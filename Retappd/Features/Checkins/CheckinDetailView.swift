@@ -25,6 +25,7 @@ struct CheckinDetailView: View {
             .padding()
             .padding(.bottom, 60)
         }
+        .readableContentWidth()
         .navigationTitle(checkin.beer?.name ?? "Checkin")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
@@ -35,6 +36,7 @@ struct CheckinDetailView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .padding(.horizontal)
+                .frame(maxWidth: .readableContentWidth)
                 .padding(.bottom, 8)
             }
         }

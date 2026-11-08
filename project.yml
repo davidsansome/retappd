@@ -27,7 +27,8 @@ targets:
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Your location is used to find the venue you're at and nearby places to check in."
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         # Only HTTPS, which is exempt: TestFlight builds then don't wait on an export compliance answer.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
   RetappdTests:
