@@ -1,5 +1,5 @@
 import XCTest
-@testable import Untappd
+@testable import Retappd
 
 final class DecodingTests: XCTestCase {
     func testCheckinWithEmptyVenueAndExtras() throws {

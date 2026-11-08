@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct UntappdApp: App {
+struct RetappdApp: App {
     @State private var auth = AuthStore()
     @State private var location = LocationProvider()
 
