@@ -138,6 +138,34 @@ struct Venue: Codable, Hashable, Identifiable {
     /// Untappd's popularity score, from /venue/map. Not persisted.
     var popularity: Int?
 
+    static let atHome = Venue(
+        venueId: 9_917_985,
+        foursquareId: "5e7b4d99c91df60008e8b168",
+        name: "Untappd at Home",
+        isVerified: false,
+        isCustom: true
+    )
+
+    init(venueId: Int? = nil, foursquareId: String? = nil, name: String, category: String? = nil,
+         address: String? = nil, city: String? = nil, state: String? = nil, lat: Double? = nil, lng: Double? = nil,
+         isVerified: Bool = false, icon: URL? = nil, reportedDistance: Double? = nil, isCustom: Bool = false,
+         popularity: Int? = nil) {
+        self.venueId = venueId
+        self.foursquareId = foursquareId
+        self.name = name
+        self.category = category
+        self.address = address
+        self.city = city
+        self.state = state
+        self.lat = lat
+        self.lng = lng
+        self.isVerified = isVerified
+        self.icon = icon
+        self.reportedDistance = reportedDistance
+        self.isCustom = isCustom
+        self.popularity = popularity
+    }
+
     /// Whether a Foursquare-only result looks like somewhere you'd drink a beer.
     var looksLikeDrinkingPlace: Bool {
         guard let c = category?.lowercased() else { return false }
@@ -319,16 +347,26 @@ struct Checkin: Decodable, Hashable, Identifiable {
         comments = c.items("comments")
         flavors = c.items("flavor_profile", Flavor.self).compactMap(\.name)
         badges = c.items("badges")
-        // Only seen empty in captures; accept either serving-type objects or plain strings.
-        servingType = c.list("serving_types", Flavor.self).first?.name
-            ?? c.obj("serving_types", [String].self)?.first
+        // Only seen empty in captures; accept serving-type objects, arrays or plain strings.
+        servingType = c.obj("serving_types", Flavor.self)?.name
+            ?? c.items("serving_types", Flavor.self).first?.name
+            ?? c.list("serving_types", Flavor.self).first?.name
+            ?? c.obj("serving_type", Flavor.self)?.name
+            ?? c.items("serving_type", Flavor.self).first?.name
+            ?? c.list("serving_type", Flavor.self).first?.name
     }
 
     private struct Flavor: Decodable {
         var name: String?
         init(from decoder: Decoder) throws {
+            if let s = (try? decoder.singleValueContainer().decode(String.self))?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+                name = s
+                return
+            }
             let c = try decoder.container(keyedBy: AnyKey.self)
-            name = c.text("tag_name") ?? c.text("container_name") ?? c.text("serving_type") ?? c.text("name")
+            name = c.text("tag_name") ?? c.text("container_name") ?? c.text("serving_type")
+                ?? c.text("serving_name") ?? c.text("serving_type_name") ?? c.text("type_name") ?? c.text("name")
         }
     }
 

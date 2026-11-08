@@ -120,4 +120,11 @@ final class DecodingTests: XCTestCase {
         let r2 = await idx.searchBeers("russian")
         XCTAssertEqual(r2.map(\.bid), [1])
     }
+
+    @MainActor
+    func testCheckInVenuesIncludesAtHomeFirst() {
+        let model = DiscoverModel(username: "me")
+        XCTAssertEqual(model.checkInVenues.first, .atHome)
+        XCTAssertEqual(model.checkInVenues.first?.foursquareId, "5e7b4d99c91df60008e8b168")
+    }
 }

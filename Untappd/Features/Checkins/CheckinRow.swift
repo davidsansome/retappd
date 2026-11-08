@@ -10,43 +10,63 @@ struct CheckinRow: View {
             HStack(alignment: .center, spacing: 12) {
                 if showUser {
                     Avatar(url: checkin.user?.avatar, size: 40)
-                } else {
-                    CachedImage(url: checkin.beer?.label, maxPixel: 160)
-                        .frame(width: 40, height: 40)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        if showUser, let u = checkin.user {
-                            Text(u.displayName).font(.subheadline.weight(.semibold)).lineLimit(1)
+                HStack(alignment: .top, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            if showUser, let u = checkin.user {
+                                Text(u.displayName).font(.subheadline.weight(.semibold)).lineLimit(1)
+                            }
+                            if let d = checkin.createdAt {
+                                Text(RelativeTime.string(d)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    .layoutPriority(1)
+                            }
                         }
-                        if let d = checkin.createdAt {
-                            Text(RelativeTime.string(d)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                .layoutPriority(1)
+
+                        if let v = checkin.venue {
+                            Label(v.name, systemImage: "mappin.circle.fill")
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                .labelStyle(TightLabel())
                         }
-                        Spacer(minLength: 4)
-                        if let r = checkin.rating { RatingView(rating: r) }
                     }
 
-                    if let v = checkin.venue {
-                        Label(v.name, systemImage: "mappin.circle.fill")
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            .labelStyle(TightLabel())
+                    Spacer(minLength: 4)
+
+                    if checkin.rating != nil || checkin.servingType != nil {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            if let r = checkin.rating { RatingView(rating: r) }
+                            if let s = checkin.servingType {
+                                Text(s)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color(.secondarySystemFill), in: Capsule())
+                            }
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
                     }
                 }
             }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(checkin.beer?.name ?? "Unknown beer").font(.headline).lineLimit(2)
+            HStack(alignment: .center, spacing: 12) {
+                CachedImage(url: checkin.beer?.label, maxPixel: 160)
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 48, height: 48)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
 
-                if let b = checkin.brewery?.name {
-                    Text(b).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(checkin.beer?.name ?? "Unknown beer").font(.headline).lineLimit(2)
 
-                if let comment = checkin.comment {
-                    Text(comment).font(.callout).lineLimit(3).padding(.top, 1)
+                    if let b = checkin.brewery?.name {
+                        Text(b).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
+            }
+
+            if let comment = checkin.comment {
+                Text(comment).font(.callout).lineLimit(3)
             }
 
             if let p = checkin.photo, let url = p.medium ?? p.large ?? p.small {

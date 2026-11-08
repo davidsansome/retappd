@@ -183,8 +183,10 @@ final class DiscoverModel {
 
     /// Candidate venues for the check-in sheet, best guess first.
     var checkInVenues: [Venue] {
-        var out = here
-        for v in friendsNearby.map(\.venue) + nearby where !out.contains(where: { $0.id == v.id }) { out.append(v) }
+        var out: [Venue] = [.atHome]
+        for v in here + friendsNearby.map(\.venue) + nearby where !out.contains(where: { $0.id == v.id }) {
+            out.append(v)
+        }
         return out.filter { $0.foursquareId != nil }
     }
 

@@ -114,7 +114,9 @@ struct CheckInSheet: View {
 
     private var venueChoices: [Venue] {
         var vs = discover.checkInVenues
-        if let venue, venue.foursquareId != nil, !vs.contains(where: { $0.id == venue.id }) { vs.insert(venue, at: 0) }
+        if let venue, venue.foursquareId != nil, !vs.contains(where: { $0.id == venue.id }) {
+            vs.insert(venue, at: vs.first?.isCustom == true ? 1 : 0)
+        }
         return vs
     }
 
