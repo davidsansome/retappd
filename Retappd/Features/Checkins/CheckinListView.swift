@@ -37,6 +37,7 @@ struct CheckinList<Header: View>: View {
             footer
         }
         .listStyle(.plain)
+        .readableContentWidth()
         .refreshable { await model.refresh() }
         .task { await model.loadIfNeeded() }
         .navigationDestination(for: Checkin.self) { CheckinDetailView(checkin: $0) }
