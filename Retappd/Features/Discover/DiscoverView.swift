@@ -26,6 +26,7 @@ struct DiscoverView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task(id: query) { await model.search(query) }
+        .task { await model.refreshIfStale(location: location.location) }
         .refreshable { await model.update(location: location.location, force: true) }
         .navigationDestination(for: Venue.self) { VenueDetailView(venue: $0) }
         .sheet(item: $checkInBeer) { CheckInSheet(beer: $0, venue: model.here.first) }

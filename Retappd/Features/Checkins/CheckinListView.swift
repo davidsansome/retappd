@@ -11,8 +11,15 @@ struct CheckinList<Header: View>: View {
     @Environment(DiscoverModel.self) private var discover
 
     var body: some View {
+        ScrollViewReader { proxy in
+            list
+                .onChange(of: model.scrollToTopRequests) { scrollToTop(proxy) }
+        }
+    }
+
+    private var list: some View {
         List {
-            header()
+            header().id(Self.topID)
             ForEach(model.items) { c in
                 // A zero-opacity link keeps the whole row tappable without List's disclosure chevron.
                 ZStack {
@@ -43,6 +50,17 @@ struct CheckinList<Header: View>: View {
         .navigationDestination(for: Checkin.self) { CheckinDetailView(checkin: $0) }
         .navigationDestination(for: Venue.self) { VenueDetailView(venue: $0) }
         .sheet(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
+    }
+
+    private static var topID: String { "CheckinList.top" }
+
+    private func scrollToTop(_ proxy: ScrollViewProxy) {
+        // An empty header has nothing to scroll to, so go to the first row instead.
+        if Header.self != EmptyView.self {
+            proxy.scrollTo(Self.topID, anchor: .top)
+        } else if let first = model.items.first {
+            proxy.scrollTo(first.id, anchor: .top)
+        }
     }
 
     @ViewBuilder private var footer: some View {

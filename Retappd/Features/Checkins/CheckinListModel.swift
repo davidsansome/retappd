@@ -24,15 +24,38 @@ final class CheckinListModel {
     private(set) var isLoadingMore = false
     private(set) var reachedEnd = false
     private(set) var error: String?
+    /// Bumped at the start of each `reload()`, so views can reload anything they show alongside.
+    private(set) var reloads = 0
+    /// Bumped by `reload()`. The list scrolls back to the top whenever it changes.
+    private(set) var scrollToTopRequests = 0
     private var nextMaxId: Int?
     private var hasLoaded = false
+    private var isStale = false
 
     init(source: Source) { self.source = source }
 
+    /// Call when the list appears: loads it the first time, and reloads it if it was invalidated.
     func loadIfNeeded() async {
-        guard !hasLoaded else { return }
+        if isStale {
+            await reload()
+        } else if !hasLoaded {
+            hasLoaded = true
+            await refresh()
+        }
+    }
+
+    /// Marks the list as out of date, so it goes back to the top and refreshes when it next appears.
+    func invalidate() { isStale = true }
+
+    /// Goes back to the top and fetches the newest checkins.
+    func reload() async {
+        isStale = false
         hasLoaded = true
+        reloads += 1
+        scrollToTopRequests += 1
         await refresh()
+        // Scroll again, in case the fresh checkins were put above where the list was.
+        scrollToTopRequests += 1
     }
 
     func refresh() async {
