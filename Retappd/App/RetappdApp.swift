@@ -27,11 +27,28 @@ struct RetappdApp: App {
 }
 
 struct RootTabs: View {
+    enum Page: Hashable { case feed, discover, profile }
+
+    /// How long the app must have been in the background before reopening it refreshes everything.
+    static var staleAfter: TimeInterval {
+        #if DEBUG
+        // e.g. launch with `-staleAfter 10` to try it without waiting.
+        let override = UserDefaults.standard.double(forKey: "staleAfter")
+        if override > 0 { return override }
+        #endif
+        return 5 * 60
+    }
+
     let username: String
     @Environment(LocationProvider.self) private var location
+    @Environment(\.scenePhase) private var scenePhase
     @State private var feed = CheckinListModel(source: .friends)
     @State private var profile: CheckinListModel
     @State private var discover: DiscoverModel
+    @State private var page = Page.feed
+    @State private var feedPath = NavigationPath()
+    @State private var profilePath = NavigationPath()
+    @State private var backgroundedAt: Date?
 
     init(username: String) {
         self.username = username
@@ -40,15 +57,15 @@ struct RootTabs: View {
     }
 
     var body: some View {
-        TabView {
-            Tab("Feed", systemImage: "list.bullet.rectangle") {
-                NavigationStack { FeedView(model: feed) }
+        TabView(selection: $page) {
+            Tab("Feed", systemImage: "list.bullet.rectangle", value: .feed) {
+                NavigationStack(path: $feedPath) { FeedView(model: feed) }
             }
-            Tab("Discover", systemImage: "mappin.and.ellipse") {
+            Tab("Discover", systemImage: "mappin.and.ellipse", value: .discover) {
                 NavigationStack { DiscoverView(model: discover) }
             }
-            Tab("Profile", systemImage: "person.crop.circle") {
-                NavigationStack { ProfileView(username: username, model: profile) }
+            Tab("Profile", systemImage: "person.crop.circle", value: .profile) {
+                NavigationStack(path: $profilePath) { ProfileView(username: username, model: profile) }
             }
         }
         .environment(discover)
@@ -64,6 +81,33 @@ struct RootTabs: View {
                 await feed.refresh()
                 await profile.refresh()
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background:
+                backgroundedAt = .now
+            case .active:
+                if let at = backgroundedAt, Date.now.timeIntervalSince(at) >= Self.staleAfter {
+                    reopenedAfterAWhile()
+                }
+                backgroundedAt = nil
+            default:
+                break
+            }
+        }
+    }
+
+    /// Brings the feed or profile up to date if it's on screen, and leaves everything else to
+    /// refresh the next time it's shown.
+    private func reopenedAfterAWhile() {
+        discover.invalidate()
+        feed.invalidate()
+        profile.invalidate()
+        // A pushed checkin or venue covers the list, so that counts as not being on the page.
+        if page == .feed && feedPath.isEmpty {
+            Task { await feed.reload() }
+        } else if page == .profile && profilePath.isEmpty {
+            Task { await profile.reload() }
         }
     }
 }

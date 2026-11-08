@@ -32,9 +32,20 @@ final class DiscoverModel {
     private var feed: [Checkin] = []
     private var lastQueried: CLLocation?
     private var prefetchedMenus = Set<Int>()
+    private var isStale = false
     private let username: String
 
     init(username: String) { self.username = username }
+
+    /// Marks what's nearby as out of date, so it's fetched again when Discover next appears.
+    func invalidate() { isStale = true }
+
+    /// Call when Discover appears: refetches if it was invalidated.
+    func refreshIfStale(location: CLLocation?) async {
+        guard isStale, location != nil else { return }
+        isStale = false
+        await update(location: location, force: true)
+    }
 
     // MARK: Nearby
 

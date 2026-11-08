@@ -15,7 +15,7 @@ struct ProfileView: View {
         .confirmationDialog("Sign out of Untappd?", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) { auth.signOut() }
         }
-        .task { await loadInfo() }
+        .task(id: model.reloads) { await loadInfo() }
         .refreshable {
             async let a: () = model.refresh()
             async let b: () = loadInfo()
