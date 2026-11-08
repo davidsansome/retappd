@@ -1,0 +1,143 @@
+# Builds the app and runs its tests on every pull request and every push to main. Each push to
+# main that passes them is then uploaded to TestFlight, for the App Store Connect team's internal
+# testers. See RELEASING.md.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 30
+    # A new push to a pull request cancels its older run; runs on main all finish.
+    concurrency:
+      group: test-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Show Xcode
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        run: xcodegen generate --quiet
+
+      - name: Pick a simulator
+        run: |
+          id=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          runtimes = json.load(sys.stdin)["devices"]
+          for runtime in sorted(runtimes, reverse=True):
+              if "SimRuntime.iOS-" not in runtime:
+                  continue
+              for device in runtimes[runtime]:
+                  if device["name"].startswith("iPhone"):
+                      print(device["udid"])
+                      sys.exit()
+          ')
+          [ -n "$id" ] || { echo "::error::No iPhone simulator on this runner."; exit 1; }
+          echo "Using simulator $id"
+          echo "DESTINATION=id=$id" >> "$GITHUB_ENV"
+          # Booted before the tests: booting can take minutes on a runner.
+          xcrun simctl boot "$id"
+          xcrun simctl bootstatus "$id" -b
+
+      - name: Build and test
+        # CI has no signing account: build for the simulator without a team.
+        run: |
+          xcodebuild test -project Retappd.xcodeproj -scheme Retappd \
+            -destination "$DESTINATION" -derivedDataPath build/DerivedData \
+            -resultBundlePath build/Tests.xcresult \
+            DEVELOPMENT_TEAM=
+
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: test-results
+          path: build/Tests.xcresult
+          if-no-files-found: ignore
+
+  testflight:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: macos-26
+    timeout-minutes: 60
+    # One upload at a time, in order, and never cancelled part way.
+    concurrency:
+      group: testflight
+      cancel-in-progress: false
+    env:
+      # A step's condition can't read secrets, so this says whether the API key is set.
+      HAS_ASC_KEY: ${{ secrets.ASC_KEY_ID != '' }}
+    steps:
+      - name: Check the App Store Connect key
+        if: env.HAS_ASC_KEY != 'true'
+        run: |
+          echo "::notice::Not uploading to TestFlight: the App Store Connect API key isn't set yet (see RELEASING.md)."
+
+      - uses: actions/checkout@v5
+        if: env.HAS_ASC_KEY == 'true'
+        with:
+          # The build number is main's commit count.
+          fetch-depth: 0
+
+      - name: Build number
+        if: env.HAS_ASC_KEY == 'true'
+        id: version
+        run: echo "build=$(git rev-list --count HEAD)" | tee -a "$GITHUB_OUTPUT"
+
+      - name: The App Store Connect key
+        if: env.HAS_ASC_KEY == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          # Where altool looks for it, as well as where xcodebuild is told it is.
+          dir="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$dir"
+          key="$dir/AuthKey_$ASC_KEY_ID.p8"
+          printf '%s\n' "$ASC_PRIVATE_KEY" > "$key"
+          chmod 600 "$key"
+          echo "ASC_KEY_PATH=$key" >> "$GITHUB_ENV"
+
+      - name: Install XcodeGen
+        if: env.HAS_ASC_KEY == 'true'
+        run: brew install xcodegen
+
+      - name: Build
+        if: env.HAS_ASC_KEY == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: scripts/archive.sh "${{ steps.version.outputs.build }}" build/release
+
+      - uses: actions/upload-artifact@v5
+        if: env.HAS_ASC_KEY == 'true'
+        with:
+          name: testflight-${{ steps.version.outputs.build }}
+          path: |
+            build/release/Retappd.ipa
+            build/release/Retappd.xcarchive/dSYMs/
+
+      - name: Upload to TestFlight
+        if: env.HAS_ASC_KEY == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcrun altool --upload-app -f build/release/Retappd.ipa -t ios \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Remove the App Store Connect key
+        if: always() && env.HAS_ASC_KEY == 'true'
+        run: rm -f "$HOME/.appstoreconnect/private_keys/"AuthKey_*.p8
