@@ -7,8 +7,8 @@
 - **test** generates the Xcode project from `project.yml`, builds the app for an iPhone
   simulator and runs `RetappdTests`. Require it in branch protection.
 - **testflight** runs only on `main`, after **test** passes. It builds the app with
-  `scripts/archive.sh` and uploads it to TestFlight. Internal testers get it as soon as Apple
-  has processed it (about 5–15 minutes), with no review.
+  `scripts/archive.sh` and uploads it to TestFlight. The *Internal testers* group gets it as
+  soon as Apple has processed it (about 5–15 minutes), with no review.
 
 Build numbers are `main`'s commit count, so each upload's is higher than the last. Don't rewrite
 `main`'s history: a lower count would repeat a build number, and App Store Connect would refuse
@@ -38,11 +38,11 @@ Until they're set, the **testflight** job skips, with a notice saying so.
    Algolia key in it.
 
 2. **Register the bundle ID.** In the [developer portal](https://developer.apple.com/account/resources/identifiers/list),
-   *Identifiers → +*, *App IDs → App*, with the explicit bundle ID `dev.retappd.app`. Skip
+   *Identifiers → +*, *App IDs → App*, with the explicit bundle ID `com.davidsansome.retappd`. Skip
    this if it's listed already: building to a device from Xcode registers it.
 
 3. **Create the app** in [App Store Connect](https://appstoreconnect.apple.com): *Apps → + →
-   New App*: platform iOS, name *Retappd*, bundle ID `dev.retappd.app`, SKU anything
+   New App*: platform iOS, name *Retappd*, bundle ID `com.davidsansome.retappd`, SKU anything
    (`retappd`), *Full Access*. The name has to be unique across the whole App Store; if it's
    taken, any other works, since the home screen shows `CFBundleDisplayName` ("Retappd").
 
@@ -56,8 +56,9 @@ Until they're set, the **testflight** job skips, with a notice saying so.
    gh secret set ASC_PRIVATE_KEY < AuthKey_<key ID>.p8
    ```
 
-5. **TestFlight testers:** in the app, *TestFlight → Internal Testing → +*, create a group
-   with *Enable automatic distribution* on, and add yourself and the other testers. Internal
+5. **TestFlight testers:** the builds go to the internal group *Internal testers* (*TestFlight →
+   Internal Testing*). It needs *Enable automatic distribution* on: the upload doesn't name a
+   group, so without it each build waits for someone to add it to the group by hand. Internal
    testers have to be users of the App Store Connect team (*Users and Access*), and install
    the TestFlight app on their iPhone.
 
@@ -69,7 +70,7 @@ Until they're set, the **testflight** job skips, with a notice saying so.
 
 ## When something fails
 
-- *"No Accounts"* or *"No profiles for 'dev.retappd.app'"* at the export: the API key
+- *"No Accounts"* or *"No profiles for 'com.davidsansome.retappd'"* at the export: the API key
   secrets are missing or wrong, or the key isn't Admin.
 - *"The bundle version must be higher than the previously uploaded version"*: a build with
   that number was uploaded already, by hand or before a history rewrite. Add a commit.
