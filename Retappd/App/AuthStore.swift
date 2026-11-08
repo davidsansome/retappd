@@ -46,7 +46,7 @@ final class AuthStore {
 }
 
 enum Keychain {
-    private static let service = "dev.retappd.app"
+    private static let service = "com.davidsansome.retappd"
 
     static func read(_ account: String) -> String? {
         let q: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: service,
