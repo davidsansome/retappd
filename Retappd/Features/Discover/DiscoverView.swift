@@ -3,35 +3,41 @@ import CoreLocation
 
 struct DiscoverView: View {
     let model: DiscoverModel
+    /// Bumped by the tab bar's Search and Scan buttons.
+    var searchRequests = 0
+    var scanRequests = 0
     @Environment(LocationProvider.self) private var location
     @State private var query = ""
     @State private var checkInBeer: BeerLite?
     @State private var scanning = false
     @State private var scannedBeer: BeerLite?
+    @State private var handledScans = 0
 
     var body: some View {
-        List {
-            if query.trimmingCharacters(in: .whitespaces).isEmpty {
-                nearbyContent
-            } else {
-                searchContent
+        ScrollView {
+            VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    nearbyContent
+                } else {
+                    searchContent
+                }
             }
+            .padding(.horizontal, Taproom.margin)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .readableContentWidth)
+            .frame(maxWidth: .infinity)
         }
-        .listStyle(.insetGrouped)
-        .contentMargins(.top, 4, for: .scrollContent)
         .scrollDismissesKeyboard(.immediately)
+        .foregroundStyle(Taproom.ink)
+        .background(Taproom.background)
         .safeAreaInset(edge: .top, spacing: 0) {
-            HStack(spacing: 10) {
-                SearchField(text: $query, prompt: "Beers or venues")
-                Button("Find a beer by barcode", systemImage: "barcode.viewfinder") { scanning = true }
-                    .labelStyle(.iconOnly)
-                    .font(.title2)
-                    .frame(width: 38, height: 38)
-                    .contentShape(Rectangle())
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 6)
-            .background(.bar)
+            TaproomSearchField(text: $query, prompt: "Beers or venues", focusRequests: searchRequests)
+                .frame(maxWidth: .readableContentWidth)
+                .padding(.horizontal, Taproom.margin)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity)
+                .background(Taproom.background)
         }
         .toolbar(.hidden, for: .navigationBar)
         .task(id: query) { await model.search(query) }
@@ -45,54 +51,67 @@ struct DiscoverView: View {
         }) {
             BarcodeSearchSheet { scannedBeer = $0 }
         }
+        .onAppear(perform: handleScanRequest)
+        .onChange(of: scanRequests) { handleScanRequest() }
+    }
+
+    private func handleScanRequest() {
+        guard scanRequests > handledScans else { return }
+        handledScans = scanRequests
+        scanning = true
     }
 
     // MARK: Nearby
 
     @ViewBuilder private var nearbyContent: some View {
         if location.isDenied {
-            Section {
-                Label("Location access is off. Turn it on in Settings to see venues near you, or search above.",
-                      systemImage: "location.slash")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
+            Label("Location access is off. Turn it on in Settings to see venues near you, or search above.",
+                  systemImage: "location.slash")
+                .font(.callout).foregroundStyle(Taproom.muted)
         }
 
-        if !model.here.isEmpty {
-            Section("You're probably at") {
-                ForEach(model.here) { v in
-                    NavigationLink(value: v) { HereCard(venue: v, origin: model.origin) }
-                }
+        if let here = model.here.first {
+            NavigationLink(value: here) { HereCard(venue: here, origin: model.origin) }
+                .buttonStyle(CardLinkStyle())
+            if model.here.count > 1 {
+                TaproomSection("Or maybe") { venueRows(Array(model.here.dropFirst())) }
             }
         }
 
         if !model.friendsNearby.isEmpty {
-            Section("Friends drinking nearby") {
-                ForEach(model.friendsNearby) { a in
-                    NavigationLink(value: a.venue) { FriendActivityRow(activity: a) }
+            TaproomSection("Friends drinking nearby") {
+                VStack(spacing: 0) {
+                    ForEach(model.friendsNearby) { a in
+                        NavigationLink(value: a.venue) { FriendActivityRow(activity: a) }
+                            .buttonStyle(TaproomRowStyle())
+                            .taproomRowDivider()
+                    }
                 }
             }
         }
 
         if !model.nearby.isEmpty {
-            Section("Nearby") {
-                ForEach(model.nearby) { v in
-                    NavigationLink(value: v) { VenueRow(venue: v, origin: model.origin) }
-                }
-            }
+            TaproomSection("Nearby") { venueRows(model.nearby) }
         } else if model.isLoading {
-            Section { ProgressView().frame(maxWidth: .infinity) }
+            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
         } else if let e = model.error {
-            Section { ErrorRow(message: e) { Task { await model.update(location: location.location, force: true) } } }
+            ErrorRow(message: e) { Task { await model.update(location: location.location, force: true) } }
         } else if model.origin == nil && !location.isDenied {
-            Section { Label("Finding your location…", systemImage: "location").foregroundStyle(.secondary) }
+            Label("Finding your location…", systemImage: "location").foregroundStyle(Taproom.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
 
         if !model.recent.isEmpty {
-            Section("Your recent venues") {
-                ForEach(model.recent) { v in
-                    NavigationLink(value: v) { VenueRow(venue: v, origin: model.origin) }
-                }
+            TaproomSection("Your recent venues") { venueRows(model.recent) }
+        }
+    }
+
+    private func venueRows<C: RandomAccessCollection>(_ venues: C) -> some View where C.Element == Venue {
+        VStack(spacing: 0) {
+            ForEach(venues) { v in
+                NavigationLink(value: v) { VenueRow(venue: v, origin: model.origin) }
+                    .buttonStyle(TaproomRowStyle())
+                    .taproomRowDivider()
             }
         }
     }
@@ -107,89 +126,70 @@ struct DiscoverView: View {
         let rest = model.venueResults.filter { !directIds.contains($0.id) }
 
         if !direct.isEmpty {
-            Section("Venues") {
-                ForEach(direct) { v in
-                    NavigationLink(value: v) { VenueRow(venue: v, origin: model.origin) }
-                }
-            }
+            TaproomSection("Venues") { venueRows(direct) }
         }
 
-        Section {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("Beers").font(Taproom.sectionLabel)
+                if model.isSearching { ProgressView().controlSize(.mini) }
+            }
             if model.beerResults.isEmpty {
-                Text(model.isSearching ? "Searching…" : "No beers found").foregroundStyle(.secondary)
+                Text(model.isSearching ? "Searching…" : "No beers found").foregroundStyle(Taproom.muted)
             }
-            ForEach(model.beerResults.prefix(20)) { b in
-                Button { checkInBeer = b } label: { BeerRow(beer: b) }
-                    .buttonStyle(.plain)
+            VStack(spacing: 0) {
+                ForEach(model.beerResults.prefix(20)) { b in
+                    Button { checkInBeer = b } label: { BeerRow(beer: b) }
+                        .buttonStyle(TaproomRowStyle())
+                        .taproomRowDivider()
+                        .accessibilityHint("Checks in this beer")
+                }
             }
-        } header: {
-            HStack { Text("Beers"); if model.isSearching { ProgressView().controlSize(.mini) } }
         }
 
         if !rest.isEmpty {
-            Section(direct.isEmpty ? "Venues" : "More venues") {
-                ForEach(rest.prefix(15)) { v in
-                    NavigationLink(value: v) { VenueRow(venue: v, origin: model.origin) }
-                }
-            }
+            TaproomSection(direct.isEmpty ? "Venues" : "More venues") { venueRows(rest.prefix(15)) }
         }
-    }
-}
-
-// MARK: - Search field
-
-/// A compact search bar that doesn't need a navigation bar (which `.searchable` does).
-struct SearchField: View {
-    @Binding var text: String
-    let prompt: String
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(prompt, text: $text)
-                    .focused($focused)
-                    .submitLabel(.search)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                if !text.isEmpty {
-                    Button("Clear", systemImage: "xmark.circle.fill") { text = "" }
-                        .labelStyle(.iconOnly).foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 38)
-            .background(Color(.tertiarySystemFill), in: Capsule())
-
-            if focused || !text.isEmpty {
-                Button("Cancel") { text = ""; focused = false }
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
-        }
-        .animation(.snappy(duration: 0.2), value: focused || !text.isEmpty)
     }
 }
 
 // MARK: - Rows
 
+/// The venue you're probably at, as Discover's hero: a card that opens its menu.
 struct HereCard: View {
     let venue: Venue
     let origin: CLLocation?
 
     var body: some View {
-        HStack(spacing: 12) {
-            VenueIcon(venue: venue, size: 52)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 4) {
-                    Text(venue.name).font(.headline)
-                    VerifiedBadge()
+        VStack(alignment: .leading, spacing: 12) {
+            Text("You're probably at").font(Taproom.sectionLabel).foregroundStyle(Taproom.muted)
+            HStack(spacing: 12) {
+                VenueIcon(venue: venue, size: 56)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Text(venue.name).font(.system(size: 24, weight: .heavy)).tracking(-0.4).lineLimit(2)
+                        if venue.isVerified { VerifiedBadge() }
+                    }
+                    let sub = [venue.subtitle.isEmpty ? nil : venue.subtitle,
+                               (venue.distance(from: origin) ?? venue.reportedDistance).map(Distance.string)]
+                        .compactMap { $0 }.joined(separator: " · ")
+                    if !sub.isEmpty {
+                        Text(sub).font(.subheadline).foregroundStyle(Taproom.muted).lineLimit(1)
+                    }
                 }
-                Text(venue.subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                Text("See what's on tap").font(.caption.weight(.semibold)).foregroundStyle(.orange)
             }
+            Text("See what's on tap")
+                .font(.headline)
+                .foregroundStyle(Taproom.background)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(Taproom.ink, in: RoundedRectangle(cornerRadius: 12))
         }
-        .padding(.vertical, 6)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .foregroundStyle(Taproom.ink)
+        .taproomCard()
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens what's on tap")
     }
 }
 
@@ -206,14 +206,17 @@ struct VenueRow: View {
                     if venue.isVerified { VerifiedBadge() }
                 }
                 if !venue.subtitle.isEmpty {
-                    Text(venue.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(venue.subtitle).font(.footnote).foregroundStyle(Taproom.muted).lineLimit(1)
                 }
             }
             Spacer(minLength: 4)
             if let d = venue.distance(from: origin) ?? venue.reportedDistance {
-                Text(Distance.string(d)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Text(Distance.string(d)).font(.footnote.monospacedDigit()).foregroundStyle(Taproom.muted)
             }
         }
+        .foregroundStyle(Taproom.ink)
+        .padding(.vertical, 6)
+        .frame(minHeight: 56)
     }
 }
 
@@ -227,7 +230,7 @@ struct FriendActivityRow: View {
                 if activity.venue.isVerified { VerifiedBadge() }
                 Spacer()
                 if let d = activity.distance {
-                    Text(Distance.string(d)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Text(Distance.string(d)).font(.footnote.monospacedDigit()).foregroundStyle(Taproom.muted)
                 }
             }
             ForEach(activity.checkins.prefix(3)) { c in
@@ -237,12 +240,13 @@ struct FriendActivityRow: View {
                         .font(.caption).lineLimit(1)
                     Spacer(minLength: 4)
                     if let d = c.createdAt {
-                        Text(RelativeTime.string(d)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        Text(RelativeTime.string(d)).font(.caption2).foregroundStyle(Taproom.muted).lineLimit(1)
                     }
                 }
             }
         }
-        .padding(.vertical, 4)
+        .foregroundStyle(Taproom.ink)
+        .padding(.vertical, 10)
     }
 }
 
@@ -259,35 +263,40 @@ struct BeerRow: View {
                     .font(.headline.monospacedDigit())
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Taproom.background)
                     .frame(width: 34, height: 34)
-                    .background(.orange, in: RoundedRectangle(cornerRadius: 8))
+                    .background(Taproom.ink, in: RoundedRectangle(cornerRadius: 8))
                     .accessibilityLabel("Number \(number)")
             }
-            CachedImage(url: beer.label, maxPixel: 120)
-                .frame(width: 40, height: 40)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+            CachedImage(url: beer.label, maxPixel: 132)
+                .frame(width: 44, height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(beer.name).font(.body.weight(.medium)).lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(beer.name).font(.body.weight(.semibold)).lineLimit(1)
                     if beer.hasHad == true {
-                        Image(systemName: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+                        Text("Had")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(Taproom.onAmber)
+                            .padding(.horizontal, 7).frame(minHeight: 18)
+                            .background(Taproom.amber, in: Capsule())
                             .accessibilityLabel("Had before")
                     }
                 }
-                Text(beer.brewery).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                let meta = [beer.style, beer.abv.map { "\($0.formatted(.number.precision(.fractionLength(0...1))))%" }, detail]
+                let meta = [beer.brewery, beer.style, beer.abv.map { "\($0.formatted(.number.precision(.fractionLength(0...1))))%" }, detail]
                     .compactMap { $0 }.joined(separator: " · ")
-                if !meta.isEmpty {
-                    Text(meta).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
+                Text(meta).font(.footnote).foregroundStyle(Taproom.muted).lineLimit(2)
             }
             Spacer(minLength: 4)
             if let r = beer.rating, r > 0 {
                 Text(r.formatted(.number.precision(.fractionLength(2))))
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .font(.headline.weight(.heavy).monospacedDigit())
+                    .accessibilityLabel("Average \(r.formatted(.number.precision(.fractionLength(2)))) out of 5")
             }
         }
+        .foregroundStyle(Taproom.ink)
+        .padding(.vertical, 8)
+        .frame(minHeight: 60)
         .contentShape(Rectangle())
     }
 }
@@ -299,8 +308,8 @@ struct VenueIcon: View {
     var body: some View {
         CachedImage(url: venue.icon, maxPixel: size * 3) {
             ZStack {
-                Color.orange.opacity(0.15)
-                Image(systemName: "mappin").foregroundStyle(.orange)
+                Taproom.glassInside
+                Image(systemName: "mappin").foregroundStyle(Taproom.amber)
             }
         }
         .frame(width: size, height: size)
@@ -312,7 +321,7 @@ struct VerifiedBadge: View {
     var body: some View {
         Image(systemName: "checkmark.seal.fill")
             .font(.caption)
-            .foregroundStyle(.blue)
+            .foregroundStyle(Taproom.muted)
             .accessibilityLabel("Verified venue")
     }
 }

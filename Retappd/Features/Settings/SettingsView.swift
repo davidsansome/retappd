@@ -12,71 +12,71 @@ struct SettingsView: View {
     @State private var confirmSignOut = false
 
     var body: some View {
-        Form {
-            Section("Appearance") {
-                Picker("Theme", selection: $appearance) {
-                    ForEach(Appearance.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                TaproomSection("Theme") { themeTiles }
 
-            if let settings {
-                Section {
-                    toggle("Private account", \.isPrivate) { .updateSetting("account_private", $0) }
-                    toggle("Appear in search", \.isSearchable) { .updateSetting("is_search", $0) }
-                    toggle("Public toasts", \.publicToasts) { .updateSetting("public_toasts", $0) }
-                    toggle("Opt out of data sharing", \.ocOptOut) { .updateSetting("oc_privacy", $0) }
-                } header: {
-                    Text("Privacy")
-                } footer: {
-                    Text("A private account's checkins are only visible to friends. Public toasts lets anyone toast your checkins, not only friends.")
-                }
-
-                Section("Checkins & badges") {
-                    toggle("Rating bump", \.ratingBump) { .setRatingBump($0) }
-                    toggle("Retroactive badges", \.retroactiveBadges) { .setRetroactiveBadges($0) }
-                }
-
-                if !styles.isEmpty {
-                    Section {
-                        ForEach($styles) { $style in
-                            styleToggle($style)
+                if let settings {
+                    TaproomSection("Privacy") {
+                        switchCard {
+                            toggle("Private account", \.isPrivate) { .updateSetting("account_private", $0) }
+                            toggle("Appear in search", \.isSearchable) { .updateSetting("is_search", $0) }
+                            toggle("Public toasts", \.publicToasts) { .updateSetting("public_toasts", $0) }
+                            toggle("Opt out of data sharing", \.ocOptOut) { .updateSetting("oc_privacy", $0) }
                         }
-                    } header: {
-                        Text("Drink types")
-                    } footer: {
-                        Text("Turn off drink types to hide them from menus, recommendations and trending lists.")
+                        caption("A private account's checkins are only visible to friends. Public toasts lets anyone toast your checkins, not only friends.")
                     }
-                }
 
-                if let email = settings.emailAddress {
-                    Section("Account") {
-                        LabeledContent("Email", value: email)
+                    TaproomSection("Checkins & badges") {
+                        switchCard {
+                            toggle("Rating bump", \.ratingBump) { .setRatingBump($0) }
+                            toggle("Retroactive badges", \.retroactiveBadges) { .setRetroactiveBadges($0) }
+                        }
                     }
-                }
-            } else if let loadError {
-                Section {
+
+                    if !styles.isEmpty {
+                        TaproomSection("Drink types I see") {
+                            FlowLayout(spacing: 6) {
+                                ForEach($styles) { $style in styleChip($style) }
+                            }
+                            caption("Turned-off types are hidden from menus, recommendations and trending lists.")
+                        }
+                    }
+                } else if let loadError {
                     ContentUnavailableView {
                         Label("Couldn't load settings", systemImage: "exclamationmark.triangle")
                     } description: {
                         Text(loadError)
                     } actions: {
-                        Button("Try again") { Task { await load() } }
+                        Button("Try again") { Task { await load() } }.buttonStyle(TaproomOutlineButton())
                     }
+                } else {
+                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
                 }
-            } else {
-                Section { ProgressView().frame(maxWidth: .infinity) }
-            }
 
-            Section {
-                Button("Sign out", role: .destructive) { confirmSignOut = true }
+                VStack(spacing: 8) {
+                    if let email = settings?.emailAddress {
+                        Text("Signed in as \(email)").font(.caption).foregroundStyle(Taproom.muted)
+                    }
+                    Button("Sign out", role: .destructive) { confirmSignOut = true }
+                        .buttonStyle(TaproomOutlineButton())
+                        .foregroundStyle(.red)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 8)
             }
+            .padding(.horizontal, Taproom.margin)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
+            .frame(maxWidth: .readableContentWidth)
+            .frame(maxWidth: .infinity)
         }
+        .foregroundStyle(Taproom.ink)
+        .background(Taproom.background)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
+        .toolbarBackground(Taproom.background, for: .navigationBar)
         .task { await load() }
         .refreshable { await load() }
         .alert("Couldn't save", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
@@ -87,6 +87,53 @@ struct SettingsView: View {
         .confirmationDialog("Sign out of Untappd?", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) { auth.signOut() }
         }
+    }
+
+    // MARK: Pieces
+
+    /// System, Light and Dark as tiles, each with a little preview of the page in that theme.
+    private var themeTiles: some View {
+        HStack(spacing: 8) {
+            ForEach(Appearance.allCases) { a in
+                let on = appearance == a
+                Button { appearance = a } label: {
+                    VStack(spacing: 6) {
+                        ThemePreview(appearance: a)
+                        Text(a.title).font(.subheadline.weight(.semibold))
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity)
+                    .background(Taproom.card, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(on ? Taproom.amber : Taproom.border, lineWidth: on ? 2 : 1))
+                    .contentShape(RoundedRectangle(cornerRadius: 16))
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .sensoryFeedback(.selection, trigger: appearance)
+    }
+
+    /// Switch rows in a card, with a line between each.
+    private func switchCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            Group(subviews: content()) { rows in
+                ForEach(rows.indices, id: \.self) { i in
+                    rows[i]
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 50)
+                        .overlay(alignment: .bottom) {
+                            if i < rows.count - 1 { Rectangle().fill(Taproom.border).frame(height: 1) }
+                        }
+                }
+            }
+        }
+        .taproomCard()
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text).font(.caption).foregroundStyle(Taproom.muted)
     }
 
     /// A switch that changes the setting straight away and flips back if the server refuses.
@@ -107,32 +154,33 @@ struct SettingsView: View {
                     }
                 }
             }))
+            .tint(Taproom.amber)
     }
 
-    private func styleToggle(_ style: Binding<ParentStyleOptOut>) -> some View {
-        Toggle(isOn: Binding(
-            get: { style.wrappedValue.isEnabled },
-            set: { on in
-                style.wrappedValue.isEnabled = on
-                let id = style.wrappedValue.id
-                Task {
-                    do {
-                        _ = try await UntappdAPI.shared.data(.setParentStyle(id, enabled: on))
-                        await invalidateCache()
-                    } catch {
-                        if let i = styles.firstIndex(where: { $0.id == id }) { styles[i].isEnabled = !on }
-                        saveError = error.localizedDescription
-                    }
-                }
-            })) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(style.wrappedValue.name)
-                if let d = style.wrappedValue.description {
-                    Text(d).font(.caption).foregroundStyle(.secondary)
+    /// A drink type as a chip: amber when shown, outlined when hidden. Flips straight away and
+    /// back again if the server refuses.
+    private func styleChip(_ style: Binding<ParentStyleOptOut>) -> some View {
+        let on = style.wrappedValue.isEnabled
+        return Button {
+            style.wrappedValue.isEnabled = !on
+            let id = style.wrappedValue.id
+            Task {
+                do {
+                    _ = try await UntappdAPI.shared.data(.setParentStyle(id, enabled: !on))
+                    await invalidateCache()
+                } catch {
+                    if let i = styles.firstIndex(where: { $0.id == id }) { styles[i].isEnabled = on }
+                    saveError = error.localizedDescription
                 }
             }
+        } label: {
+            Text(style.wrappedValue.name)
         }
+        .buttonStyle(TaproomChip(on: on))
         .disabled(style.wrappedValue.isLocked)
+        .opacity(style.wrappedValue.isLocked ? 0.6 : 1)
+        .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityHint(style.wrappedValue.description ?? "")
     }
 
     private func load() async {
@@ -161,5 +209,41 @@ struct SettingsView: View {
     private func invalidateCache() async {
         await ResponseCache.shared.remove(APIRequest.userSettings.cacheKey)
         await ResponseCache.shared.remove(APIRequest.parentStyleOptOuts.cacheKey)
+    }
+}
+
+/// A thumbnail of the page in one theme, for the theme tiles. System shows light and dark side by side.
+private struct ThemePreview: View {
+    let appearance: Appearance
+
+    var body: some View {
+        HStack(spacing: 0) {
+            switch appearance {
+            case .system:
+                page(.light)
+                page(.dark)
+            case .light:
+                page(.light)
+            case .dark:
+                page(.dark)
+            }
+        }
+        .frame(height: 64)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Taproom.border))
+        .accessibilityHidden(true)
+    }
+
+    /// The page drawn in one scheme: background, an amber line and two lines of text.
+    private func page(_ scheme: ColorScheme) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Capsule().fill(Taproom.amber).frame(width: 26, height: 6)
+            Capsule().fill(Taproom.ink).frame(width: 38, height: 6)
+            Capsule().fill(Taproom.glassRim).frame(width: 22, height: 6)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Taproom.background)
+        .environment(\.colorScheme, scheme)
     }
 }

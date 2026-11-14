@@ -44,6 +44,9 @@ final class CheckinListModel {
         }
     }
 
+    /// Scrolls the list back to the top without reloading it.
+    func scrollToTop() { scrollToTopRequests += 1 }
+
     /// Marks the list as out of date, so it goes back to the top and refreshes when it next appears.
     func invalidate() { isStale = true }
 

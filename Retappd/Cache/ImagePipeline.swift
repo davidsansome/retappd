@@ -97,6 +97,6 @@ struct CachedImage<Placeholder: View>: View {
 
 extension CachedImage where Placeholder == Color {
     init(url: URL?, maxPixel: CGFloat = 400) {
-        self.init(url: url, maxPixel: maxPixel) { Color(.secondarySystemFill) }
+        self.init(url: url, maxPixel: maxPixel) { Taproom.glassInside }
     }
 }

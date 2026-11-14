@@ -1,8 +1,10 @@
 import SwiftUI
 
+/// A checkin in the feed or on a profile: a card with who and where, the beer and its rating,
+/// the comment, the photo edge to edge, and the toasts.
 struct CheckinRow<MenuItems: View>: View {
     let checkin: Checkin
-    /// Shows the user's name; the avatar is always shown.
+    /// Shows the user's avatar and name; off on a profile, where it's always the same person.
     var showUser = true
     /// Items for the overflow menu at the top right; the menu is hidden when this is nil.
     var menu: (() -> MenuItems)?
@@ -10,106 +12,128 @@ struct CheckinRow<MenuItems: View>: View {
     var toast: (() -> Void)?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Only the who/when/where header sits beside the photo; the rest uses the full width.
-            HStack(alignment: .center, spacing: 12) {
-                Avatar(url: checkin.user?.avatar, size: 40)
-
-                HStack(alignment: .top, spacing: 6) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            if showUser, let u = checkin.user {
-                                Text(u.shortName).font(.subheadline.weight(.semibold)).lineLimit(1)
-                            }
-                            if let d = checkin.createdAt {
-                                Text(RelativeTime.string(d)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                    .layoutPriority(1)
-                            }
-                        }
-
-                        if let v = checkin.venue {
-                            Label(v.name, systemImage: "mappin.circle.fill")
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                .labelStyle(TightLabel())
-                        }
-                    }
-
-                    Spacer(minLength: 4)
-
-                    if checkin.rating != nil || checkin.servingType != nil {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            if let r = checkin.rating { RatingView(rating: r) }
-                            if let s = checkin.servingType { ServingChip(name: s) }
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-                    }
-
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                header
+                beer
+                if let comment = checkin.comment {
+                    Text(comment).font(.body).lineLimit(4)
                 }
             }
-
-            HStack(alignment: .center, spacing: 12) {
-                CachedImage(url: checkin.beer?.label, maxPixel: 160)
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 48, height: 48)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-
-                HStack(alignment: .top, spacing: 6) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(checkin.beer?.name ?? "Unknown beer").font(.headline).lineLimit(2)
-
-                        if let b = checkin.brewery?.name {
-                            Text(b).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                    }
-
-                    Spacer(minLength: 4)
-
-                    if let menu {
-                        Menu(content: menu) {
-                            Image(systemName: "ellipsis")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 32, height: 24)
-                                .contentShape(Rectangle())
-                        }
-                        .accessibilityLabel("More")
-                        .padding(.trailing, -6)  // line the dots up with the content's trailing edge
-                    }
-                }
-            }
-
-            if let comment = checkin.comment {
-                Text(comment).font(.callout).lineLimit(3)
-            }
+            .padding(14)
 
             if let p = checkin.photo, let url = p.medium ?? p.large ?? p.small {
-                // Full row width, 4:3, cropped from Untappd's square photo.
-                Color(.secondarySystemFill)
+                // Full card width, 4:3, cropped from Untappd's square photo.
+                Taproom.glassInside
                     .aspectRatio(4 / 3, contentMode: .fit)
                     .overlay { CachedImage(url: url, maxPixel: 1000).aspectRatio(contentMode: .fill) }
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipped()
+                    .accessibilityLabel("Photo")
             }
 
+            if hasFooter {
+                footer
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .overlay(alignment: .top) {
+                        if checkin.photo == nil { Rectangle().fill(Taproom.border).frame(height: 1) }
+                    }
+            }
+        }
+        .foregroundStyle(Taproom.ink)
+        .background(Taproom.card)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Taproom.border))
+    }
+
+    /// Who, where and when, with the overflow menu.
+    private var header: some View {
+        HStack(spacing: 10) {
+            if showUser { Avatar(url: checkin.user?.avatar, size: 32) }
+            whoWhereWhen
+                .font(.subheadline)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let menu {
+                Menu(content: menu) {
+                    Image(systemName: "ellipsis")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Taproom.muted)
+                        .frame(width: 44, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("More")
+                .padding(.trailing, -12)  // line the dots up with the content's trailing edge
+            }
+        }
+    }
+
+    private var whoWhereWhen: Text {
+        var t = Text("")
+        if showUser, let u = checkin.user { t = Text(u.shortName).fontWeight(.semibold) }
+        var rest: [String] = []
+        if let v = checkin.venue { rest.append((showUser ? "at " : "") + v.name) }
+        if let d = checkin.createdAt { rest.append(RelativeTime.string(d)) }
+        let tail = rest.joined(separator: " · ")
+        if tail.isEmpty { return t }
+        return t + Text(showUser && checkin.user != nil ? " " + tail : tail).foregroundStyle(Taproom.muted)
+    }
+
+    /// The beer, with the rating as the card's hero on the right.
+    private var beer: some View {
+        HStack(alignment: .center, spacing: 12) {
+            if checkin.photo == nil {
+                CachedImage(url: checkin.beer?.label, maxPixel: 160)
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 56, height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                if let b = checkin.brewery?.name {
+                    Text(b).font(.footnote).foregroundStyle(Taproom.muted).lineLimit(1)
+                }
+                Text(checkin.beer?.name ?? "Unknown beer")
+                    .font(.system(size: 22, weight: .heavy))
+                    .tracking(-0.4)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                let meta = [checkin.beer?.style,
+                            checkin.beer?.abv.map { "\($0.formatted(.number.precision(.fractionLength(0...1))))%" },
+                            checkin.servingType].compactMap { $0 }.joined(separator: " · ")
+                if !meta.isEmpty {
+                    Text(meta).font(.caption).foregroundStyle(Taproom.muted).lineLimit(2).padding(.top, 1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let r = checkin.rating { TaproomRating(rating: r, size: 30) }
+        }
+    }
+
+    private var hasFooter: Bool {
+        checkin.toastCount > 0 || checkin.commentCount > 0 || !checkin.taggedFriends.isEmpty || toast != nil
+    }
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 8) {
             if !checkin.taggedFriends.isEmpty {
                 Label("with " + checkin.taggedFriends.map(\.shortName).formatted(.list(type: .and)),
                       systemImage: "person.2.fill")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    .font(.caption).foregroundStyle(Taproom.muted).lineLimit(2)
                     .labelStyle(TightLabel())
             }
-
             if checkin.toastCount > 0 || checkin.commentCount > 0 || toast != nil {
                 HStack(alignment: .center, spacing: 10) {
                     if checkin.toastCount > 0 { ToastChips(checkin: checkin) }
                     Spacer(minLength: 0)
                     if checkin.commentCount > 0 {
                         Label("\(checkin.commentCount)", systemImage: "bubble.right")
-                            .font(.caption).foregroundStyle(.secondary).labelStyle(TightLabel())
+                            .font(.caption).foregroundStyle(Taproom.muted).labelStyle(TightLabel())
+                            .accessibilityLabel("\(checkin.commentCount) comments")
                     }
                     if let toast { ToastButton(checkin: checkin, toast: toast) }
                 }
             }
         }
-        .padding(.vertical, 6)
     }
 }
 
@@ -152,7 +176,7 @@ struct ToastChips: View {
         FlowLayout(spacing: 4) {
             Image("toast").resizable().scaledToFit()
                 .frame(width: size * 0.8, height: size * 0.8).frame(height: size)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Taproom.muted)
             ForEach(checkin.toasters) { u in
                 Avatar(url: u.avatar, size: size)
                     .accessibilityLabel(u.displayName)
@@ -160,9 +184,9 @@ struct ToastChips: View {
             let hidden = checkin.toastCount - checkin.toasters.count
             if hidden > 0 {
                 Text("+\(hidden)")
-                    .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    .font(.caption2.weight(.semibold)).foregroundStyle(Taproom.muted)
                     .frame(minWidth: size, minHeight: size)
-                    .background(Color(.secondarySystemFill), in: Capsule())
+                    .background(Taproom.glassInside, in: Capsule())
             }
         }
         .accessibilityElement(children: .combine)
@@ -177,8 +201,8 @@ struct Avatar: View {
     var body: some View {
         CachedImage(url: url, maxPixel: size * 3) {
             ZStack {
-                Color(.secondarySystemFill)
-                Image(systemName: "person.fill").font(.system(size: size * 0.45)).foregroundStyle(.secondary)
+                Taproom.glassInside
+                Image(systemName: "person.fill").font(.system(size: size * 0.45)).foregroundStyle(Taproom.glassRim)
             }
         }
         .frame(width: size, height: size)
@@ -251,43 +275,13 @@ struct PhotoViewer: View {
     }
 }
 
-struct RatingView: View {
-    let rating: Double
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "star.fill").font(.caption2).foregroundStyle(.orange)
-            Text(rating.formatted(.number.precision(.fractionLength(2))))
-                .font(.caption.weight(.semibold).monospacedDigit())
-        }
-        .padding(.horizontal, 6).padding(.vertical, 2)
-        .background(.orange.opacity(0.12), in: Capsule())
-        .accessibilityLabel("Rated \(rating) out of 5")
-    }
-}
-
-/// The serving style ("Draft", "Can"…) as a chip matching `RatingView`.
-struct ServingChip: View {
-    let name: String
-
-    var body: some View {
-        HStack(spacing: 3) {
-            ServingIcon(name: name, size: 13)
-            Text(name).font(.caption.weight(.semibold)).lineLimit(1)
-        }
-        .padding(.horizontal, 6).padding(.vertical, 2)
-        .background(.orange.opacity(0.12), in: Capsule())
-        .accessibilityElement(children: .combine)
-    }
-}
-
-/// Icon for a serving style, drawn orange by default; a generic glass for styles without one.
+/// Icon for a serving style, drawn amber by default; a generic glass for styles without one.
 struct ServingIcon: View {
     let name: String
-    var color: Color = .orange
+    var color: Color = Taproom.amber
     @ScaledMetric private var size: CGFloat
 
-    init(name: String, size: CGFloat, color: Color = .orange) {
+    init(name: String, size: CGFloat, color: Color = Taproom.amber) {
         self.name = name
         self.color = color
         _size = ScaledMetric(wrappedValue: size)

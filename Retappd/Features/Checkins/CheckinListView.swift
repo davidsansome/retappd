@@ -26,24 +26,28 @@ struct CheckinList<Header: View>: View {
     }
 
     private var list: some View {
-        List {
-            header().id(Self.topID)
-            ForEach(model.items) { c in
-                let mine = c.isBy(username: auth.username)
-                // A zero-opacity link keeps the whole row tappable without List's disclosure chevron.
-                ZStack {
-                    NavigationLink(value: CheckinRoute(checkin: c, listID: listID)) { EmptyView() }.opacity(0)
-                    CheckinRow(checkin: c, showUser: showUser,
-                               menu: CheckinMenuItems.hasItems(c, isMine: mine) ? { menuItems(c, isMine: mine) } : nil,
-                               toast: showActions ? { toggleToast(c) } : nil)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                header().id(Self.topID)
+                ForEach(model.items) { c in
+                    let mine = c.isBy(username: auth.username)
+                    NavigationLink(value: CheckinRoute(checkin: c, listID: listID)) {
+                        CheckinRow(checkin: c, showUser: showUser,
+                                   menu: CheckinMenuItems.hasItems(c, isMine: mine) ? { menuItems(c, isMine: mine) } : nil,
+                                   toast: showActions ? { toggleToast(c) } : nil)
+                    }
+                    .buttonStyle(CardLinkStyle())
+                    .id(c.id)
+                    .onAppear { model.onAppear(c) }
+                    .contextMenu { menuItems(c, isMine: mine) }
                 }
-                .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }  // full-width divider
-                .onAppear { model.onAppear(c) }
-                .contextMenu { menuItems(c, isMine: mine) }
+                footer
             }
-            footer
+            .padding(.horizontal, Taproom.margin)
+            .padding(.bottom, 16)
         }
-        .listStyle(.plain)
+        .foregroundStyle(Taproom.ink)
+        .background(Taproom.background)
         .readableContentWidth()
         .refreshable { await model.refresh() }
         .task { await model.loadIfNeeded() }
@@ -87,14 +91,14 @@ struct CheckinList<Header: View>: View {
     @ViewBuilder private var footer: some View {
         if model.items.isEmpty {
             if model.isRefreshing {
-                ProgressView().frame(maxWidth: .infinity).listRowSeparator(.hidden)
+                ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
             } else if let e = model.error {
                 ErrorRow(message: e) { Task { await model.refresh() } }
             } else {
-                Text(emptyText).foregroundStyle(.secondary).frame(maxWidth: .infinity).listRowSeparator(.hidden)
+                Text(emptyText).foregroundStyle(Taproom.muted).frame(maxWidth: .infinity).padding(.vertical, 24)
             }
         } else if model.isLoadingMore {
-            ProgressView().frame(maxWidth: .infinity).listRowSeparator(.hidden)
+            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 12)
         } else if let e = model.error {
             ErrorRow(message: e) { Task { await model.loadMore() } }
         }
@@ -108,9 +112,8 @@ extension CheckinList where Header == EmptyView {
     }
 }
 
-/// A checkin opened from a particular list. List highlights any row whose link value is already on
-/// the navigation stack, so pushing bare `Checkin`s would highlight a row on someone's profile when
-/// that same checkin was opened further back (e.g. from the feed).
+/// A checkin opened from a particular list, so that the same checkin opened from two lists in one
+/// stack (the feed, then someone's profile) are separate pushes.
 struct CheckinRoute: Hashable {
     let checkin: Checkin
     let listID: UUID
@@ -144,14 +147,10 @@ struct ToastButton: View {
                 Image("toast").resizable().scaledToFit().frame(width: 18, height: 18)
                 Text(checkin.youToasted ? "Toasted" : "Toast").font(.subheadline.weight(.medium))
             }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 34)
-            .foregroundStyle(checkin.youToasted ? Color.orange : Color.primary)
-            .background(checkin.youToasted ? Color.orange.opacity(0.15) : Color(.tertiarySystemFill),
-                        in: Capsule())
+            .padding(.horizontal, 4)
         }
-        .buttonStyle(.borderless)  // keeps taps on the button, not the row's navigation link
-        .tint(.primary)
+        .buttonStyle(TaproomChip(on: checkin.youToasted))
+        .accessibilityAddTraits(checkin.youToasted ? .isSelected : [])
         .accessibilityLabel(checkin.youToasted ? "Remove toast" : "Toast")
     }
 }
@@ -162,12 +161,11 @@ struct ErrorRow: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Text(message).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            Button("Retry", action: retry).buttonStyle(.bordered)
+            Text(message).font(.footnote).foregroundStyle(Taproom.muted).multilineTextAlignment(.center)
+            Button("Retry", action: retry).buttonStyle(TaproomOutlineButton()).frame(maxWidth: 160)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .listRowSeparator(.hidden)
+        .padding(.vertical, 12)
     }
 }
 
@@ -175,7 +173,23 @@ struct FeedView: View {
     let model: CheckinListModel
 
     var body: some View {
-        CheckinList(model: model, showActions: true, emptyText: "Your friends haven't checked in anything yet.")
-            .toolbar(.hidden, for: .navigationBar)
+        CheckinList(model: model, showActions: true, emptyText: "Your friends haven't checked in anything yet.") {
+            Text("Feed")
+                .font(.system(size: 34, weight: .heavy))
+                .tracking(-0.8)
+                .padding(.top, 4)
+                .accessibilityAddTraits(.isHeader)
+        }
+        .toolbar(.hidden, for: .navigationBar)
+    }
+}
+
+/// A whole card that opens something; dims a little while pressed.
+struct CardLinkStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .scaleEffect(configuration.isPressed ? 0.99 : 1)
+            .animation(.interactiveSpring(response: 0.25, dampingFraction: 0.85), value: configuration.isPressed)
     }
 }

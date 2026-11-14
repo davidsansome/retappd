@@ -96,15 +96,21 @@ struct TaproomOutlineButton: ButtonStyle {
     }
 }
 
-/// The screen's one main action: full width, dark ink with light text.
+/// The screen's one main action: full width, dark ink with light text. `fullWidth: false` sizes
+/// it to its label, for the tab bar's action.
 struct TaproomPrimaryButton: ButtonStyle {
+    var fullWidth = true
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .labelStyle(TightLabel())
             .font(.headline)
-            .frame(maxWidth: .infinity, minHeight: 54)
+            .padding(.horizontal, fullWidth ? 0 : 20)
+            .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: 54)
             .foregroundStyle(Taproom.background)
             .background(Taproom.ink, in: RoundedRectangle(cornerRadius: 16))
-            .opacity(configuration.isPressed ? 0.8 : 1)
+            .opacity(!isEnabled ? 0.4 : configuration.isPressed ? 0.8 : 1)
             .contentShape(RoundedRectangle(cornerRadius: 16))
     }
 }
@@ -136,5 +142,178 @@ extension View {
         foregroundStyle(Taproom.ink)
             .background(Taproom.background)
             .tint(Taproom.amber)
+    }
+}
+
+/// A pint glass filled to a rating, for showing (not setting) a score. `GlassRating` is the
+/// draggable one on the check-in screen.
+struct FilledGlass: View {
+    let rating: Double
+    var lineWidth: CGFloat = 1.5
+    /// Draws a band of foam on top of the beer; worth it on bigger glasses only.
+    var foam = false
+
+    var body: some View {
+        GeometryReader { geo in
+            let level = geo.size.height * CGFloat(min(max(rating, 0), 5) / 5 * 0.93)
+            ZStack(alignment: .bottom) {
+                PintShape().fill(Taproom.glassInside)
+                VStack(spacing: 0) {
+                    if foam && rating > 0 { Rectangle().fill(Taproom.foam).frame(height: geo.size.height * 0.06) }
+                    Rectangle().fill(Taproom.amber).frame(height: level)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .clipShape(PintShape())
+                PintShape().stroke(Taproom.glassRim, lineWidth: lineWidth)
+            }
+        }
+        .aspectRatio(0.72, contentMode: .fit)
+        .accessibilityHidden(true)
+    }
+}
+
+/// A checkin's rating: the number in heavy type beside a small glass filled to match.
+struct TaproomRating: View {
+    let rating: Double
+    var size: CGFloat = 34
+
+    var body: some View {
+        HStack(alignment: .lastTextBaseline, spacing: size * 0.16) {
+            Text(rating.formatted(.number.precision(.fractionLength(2))))
+                .font(.system(size: size, weight: .heavy).monospacedDigit())
+                .tracking(-size * 0.03)
+            FilledGlass(rating: rating, lineWidth: size > 40 ? 2 : 1.5)
+                .frame(height: size * 0.8)
+                .alignmentGuide(.lastTextBaseline) { $0[.bottom] }
+        }
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Rated \(rating.formatted(.number.precision(.fractionLength(0...2)))) out of 5")
+    }
+}
+
+/// A full-width tappable row in a list laid out on the page (venues, beers, settings). Shows a
+/// warm highlight while pressed.
+struct TaproomRowStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .background(configuration.isPressed ? Taproom.glassInside : Color.clear)
+    }
+}
+
+extension View {
+    /// A 1pt warm line under a row in a list laid out on the page.
+    func taproomRowDivider() -> some View {
+        overlay(alignment: .bottom) { Rectangle().fill(Taproom.border).frame(height: 1) }
+    }
+}
+
+/// A search field on the page: a card with a magnifying glass, and a Cancel button while it's
+/// in use. `focusRequests` focuses it each time it goes up (e.g. from the tab bar's Search).
+struct TaproomSearchField: View {
+    @Binding var text: String
+    let prompt: String
+    var focusRequests = 0
+    @FocusState private var focused: Bool
+    @State private var handledRequests = 0
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(Taproom.muted)
+                TextField(prompt, text: $text, prompt: Text(prompt).foregroundStyle(Taproom.muted))
+                    .focused($focused)
+                    .submitLabel(.search)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                if !text.isEmpty {
+                    Button("Clear", systemImage: "xmark.circle.fill") { text = "" }
+                        .labelStyle(.iconOnly).foregroundStyle(Taproom.muted)
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(Taproom.card, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(focused ? Taproom.amber : Taproom.border))
+            .contentShape(RoundedRectangle(cornerRadius: 16))
+            .onTapGesture { focused = true }
+
+            if focused || !text.isEmpty {
+                Button("Cancel") { text = ""; focused = false }
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(Taproom.ink)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.2), value: focused || !text.isEmpty)
+        .onAppear(perform: handleFocusRequest)
+        .onChange(of: focusRequests) { handleFocusRequest() }
+    }
+
+    private func handleFocusRequest() {
+        guard focusRequests > handledRequests else { return }
+        handledRequests = focusRequests
+        // Wait for the tab switch to settle, or the keyboard doesn't come up.
+        Task { try? await Task.sleep(for: .milliseconds(150)); focused = true }
+    }
+}
+
+/// One tab in a `TaproomTabBar`.
+struct TaproomTab<Value: Hashable>: Identifiable {
+    let value: Value
+    let title: String
+    let systemImage: String
+    var id: Value { value }
+}
+
+/// The app's bottom bar: the tabs on the left and one context action (Search, Scan…) as a dark
+/// button on the right, within thumb reach. It belongs at the bottom of each tab's root screen,
+/// so it slides away with the root when something is pushed, and it steps aside for the keyboard.
+struct TaproomTabBar<Value: Hashable, Action: View>: View {
+    let tabs: [TaproomTab<Value>]
+    let selection: Value
+    let select: (Value) -> Void
+    @ViewBuilder var action: Action
+    @State private var keyboardShown = false
+
+    var body: some View {
+        Group {
+            if !keyboardShown {
+                HStack(spacing: 4) {
+                    ForEach(tabs) { tab in
+                        let on = tab.value == selection
+                        Button { select(tab.value) } label: {
+                            VStack(spacing: 2) {
+                                Image(systemName: tab.systemImage).font(.system(size: 20, weight: .medium))
+                                    .frame(height: 24)
+                                Text(tab.title).font(.caption2.weight(.semibold))
+                            }
+                            .frame(minWidth: 56, minHeight: 50)
+                            .padding(.horizontal, 2)
+                            .foregroundStyle(on ? Taproom.ink : Taproom.muted)
+                            .background(on ? Taproom.glassInside : .clear, in: RoundedRectangle(cornerRadius: 14))
+                            .contentShape(RoundedRectangle(cornerRadius: 14))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(on ? .isSelected : [])
+                    }
+                    Spacer(minLength: 8)
+                    action
+                }
+                .padding(.horizontal, Taproom.margin)
+                .padding(.top, 8)
+                .padding(.bottom, 2)
+                .background(Taproom.background)
+                .overlay(alignment: .top) { Rectangle().fill(Taproom.border).frame(height: 1) }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            keyboardShown = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardShown = false
+        }
     }
 }

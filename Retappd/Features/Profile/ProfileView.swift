@@ -10,21 +10,17 @@ struct ProfileView: View {
     /// Shown in the header until the full profile loads.
     var placeholder: User? = nil
     var openSettings: () -> Void = {}
-    @Environment(AuthStore.self) private var auth
     @State private var info: UserInfo.Profile?
-    @State private var confirmSignOut = false
 
     var body: some View {
         CheckinList(model: model, showUser: false, registersDestinations: isAccountTab, emptyText: emptyText) {
-            header.listRowSeparator(.hidden)
+            header
         }
         .toolbar(isAccountTab ? .hidden : .automatic, for: .navigationBar)
+        .toolbarBackground(Taproom.background, for: .navigationBar)
         .navigationTitle(isAccountTab ? "" : (info?.userName ?? username))
         .navigationBarTitleDisplayMode(.inline)
         .modifier(SettingsDestination(enabled: isAccountTab))
-        .confirmationDialog("Sign out of Untappd?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-            Button("Sign out", role: .destructive) { auth.signOut() }
-        }
         .task(id: model.reloads) { await loadInfo() }
         .refreshable {
             async let a: () = model.refresh()
@@ -33,37 +29,49 @@ struct ProfileView: View {
         }
     }
 
+    /// The avatar and name centred as the hero, then the stats in a row.
     private var header: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Avatar(url: info?.avatar ?? placeholder?.avatar, size: 64)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(info?.displayName ?? placeholder?.displayName ?? username).font(.title3.bold())
-                    Spacer()
-                    if isAccountTab { accountMenu }
-                }
-                if let loc = info?.location { Text(loc).font(.subheadline).foregroundStyle(.secondary) }
-                HStack(spacing: 16) {
-                    stat(info?.totalCheckins, "Total")
-                    stat(info?.totalBeers, "Unique")
-                    stat(info?.totalBadges, "Badges")
-                    stat(info?.totalFriends, "Friends")
+        VStack(spacing: 0) {
+            VStack(spacing: 4) {
+                Avatar(url: info?.avatar ?? placeholder?.avatar, size: 96)
+                Text(info?.displayName ?? placeholder?.displayName ?? username)
+                    .font(.system(size: 26, weight: .heavy))
+                    .tracking(-0.4)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 8)
+                    .accessibilityAddTraits(.isHeader)
+                Text(["@" + (info?.userName ?? username), info?.location].compactMap { $0 }.joined(separator: " · "))
+                    .font(.subheadline).foregroundStyle(Taproom.muted)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .overlay(alignment: .topTrailing) {
+                if isAccountTab {
+                    Button(action: openSettings) {
+                        Image(systemName: "gearshape").font(.title3).frame(width: 44, height: 44)
+                    }
+                    .foregroundStyle(Taproom.ink)
+                    .accessibilityLabel("Settings")
+                    .padding(.trailing, -10)
                 }
             }
-        }
-        .padding(.vertical, 8)
-    }
 
-    private var accountMenu: some View {
-        Menu {
-            Button("Settings", systemImage: "gearshape") { openSettings() }
-            Button("Sign out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                confirmSignOut = true
+            HStack(spacing: 0) {
+                stat(info?.totalCheckins, "Total")
+                stat(info?.totalBeers, "Unique")
+                stat(info?.totalBadges, "Badges")
+                stat(info?.totalFriends, "Friends")
             }
-        } label: {
-            Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(.secondary)
+            .padding(.vertical, 16)
+            .overlay(alignment: .top) { Rectangle().fill(Taproom.border).frame(height: 1) }
+            .taproomRowDivider()
+            .padding(.top, Taproom.sectionSpacing)
+
+            Text("Checkins").font(Taproom.sectionLabel)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, Taproom.sectionSpacing)
         }
-        .accessibilityLabel("Account")
+        .padding(.top, isAccountTab ? 8 : 0)
     }
 
     private var emptyText: String {
@@ -73,10 +81,16 @@ struct ProfileView: View {
     }
 
     private func stat(_ n: Int?, _ label: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(n.map { $0.formatted() } ?? "–").font(.subheadline.bold().monospacedDigit())
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+        VStack(spacing: 2) {
+            Text(n.map { $0.formatted() } ?? "–")
+                .font(.system(size: 22, weight: .heavy).monospacedDigit())
+                .tracking(-0.5)
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
+            Text(label).font(.caption).foregroundStyle(Taproom.muted)
         }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
     }
 
     private func loadInfo() async {

@@ -50,12 +50,18 @@ struct BarcodeSearchSheet: View {
     var body: some View {
         NavigationStack {
             content
+                .taproomScreen()
                 .navigationTitle("Find by barcode")
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(Taproom.background, for: .navigationBar)
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button { dismiss() } label: { Image(systemName: "xmark") }
+                            .accessibilityLabel("Close")
+                    }
                 }
         }
+        .tint(Taproom.amber)
         .task { await askForCamera() }
         .sensoryFeedback(.success, trigger: phase) { _, new in
             if case .looking = new { return true } else { return false }
@@ -74,7 +80,7 @@ struct BarcodeSearchSheet: View {
         case .looking(let code):
             VStack(spacing: 12) {
                 ProgressView()
-                Text("Looking up \(code)…").foregroundStyle(.secondary)
+                Text("Looking up \(code)…").foregroundStyle(Taproom.muted)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .found(let code, let beers):
@@ -85,8 +91,11 @@ struct BarcodeSearchSheet: View {
             } description: {
                 Text(message)
             } actions: {
-                Button("Try again") { lookUp(code) }.buttonStyle(.borderedProminent)
-                Button("Scan another") { phase = .scanning }
+                VStack(spacing: 8) {
+                    Button("Try again") { lookUp(code) }.buttonStyle(TaproomPrimaryButton())
+                    Button("Scan another") { phase = .scanning }.buttonStyle(TaproomOutlineButton())
+                }
+                .frame(maxWidth: 280)
             }
         }
     }
@@ -98,7 +107,7 @@ struct BarcodeSearchSheet: View {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(.white.opacity(0.85), lineWidth: 3)
+                    .strokeBorder(Taproom.amber, lineWidth: 3)
                     .frame(width: 260, height: 140)
                     .allowsHitTesting(false)
             }
@@ -127,45 +136,58 @@ struct BarcodeSearchSheet: View {
     /// of Release builds, so TestFlight and the App Store never show it.
     private var manualEntry: some View {
         HStack(spacing: 8) {
-            TextField("Or type the barcode", text: $typed)
+            TextField("Or type the barcode", text: $typed,
+                      prompt: Text("Or type the barcode").foregroundStyle(Taproom.muted))
                 .keyboardType(.numberPad)
+                .font(.body.monospacedDigit())
                 .focused($typing)
-                .padding(.horizontal, 12)
-                .frame(height: 40)
-                .background(Color(.tertiarySystemFill), in: Capsule())
+                .padding(.horizontal, 14)
+                .frame(height: 44)
+                .taproomCard(cornerRadius: 12)
             Button("Search") { lookUp(typed) }
-                .buttonStyle(.borderedProminent)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Taproom.background)
+                .padding(.horizontal, 16)
+                .frame(height: 44)
+                .background(Taproom.ink, in: RoundedRectangle(cornerRadius: 12))
+                .opacity(BarcodeLookup.candidates(typed).isEmpty ? 0.4 : 1)
                 .disabled(BarcodeLookup.candidates(typed).isEmpty)
         }
-        .padding()
-        .background(.bar)
+        .padding(Taproom.margin)
+        .background(Taproom.background)
     }
     #endif
 
     private func results(code: String, beers: [BeerLite]) -> some View {
-        List {
+        ScrollView {
             if beers.isEmpty {
                 ContentUnavailableView("No beers found",
                                        systemImage: "barcode",
                                        description: Text("Nobody on Untappd has given \(code) to a beer yet."))
+                    .padding(.top, 40)
             } else {
-                Section {
-                    ForEach(beers) { b in
-                        Button {
-                            dismiss()
-                            onPick(b)
-                        } label: { BeerRow(beer: b) }
-                        .buttonStyle(.plain)
+                TaproomSection(beers.count == 1 ? "Barcode \(code)" : "\(beers.count) beers have barcode \(code)") {
+                    VStack(spacing: 0) {
+                        ForEach(beers) { b in
+                            Button {
+                                dismiss()
+                                onPick(b)
+                            } label: { BeerRow(beer: b) }
+                            .buttonStyle(TaproomRowStyle())
+                            .taproomRowDivider()
+                            .accessibilityHint("Checks in this beer")
+                        }
                     }
-                } header: {
-                    Text(beers.count == 1 ? "Barcode \(code)" : "\(beers.count) beers have barcode \(code)")
                 }
-            }
-            Section {
-                Button("Scan another", systemImage: "barcode.viewfinder") { typed = ""; phase = .scanning }
+                .padding(.horizontal, Taproom.margin)
+                .padding(.top, 8)
             }
         }
-        .listStyle(.insetGrouped)
+        .safeAreaInset(edge: .bottom) {
+            Button { typed = ""; phase = .scanning } label: { Label("Scan another", systemImage: "barcode.viewfinder") }
+                .buttonStyle(TaproomOutlineButton())
+                .taproomBottomBar()
+        }
     }
 
     private func lookUp(_ raw: String) {

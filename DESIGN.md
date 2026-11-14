@@ -80,9 +80,32 @@ System font throughout (SF Pro), so Dynamic Type works.
 | `TaproomPrimaryButton()` | Full width, 54pt, ink fill, background-coloured text, 16pt corners | The screen's one main action, pinned at the bottom |
 | `.taproomCard()` | Card fill, 1pt border, 16pt corners | Text fields, photos, tappable rows that need a boundary |
 | `TaproomSection` | Bold label above content | Every titled block |
+| `TaproomRating(rating:size:)` | The score in heavy type beside a small glass filled to match | Showing a checkin's rating (feed cards at 30, checkin screen at 44). Never stars. |
+| `FilledGlass(rating:)` | A static pint glass filled to a rating, optional foam | Inside `TaproomRating`, and decoration (the login glass). `GlassRating` is the draggable one. |
+| `TaproomTabBar` | The app's bottom bar: tabs on the left, one dark context action on the right | Each tab's root screen, via `.safeAreaInset(edge: .bottom)`. Not on pushed screens, so it slides away on push; it hides itself while the keyboard is up. |
+| `TaproomSearchField` | Card-style search field with Cancel; `focusRequests` focuses it from elsewhere | Searching or filtering on a page (Discover, a venue's menu) instead of `.searchable` |
+| `TaproomRowStyle` + `.taproomRowDivider()` | Full-width tappable row with a pressed highlight, and a 1pt warm line under it | Lists laid out on the page: venues, beers, search results |
+| `CardLinkStyle` | Dims a whole card a little while pressed | A card that opens something (feed cards, the "You're probably at" card) |
 
 Existing shared views that already fit: `ServingIcon` (pass `color:` — amber normally,
 `Taproom.onAmber` on an amber chip), `Avatar`, `FlowLayout`, `VenueRow`.
+
+## Screen patterns
+
+- **Tab bar.** The system tab bar is hidden. `TaproomTabBar` sits on each tab's root screen with
+  Feed, Discover and Profile on the left and one context action on the right: **Search** on Feed
+  and Profile (jumps to Discover and focuses its search field), **Scan** on Discover (opens the
+  barcode scanner). Choosing the tab you're on scrolls it back to the top.
+- **Lists of things to read** (the feed, a profile's checkins) are cards: `.taproomCard()` with the
+  photo edge to edge inside, the rating as each card's hero on the right.
+- **Lists of things to pick** (venues, beers, search results) are plain rows on the page with
+  `TaproomRowStyle` and dividers, grouped under `TaproomSection`s. No `List`.
+- **Detail screens** lead with their hero: the checkin's photo square and edge to edge under the
+  navigation bar, with the content sheet overlapping it by 28pt (24pt top corners); without a
+  photo, the label and a plain bar. A venue leads with its name in heavy type and its menu
+  sections as chips.
+- **Settings** use cards of switch rows (`Toggle` tinted amber), chips for multi-select options
+  and tiles with previews for the theme.
 
 ## Motion and feedback
 

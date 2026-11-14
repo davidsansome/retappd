@@ -32,22 +32,32 @@ struct CheckinDetailView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    userHeader
-                    beerCard
-                    if let comment = checkin.comment {
-                        Text(comment).font(.body).textSelection(.enabled)
-                    }
+                VStack(alignment: .leading, spacing: 0) {
                     photo
-                    details
-                    if !checkin.badges.isEmpty { badges }
-                    if checkin.toastCount > 0 { toasts }
-                    if !checkin.comments.isEmpty || !pending.isEmpty { comments }
-                    Color.clear.frame(height: 0).id(Self.bottomID)
+                    VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                        beerHero
+                        author
+                        details
+                        if !checkin.badges.isEmpty { badges }
+                        if checkin.toastCount > 0 { toasts }
+                        if !checkin.comments.isEmpty || !pending.isEmpty { comments }
+                        Color.clear.frame(height: 0).id(Self.bottomID)
+                    }
+                    .padding(.horizontal, Taproom.margin)
+                    .padding(.top, hasPhoto ? 20 : 8)
+                    .padding(.bottom, 16)
+                    .frame(maxWidth: .readableContentWidth)
+                    .frame(maxWidth: .infinity)
+                    // The sheet of content overlaps the bottom of the photo.
+                    .background(Taproom.background, in: UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24))
+                    .padding(.top, hasPhoto ? -28 : 0)
                 }
-                .padding()
             }
             .scrollDismissesKeyboard(.interactively)
+            // The photo runs up under the status and navigation bars.
+            .ignoresSafeArea(.container, edges: hasPhoto ? .top : [])
+            .foregroundStyle(Taproom.ink)
+            .background(Taproom.background)
             // Keep your newest comment in view as it's added and as it turns into "Not sent".
             .onChange(of: pending.map { "\($0.id)\($0.failed)" }) { old, new in
                 guard new.count >= old.count, !new.isEmpty else { return }
@@ -58,14 +68,15 @@ struct CheckinDetailView: View {
                 }
             }
         }
-        .readableContentWidth()
-        .navigationTitle(checkin.beer?.name ?? "Checkin")
+        .navigationTitle(hasPhoto ? "" : "Checkin")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Taproom.background, for: .navigationBar)
+        .toolbarBackgroundVisibility(hasPhoto ? .hidden : .automatic, for: .navigationBar)
         .toolbar {
             if let beer = checkin.beerLite {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { checkInBeer = beer } label: {
-                        Image(systemName: "plus.circle.fill")
+                        Image(systemName: "plus")
                     }
                     .accessibilityLabel("Check in this beer")
                 }
@@ -83,7 +94,7 @@ struct CheckinDetailView: View {
                 }
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+        .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
         .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
         .fullScreenCover(item: $editing) { CheckInSheet(editing: $0) }
         .confirmationDialog("Delete this checkin?", isPresented: $confirmDelete, titleVisibility: .visible) {
@@ -139,53 +150,99 @@ struct CheckinDetailView: View {
     private var trimmedDraft: String { draft.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var canSend: Bool { !trimmedDraft.isEmpty && trimmedDraft != editingComment?.text }
 
-    private var composer: some View {
+    /// Toasting and commenting, pinned at the bottom: the comment field, with the Toast button
+    /// on the right within thumb reach.
+    private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 6) {
             if editingComment != nil {
                 HStack {
                     Label("Editing comment", systemImage: "pencil")
-                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        .font(.caption.weight(.semibold)).foregroundStyle(Taproom.muted)
                     Spacer()
                     Button("Cancel", action: cancelEditing).font(.caption.weight(.semibold))
+                        .foregroundStyle(Taproom.ink)
                 }
-                .padding(.horizontal, 6)
             }
             HStack(alignment: .bottom, spacing: 8) {
-                TextField(editingComment == nil ? "Add a comment…" : "Comment", text: $draft, axis: .vertical)
-                    .lineLimit(1...4)
-                    .focused($composerFocused)
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
-                    .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Color(.separator), lineWidth: 0.5))
-                    .contentShape(RoundedRectangle(cornerRadius: 20))
-                    .onTapGesture { composerFocused = true }  // the padding isn't part of the text field
-                    .onChange(of: draft) { _, new in
-                        if new.count > Self.maxCommentLength { draft = String(new.prefix(Self.maxCommentLength)) }
-                    }
-                VStack(spacing: 4) {
+                HStack(alignment: .bottom, spacing: 6) {
+                    TextField(editingComment == nil ? "Add a comment" : "Comment", text: $draft,
+                              prompt: Text(editingComment == nil ? "Add a comment" : "Comment").foregroundStyle(Taproom.muted),
+                              axis: .vertical)
+                        .lineLimit(1...4)
+                        .focused($composerFocused)
+                        .padding(.vertical, 12)
+                        .onChange(of: draft) { _, new in
+                            if new.count > Self.maxCommentLength { draft = String(new.prefix(Self.maxCommentLength)) }
+                        }
                     if remaining <= 40 {
                         Text("\(remaining)")
                             .font(.caption.monospacedDigit())
-                            .foregroundStyle(remaining <= 10 ? .red : .secondary)
+                            .foregroundStyle(remaining <= 10 ? .red : Taproom.muted)
+                            .padding(.bottom, 14)
                     }
-                    Button(action: send) {
-                        Image(systemName: editingComment == nil ? "arrow.up" : "checkmark")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 34, height: 34)
-                            .background(canSend ? Color.accentColor : Color(.systemGray4), in: Circle())
+                    if composerFocused || !trimmedDraft.isEmpty {
+                        Button(action: send) {
+                            Image(systemName: editingComment == nil ? "arrow.up" : "checkmark")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(canSend ? Taproom.background : Taproom.muted)
+                                .frame(width: 32, height: 32)
+                                .background(canSend ? Taproom.ink : Taproom.border, in: Circle())
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .disabled(!canSend)
+                        .accessibilityLabel(editingComment == nil ? "Post comment" : "Save comment")
+                        .padding(.trailing, -8)
                     }
-                    .disabled(!canSend)
-                    .accessibilityLabel(editingComment == nil ? "Post comment" : "Save comment")
-                    .padding(.bottom, 3)
+                }
+                .padding(.leading, 14).padding(.trailing, 8)
+                .frame(minHeight: 48)
+                .taproomCard()
+                .contentShape(RoundedRectangle(cornerRadius: 16))
+                .onTapGesture { composerFocused = true }  // the padding isn't part of the text field
+
+                if !composerFocused {
+                    Button { Task { await toggleToast() } } label: {
+                        HStack(spacing: 6) {
+                            Image("toast").resizable().scaledToFit().frame(width: 20, height: 20)
+                            Text(checkin.youToasted ? "Toasted" : "Toast")
+                        }
+                        .font(.headline)
+                        .padding(.horizontal, 18)
+                        .frame(minHeight: 48)
+                        .foregroundStyle(checkin.youToasted ? Taproom.onAmber : Taproom.background)
+                        .background(checkin.youToasted ? Taproom.amber : Taproom.ink, in: RoundedRectangle(cornerRadius: 16))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(checkin.youToasted ? "Remove toast" : "Toast")
+                    .accessibilityAddTraits(checkin.youToasted ? .isSelected : [])
+                    .sensoryFeedback(.impact(weight: .light), trigger: checkin.youToasted)
                 }
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
         .frame(maxWidth: .readableContentWidth)
         .frame(maxWidth: .infinity)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
+        .taproomBottomBar()
+        .animation(.snappy(duration: 0.2), value: composerFocused)
+    }
+
+    /// Toasts or un-toasts straight away, putting it back if the server refuses, and tells the
+    /// lists so their copies match.
+    private func toggleToast() async {
+        let before = checkin
+        checkin.youToasted.toggle()
+        checkin.toastCount = max(0, checkin.toastCount + (checkin.youToasted ? 1 : -1))
+        if let me {
+            checkin.toasters.removeAll { $0.id == me.id }
+            if checkin.youToasted { checkin.toasters.append(me) }
+        }
+        do {
+            _ = try await UntappdAPI.shared.data(.toggleToast(checkin.id))
+            NotificationCenter.default.post(name: .checkinEdited, object: checkin)
+        } catch {
+            checkin = before
+            self.error = "Couldn't toast: \(error.localizedDescription)"
+        }
     }
 
     private func send() {
@@ -289,129 +346,128 @@ struct CheckinDetailView: View {
 
     // MARK: Sections
 
-    /// The author, opening their profile when tapped.
-    @ViewBuilder private var userHeader: some View {
-        if let u = checkin.user, !u.userName.isEmpty {
-            NavigationLink(value: u) {
-                HStack {
-                    userHeaderContent
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        } else {
-            userHeaderContent
-        }
-    }
+    private var hasPhoto: Bool { checkin.photo.map { ($0.large ?? $0.medium ?? $0.small) != nil } ?? false }
 
-    private var userHeaderContent: some View {
-        HStack(spacing: 12) {
-            Avatar(url: checkin.user?.avatar, size: 48)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(checkin.user?.displayName ?? "").font(.headline)
-                if let d = checkin.createdAt {
-                    Text(d.formatted(date: .abbreviated, time: .shortened)
-                         + (Date.now.timeIntervalSince(d) < 86_400 ? " · " + RelativeTime.string(d) : ""))
-                        .font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private var beerCard: some View {
-        HStack(alignment: .top, spacing: 14) {
-            CachedImage(url: checkin.beer?.labelHD ?? checkin.beer?.label, maxPixel: 300)
-                .frame(width: 76, height: 76)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(checkin.beer?.name ?? "").font(.title3.bold())
-                if let b = checkin.brewery?.name { Text(b).foregroundStyle(.secondary) }
-                let meta = [checkin.beer?.style,
-                            checkin.beer?.abv.map { "\($0.formatted(.number.precision(.fractionLength(0...1))))% ABV" }]
-                    .compactMap { $0 }.joined(separator: " · ")
-                if !meta.isEmpty { Text(meta).font(.caption).foregroundStyle(.secondary) }
-                if let r = checkin.rating { StarRating(rating: r).padding(.top, 2) }
-            }
-        }
-    }
-
+    /// The photo, square and edge to edge under the navigation bar; tap to see it full screen.
     @ViewBuilder private var photo: some View {
         if let p = checkin.photo, let url = p.large ?? p.medium ?? p.small {
             Button { showPhoto = true } label: {
-                CachedImage(url: url, maxPixel: 1400) {
-                    CachedImage(url: p.medium ?? p.small, maxPixel: 1000)
-                }
-                .aspectRatio(1, contentMode: .fit)
-                .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                Taproom.glassInside
+                    .aspectRatio(1, contentMode: .fit)
+                    .overlay {
+                        CachedImage(url: url, maxPixel: 1400) {
+                            CachedImage(url: p.medium ?? p.small, maxPixel: 1000)
+                        }
+                        .aspectRatio(contentMode: .fill)
+                    }
+                    .clipped()
+                    .frame(maxWidth: .readableContentWidth)
+                    .frame(maxWidth: .infinity)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Photo")
+            .accessibilityHint("Opens it full screen")
             .fullScreenCover(isPresented: $showPhoto) {
                 PhotoViewer(url: p.large ?? url, placeholder: p.medium ?? url)
             }
         }
     }
 
+    /// The beer, with the rating beside it as the hero.
+    private var beerHero: some View {
+        HStack(alignment: .top, spacing: 12) {
+            if !hasPhoto {
+                CachedImage(url: checkin.beer?.labelHD ?? checkin.beer?.label, maxPixel: 300)
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 64, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                if let b = checkin.brewery?.name {
+                    Text(b).font(.subheadline).foregroundStyle(Taproom.muted).lineLimit(1)
+                }
+                Text(checkin.beer?.name ?? "")
+                    .font(.system(size: 26, weight: .heavy))
+                    .tracking(-0.4)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.7)
+                    .textSelection(.enabled)
+                let meta = [checkin.beer?.style,
+                            checkin.beer?.abv.map { "\($0.formatted(.number.precision(.fractionLength(0...1))))%" },
+                            checkin.servingType].compactMap { $0 }.joined(separator: " · ")
+                if !meta.isEmpty {
+                    Text(meta).font(.footnote).foregroundStyle(Taproom.muted).padding(.top, 2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let r = checkin.rating { TaproomRating(rating: r, size: 44).padding(.top, 6) }
+        }
+    }
+
+    /// Who checked in, what they said, and when and where; opens their profile when tapped.
+    @ViewBuilder private var author: some View {
+        if let u = checkin.user, !u.userName.isEmpty {
+            NavigationLink(value: u) { authorContent }.buttonStyle(.plain)
+        } else {
+            authorContent
+        }
+    }
+
+    private var authorContent: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Avatar(url: checkin.user?.avatar, size: 36)
+            VStack(alignment: .leading, spacing: 3) {
+                (Text(checkin.user?.displayName ?? "").fontWeight(.semibold)
+                 + Text(checkin.comment.map { " " + $0 } ?? ""))
+                    .font(.body)
+                    .textSelection(.enabled)
+                if let d = checkin.createdAt {
+                    Text(d.formatted(date: .abbreviated, time: .shortened)
+                         + (Date.now.timeIntervalSince(d) < 86_400 ? " · " + RelativeTime.string(d) : ""))
+                        .font(.caption).foregroundStyle(Taproom.muted)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contentShape(Rectangle())
+    }
+
+    /// Where, who with, and flavours, as chips.
     @ViewBuilder private var details: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let v = checkin.venue {
-                NavigationLink(value: v) {
-                    HStack(spacing: 10) {
-                        VenueIcon(venue: v, size: 32)
-                        VStack(alignment: .leading, spacing: 1) {
-                            HStack(spacing: 4) {
-                                Text(v.name).font(.subheadline.weight(.semibold))
-                                if v.isVerified { VerifiedBadge() }
-                            }
-                            if !v.subtitle.isEmpty { Text(v.subtitle).font(.caption).foregroundStyle(.secondary) }
+        if checkin.venue != nil || !checkin.taggedFriends.isEmpty || !checkin.flavors.isEmpty {
+            FlowLayout(spacing: 6) {
+                if let v = checkin.venue {
+                    NavigationLink(value: v) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "mappin").foregroundStyle(Taproom.amber)
+                            Text(v.name).lineLimit(1)
                         }
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                     }
-                    .contentShape(Rectangle())
+                    .buttonStyle(TaproomChip(on: false))
                 }
-                .buttonStyle(.plain)
-            }
-            if let s = checkin.servingType {
-                Label { Text(s) } icon: { ServingIcon(name: s, size: 17) }.font(.subheadline)
-            }
-            if !checkin.flavors.isEmpty {
-                FlowLayout(spacing: 6) {
-                    ForEach(checkin.flavors, id: \.self) { f in
-                        Text(f).font(.caption).padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(Color(.secondarySystemFill), in: Capsule())
-                    }
-                }
-            }
-            if !checkin.taggedFriends.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("With").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    FlowLayout(spacing: 6) {
-                        ForEach(checkin.taggedFriends) { UserChipLink(user: $0) }
-                    }
+                ForEach(checkin.taggedFriends) { UserChipLink(user: $0) }
+                ForEach(checkin.flavors, id: \.self) { f in
+                    Text(f).font(.subheadline.weight(.medium))
+                        .padding(.horizontal, 12).frame(minHeight: 34)
+                        .overlay(Capsule().strokeBorder(Taproom.border))
                 }
             }
         }
     }
 
     private var badges: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Badges earned").font(.headline)
+        TaproomSection("Badges earned") {
             ForEach(checkin.badges) { b in
                 HStack(spacing: 10) {
-                    CachedImage(url: b.image, maxPixel: 120).frame(width: 36, height: 36).clipShape(Circle())
-                    Text(b.name).font(.subheadline)
+                    CachedImage(url: b.image, maxPixel: 120).frame(width: 40, height: 40).clipShape(Circle())
+                    Text(b.name).font(.subheadline.weight(.medium))
                 }
             }
         }
     }
 
     private var toasts: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label { Text("\(checkin.toastCount) \(checkin.toastCount == 1 ? "toast" : "toasts")") } icon: { Image("toast").foregroundStyle(.orange) }
-                .font(.headline)
+        TaproomSection("\(checkin.toastCount) \(checkin.toastCount == 1 ? "toast" : "toasts")") {
             FlowLayout(spacing: 6) {
                 ForEach(checkin.toasters) { UserChipLink(user: $0) }
             }
@@ -420,7 +476,7 @@ struct CheckinDetailView: View {
 
     private var comments: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Comments").font(.headline)
+            Text("Comments").font(Taproom.sectionLabel)
             ForEach(checkin.comments) { c in
                 CommentRow(user: c.user, text: c.text, date: c.createdAt)
                     .contextMenu {
@@ -469,24 +525,24 @@ struct CommentRow: View {
                     Text(user?.displayName ?? "You").font(.subheadline.weight(.semibold))
                     switch status {
                     case .posted:
-                        if let date { Text(RelativeTime.string(date)).font(.caption).foregroundStyle(.secondary) }
+                        if let date { Text(RelativeTime.string(date)).font(.caption).foregroundStyle(Taproom.muted) }
                     case .sending:
                         ProgressView().controlSize(.mini)
-                        Text("Posting…").font(.caption).foregroundStyle(.secondary)
+                        Text("Posting…").font(.caption).foregroundStyle(Taproom.muted)
                     case .failed:
                         EmptyView()
                     }
                 }
                 Text(text).font(.subheadline)
-                    .foregroundStyle(status == .failed ? .secondary : .primary)
+                    .foregroundStyle(status == .failed ? Taproom.muted : Taproom.ink)
                 if status == .failed {
                     HStack(spacing: 6) {
                         Label("Not sent", systemImage: "exclamationmark.circle.fill")
                             .foregroundStyle(.red).labelStyle(TightLabel())
-                        Text("·").foregroundStyle(.secondary)
-                        Button("Retry", action: retry).fontWeight(.semibold)
-                        Text("·").foregroundStyle(.secondary)
-                        Button("Edit", action: edit).foregroundStyle(.secondary)
+                        Text("·").foregroundStyle(Taproom.muted)
+                        Button("Retry", action: retry).fontWeight(.semibold).foregroundStyle(Taproom.ink)
+                        Text("·").foregroundStyle(Taproom.muted)
+                        Button("Edit", action: edit).foregroundStyle(Taproom.muted)
                     }
                     .font(.caption)
                     .buttonStyle(.borderless)
@@ -505,11 +561,14 @@ struct UserChip: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Avatar(url: user.avatar, size: 22)
-            Text(user.shortName).font(.caption).lineLimit(1)
+            Avatar(url: user.avatar, size: 26)
+            Text(user.shortName).font(.subheadline.weight(.medium)).lineLimit(1)
         }
-        .padding(.leading, 2).padding(.trailing, 8).padding(.vertical, 2)
-        .background(Color(.secondarySystemFill), in: Capsule())
+        .foregroundStyle(Taproom.ink)
+        .padding(.leading, 4).padding(.trailing, 12)
+        .frame(minHeight: 34)
+        .background(Taproom.card, in: Capsule())
+        .overlay(Capsule().strokeBorder(Taproom.border))
     }
 }
 
@@ -521,34 +580,5 @@ struct UserChipLink: View {
         NavigationLink(value: user) { UserChip(user: user) }
             .buttonStyle(.plain)
             .disabled(user.userName.isEmpty)
-    }
-}
-
-struct StarRating: View {
-    let rating: Double
-    var size: CGFloat = 16
-
-    var body: some View {
-        HStack(spacing: 6) {
-            HStack(spacing: 2) {
-                ForEach(0..<5) { i in
-                    let fill = min(max(rating - Double(i), 0), 1)
-                    Image(systemName: "star.fill")
-                        .foregroundStyle(Color(.systemGray4))
-                        .overlay(alignment: .leading) {
-                            Image(systemName: "star.fill").foregroundStyle(.orange)
-                                .mask(alignment: .leading) {
-                                    Rectangle().frame(width: size * fill)
-                                }
-                        }
-                        .font(.system(size: size))
-                        .frame(width: size, height: size)
-                }
-            }
-            Text(rating.formatted(.number.precision(.fractionLength(2))))
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Rated \(rating) out of 5")
     }
 }

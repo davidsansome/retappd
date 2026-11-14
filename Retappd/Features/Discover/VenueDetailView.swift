@@ -89,73 +89,160 @@ struct VenueDetailView: View {
     @State private var model: VenueModel
     @State private var filter = ""
     @State private var checkInBeer: BeerLite?
+    /// Which list the chips show: a menu section's id, or nil for "Recently here". Defaults to
+    /// the first menu section.
+    @State private var shelf: Shelf?
+
+    enum Shelf: Hashable { case section(Int), recent }
 
     init(venue: Venue) { _model = State(initialValue: VenueModel(venue: venue)) }
 
     var body: some View {
-        List {
-            Section {
-                HStack(spacing: 12) {
-                    VenueIcon(venue: model.venue, size: 56)
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 4) {
-                            Text(model.venue.name).font(.title3.bold())
-                            if model.venue.isVerified { VerifiedBadge() }
-                        }
-                        if !model.venue.subtitle.isEmpty {
-                            Text(model.venue.subtitle).font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                hero
+                if model.venue.venueId != nil {
+                    TaproomSearchField(text: $filter, prompt: "Filter beers")
                 }
-            }
-
-            ForEach(model.sections) { s in
-                let items = s.items.filter { i in i.beer.map(matches) ?? false }
-                if !items.isEmpty {
-                    Section(s.title(venueName: model.venue.name)) {
-                        ForEach(items) { i in
-                            if let b = i.beer {
-                                // Menu numbers hidden until we know where the real tap numbers come from.
-                                Button { checkInBeer = b } label: { BeerRow(beer: b) }
-                                    .buttonStyle(.plain)
-                            }
-                        }
-                    }
+                if filter.isEmpty {
+                    if shelves.count > 1 { shelfChips }
+                    shelfContent
+                } else {
+                    filtered
                 }
+                emptyState
             }
-            if model.loadingMenu && model.sections.isEmpty {
-                Section("Menu") { ProgressView().frame(maxWidth: .infinity) }
-            }
-
-            let recent = model.recentBeers.filter { matches($0.beer) }
-            if !recent.isEmpty {
-                Section("Recently checked in here") {
-                    ForEach(recent, id: \.beer.bid) { r in
-                        Button { checkInBeer = r.beer } label: {
-                            BeerRow(beer: r.beer, detail: r.checkin.createdAt.map { RelativeTime.string($0) })
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            } else if model.loadingRecent && model.sections.isEmpty {
-                Section("Recently checked in here") { ProgressView().frame(maxWidth: .infinity) }
-            }
-
-            if model.venue.venueId == nil {
-                Section {
-                    Text("Untappd hasn't recorded beers here yet. Search for a beer to check in.")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
-            } else if !model.loadingMenu && !model.loadingRecent && model.sections.isEmpty && model.recentBeers.isEmpty {
-                Section { Text(model.error ?? "No beers listed here yet.").font(.callout).foregroundStyle(.secondary) }
-            }
+            .padding(.horizontal, Taproom.margin)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .readableContentWidth)
+            .frame(maxWidth: .infinity)
         }
-        .navigationTitle(model.venue.name)
+        .scrollDismissesKeyboard(.immediately)
+        .foregroundStyle(Taproom.ink)
+        .background(Taproom.background)
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $filter, prompt: "Filter beers")
+        .toolbarBackground(Taproom.background, for: .navigationBar)
         .task { await model.load() }
         .refreshable { await model.load(force: true) }
         .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: model.venue) }
+    }
+
+    // MARK: Sections
+
+    private var hero: some View {
+        HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                if !model.venue.subtitle.isEmpty {
+                    Text(model.venue.subtitle).font(.subheadline).foregroundStyle(Taproom.muted)
+                }
+                Text(model.venue.name)
+                    .font(.system(size: 30, weight: .heavy))
+                    .tracking(-0.6)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.7)
+                    .accessibilityAddTraits(.isHeader)
+                if model.venue.isVerified {
+                    Label("Verified venue", systemImage: "checkmark.seal.fill")
+                        .labelStyle(TightLabel())
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Taproom.muted)
+                        .padding(.top, 4)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            VenueIcon(venue: model.venue, size: 72)
+        }
+    }
+
+    /// The menu's sections, then the beers checked in here recently.
+    private var shelves: [(shelf: Shelf, title: String, count: Int)] {
+        var out = model.sections.map { s in
+            // Just the section's own name on a chip ("Beers on Tap"), not the menu's too.
+            (Shelf.section(s.id), s.name ?? s.title(venueName: model.venue.name), s.items.filter { $0.beer != nil }.count)
+        }
+        if !model.recentBeers.isEmpty { out.append((.recent, "Recently here", 0)) }
+        return out
+    }
+
+    private var currentShelf: Shelf? {
+        if let shelf, shelves.contains(where: { $0.shelf == shelf }) { return shelf }
+        return shelves.first?.shelf
+    }
+
+    private var shelfChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(shelves, id: \.shelf) { s in
+                    let on = currentShelf == s.shelf
+                    Button { shelf = s.shelf } label: {
+                        HStack(spacing: 5) {
+                            Text(s.title).lineLimit(1)
+                            if s.count > 0 {
+                                Text("\(s.count)").foregroundStyle(on ? Taproom.onAmber : Taproom.muted)
+                            }
+                        }
+                    }
+                    .buttonStyle(TaproomChip(on: on))
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+        }
+        .scrollClipDisabled()
+        .sensoryFeedback(.selection, trigger: currentShelf)
+    }
+
+    @ViewBuilder private var shelfContent: some View {
+        switch currentShelf {
+        case .section(let id):
+            if let s = model.sections.first(where: { $0.id == id }) {
+                beerRows(s.items.compactMap(\.beer).map { ($0, nil) })
+            }
+        case .recent:
+            beerRows(model.recentBeers.map { ($0.beer, $0.checkin.createdAt.map { RelativeTime.string($0) }) })
+        case nil:
+            if model.loadingMenu || model.loadingRecent {
+                ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
+            }
+        }
+    }
+
+    /// Everything matching the filter, across the menu and recent checkins.
+    @ViewBuilder private var filtered: some View {
+        ForEach(model.sections) { s in
+            let beers = s.items.compactMap(\.beer).filter(matches)
+            if !beers.isEmpty {
+                TaproomSection(s.title(venueName: model.venue.name)) { beerRows(beers.map { ($0, nil) }) }
+            }
+        }
+        let recent = model.recentBeers.filter { matches($0.beer) }
+        if !recent.isEmpty {
+            TaproomSection("Recently here") {
+                beerRows(recent.map { ($0.beer, $0.checkin.createdAt.map { RelativeTime.string($0) }) })
+            }
+        }
+    }
+
+    private func beerRows(_ beers: [(BeerLite, String?)]) -> some View {
+        VStack(spacing: 0) {
+            // Menu numbers hidden until we know where the real tap numbers come from.
+            ForEach(beers, id: \.0.bid) { b, detail in
+                Button { checkInBeer = b } label: { BeerRow(beer: b, detail: detail) }
+                    .buttonStyle(TaproomRowStyle())
+                    .taproomRowDivider()
+                    .accessibilityHint("Checks in this beer")
+            }
+        }
+    }
+
+    @ViewBuilder private var emptyState: some View {
+        if model.venue.venueId == nil {
+            Text("Untappd hasn't recorded beers here yet. Search for a beer to check in.")
+                .font(.callout).foregroundStyle(Taproom.muted)
+        } else if !model.loadingMenu && !model.loadingRecent && model.sections.isEmpty && model.recentBeers.isEmpty {
+            Text(model.error ?? "No beers listed here yet.").font(.callout).foregroundStyle(Taproom.muted)
+        }
     }
 
     private func matches(_ b: BeerLite) -> Bool {

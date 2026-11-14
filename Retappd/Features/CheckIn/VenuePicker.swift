@@ -14,57 +14,70 @@ struct VenuePicker: View {
 
     var body: some View {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        List {
-            if q.isEmpty {
-                Section { row(nil) }
-                let recentIds = Set(options.recentVenues.map(\.id))
-                if !options.recentVenues.isEmpty {
-                    Section("Recent") { ForEach(options.recentVenues) { row($0) } }
-                }
-                Section("Nearby") {
-                    ForEach(discover.checkInVenues.filter { !recentIds.contains($0.id) }) { row($0) }
-                    if discover.checkInVenues.count <= 1 {
-                        Text(location.location == nil ? "Waiting for your location…" : "Nothing nearby yet.")
-                            .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                if q.isEmpty {
+                    Button { pick(nil) } label: {
+                        Label("No venue", systemImage: "mappin.slash")
                     }
-                }
-            } else {
-                Section {
-                    ForEach(results) { row($0) }
+                    .buttonStyle(TaproomChip(on: selection == nil, dashed: selection != nil))
+                    .accessibilityAddTraits(selection == nil ? .isSelected : [])
+                    let recentIds = Set(options.recentVenues.map(\.id))
+                    if !options.recentVenues.isEmpty {
+                        TaproomSection("Recent") { rows(options.recentVenues) }
+                    }
+                    TaproomSection("Nearby") {
+                        rows(discover.checkInVenues.filter { !recentIds.contains($0.id) })
+                        if discover.checkInVenues.count <= 1 {
+                            Text(location.location == nil ? "Waiting for your location…" : "Nothing nearby yet.")
+                                .foregroundStyle(Taproom.muted)
+                        }
+                    }
+                } else {
+                    rows(results)
                     if searching && results.isEmpty {
-                        ProgressView().frame(maxWidth: .infinity)
+                        ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
                     } else if !searching && results.isEmpty {
-                        Text("No venues found.").foregroundStyle(.secondary)
+                        Text("No venues found.").foregroundStyle(Taproom.muted)
                     }
                 }
             }
+            .padding(.horizontal, Taproom.margin)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
         }
+        .scrollDismissesKeyboard(.immediately)
+        .foregroundStyle(Taproom.ink)
+        .background(Taproom.background)
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search venues")
-        .navigationTitle("Venue")
+        .navigationTitle("Where are you?")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Taproom.background, for: .navigationBar)
         .task(id: q) { await search(q) }
     }
 
-    private func row(_ v: Venue?) -> some View {
-        let on = selection?.id == v?.id
-        return Button {
-            selection = v
-            dismiss()
-        } label: {
-            HStack {
-                if let v {
-                    VenueRow(venue: v, origin: location.location)
-                } else {
-                    Label("No venue", systemImage: "mappin.slash")
+    private func pick(_ v: Venue?) {
+        selection = v
+        dismiss()
+    }
+
+    private func rows(_ venues: [Venue]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(venues) { v in
+                let on = selection?.id == v.id
+                Button { pick(v) } label: {
+                    HStack {
+                        VenueRow(venue: v, origin: location.location)
+                        if on {
+                            Image(systemName: "checkmark").foregroundStyle(Taproom.amber).fontWeight(.bold)
+                        }
+                    }
                 }
-                if on {
-                    Image(systemName: "checkmark").foregroundStyle(.orange).fontWeight(.semibold)
-                }
+                .buttonStyle(TaproomRowStyle())
+                .taproomRowDivider()
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private func search(_ q: String) async {
