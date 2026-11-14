@@ -281,13 +281,15 @@ struct ServingChip: View {
     }
 }
 
-/// Icon for a serving style, drawn orange; a generic glass for styles without one.
+/// Icon for a serving style, drawn orange by default; a generic glass for styles without one.
 struct ServingIcon: View {
     let name: String
+    var color: Color = .orange
     @ScaledMetric private var size: CGFloat
 
-    init(name: String, size: CGFloat) {
+    init(name: String, size: CGFloat, color: Color = .orange) {
         self.name = name
+        self.color = color
         _size = ScaledMetric(wrappedValue: size)
     }
 
@@ -307,7 +309,7 @@ struct ServingIcon: View {
             }
         }
         .frame(width: size, height: size)
-        .foregroundStyle(.orange)
+        .foregroundStyle(color)
         .accessibilityHidden(true)
     }
 }

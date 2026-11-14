@@ -99,6 +99,7 @@ struct SettingsView: View {
                 Task {
                     do {
                         _ = try await UntappdAPI.shared.data(request(on))
+                        if key == \.ratingBump { CheckInOptions.shared.setRatingBump(on) }
                         await invalidateCache()
                     } catch {
                         settings?[keyPath: key] = !on

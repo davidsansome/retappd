@@ -1,10 +1,23 @@
 import Foundation
 import Observation
 
-/// The user's friends (recently tagged ones first) and the serving types, cache-first.
+/// What the check-in screen offers: the user's friends (recently tagged ones first), serving
+/// types, recent venues and rating precision, all cache-first.
 @Observable @MainActor
 final class CheckInOptions {
     static let shared = CheckInOptions()
+
+    private static let ratingStepKey = "ratingStep"
+
+    /// 0.1 when the account has Untappd's "rating bump" turned on, else 0.25. Remembered between
+    /// launches so the slider is right before the settings have loaded.
+    private(set) var ratingStep: Double = {
+        let s = UserDefaults.standard.double(forKey: ratingStepKey)
+        return s > 0 ? s : 0.25
+    }()
+
+    /// The last few places the user checked in, newest first, excluding Untappd at Home.
+    private(set) var recentVenues: [Venue] = []
 
     private(set) var recentlyTagged: [User] = []
     private(set) var friends: [User] = []
@@ -18,6 +31,33 @@ final class CheckInOptions {
         let recentIds = Set(recentlyTagged.map(\.id))
         return recentlyTagged + friends.filter { !recentIds.contains($0.id) }
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    /// Reads the account's settings in the background (called at startup) to learn the rating step.
+    func loadAccountSettings() async {
+        let apply = { (a: AccountSettings) in self.setRatingBump(a.ratingBump) }
+        if let a = try? await cacheThenNetwork(.userSettings, as: AccountSettings.self, onCached: apply) { apply(a) }
+    }
+
+    /// Called when the rating bump setting is known or changed (e.g. from Settings).
+    func setRatingBump(_ on: Bool) {
+        ratingStep = on ? 0.1 : 0.25
+        UserDefaults.standard.set(ratingStep, forKey: Self.ratingStepKey)
+    }
+
+    /// Finds the user's most recent distinct venues from their own checkins.
+    func loadRecentVenues(username: String, count: Int = 3) async {
+        let apply = { (page: CheckinPage) in
+            var out: [Venue] = []
+            for v in page.checkins.compactMap(\.venue)
+            where v.foursquareId != nil && !v.isCustom && v.venueId != Venue.atHome.venueId
+                && !out.contains(where: { $0.id == v.id }) {
+                out.append(v)
+                if out.count == count { break }
+            }
+            self.recentVenues = out
+        }
+        if let p = try? await cacheThenNetwork(.userCheckins(username), as: CheckinPage.self, onCached: apply) { apply(p) }
     }
 
     func loadServingTypes() async {

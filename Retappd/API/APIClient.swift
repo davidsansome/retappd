@@ -120,6 +120,18 @@ final class UntappdAPI: @unchecked Sendable {
     }
 
     private struct Ignored: Decodable {}
+
+    /// PUTs a checkin's JPEG to the presigned S3 URL that `checkin/add` or `checkin/edit` returned.
+    /// The official app's upload wasn't captured; this is a plain presigned PUT.
+    func uploadPhoto(_ jpeg: Data, to url: URL) async throws {
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 60
+        let (_, resp) = try await session.upload(for: req, from: jpeg)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else { throw APIError.http(status) }
+    }
 }
 
 // MARK: - Endpoints
@@ -214,14 +226,16 @@ extension APIRequest {
     /// Changes a checkin's rating, comment and serving type, sending its beer and venue back
     /// unchanged as the official app does. Untappd treats an empty `shout`, `checkin_tags` or
     /// `flavor_profiles` as "leave as is", so a comment can be changed but not cleared.
-    static func editCheckin(_ checkin: Checkin, rating: Double, shout: String, containerId: Int?) -> APIRequest {
+    static func editCheckin(_ checkin: Checkin, rating: Double, shout: String, containerId: Int?,
+                            isPhoto: Bool = false) -> APIRequest {
         let tz = TimeZone.current
         var form = [
             "rating": rating > 0 ? String(format: "%.2f", rating) : "0",
             "shout": shout,
             "checkin_tags": "",
             "flavor_profiles": "",
-            "is_photo": "false",
+            "is_photo": isPhoto ? "true" : "false",
+            "photo_file_ext": "jpg",
             "gmt_offset": "\(tz.secondsFromGMT() / 3600)",
             "timezone": tz.identifier,
             "request_id": requestID(),
@@ -263,6 +277,7 @@ extension APIRequest {
 
     static let servingTypes = APIRequest(path: "/v4/checkin/serving_types")
 
+
     static func friends(offset: Int = 0, limit: Int = 50) -> APIRequest {
         APIRequest(path: "/v4/user/friends", query: ["limit": "\(limit)", "offset": "\(offset)"])
     }
@@ -293,7 +308,8 @@ extension APIRequest {
     }
 
     static func checkin(beer: Int, foursquareId: String?, lat: Double?, lng: Double?,
-                        rating: Double, shout: String, containerId: Int? = nil, taggedUserIds: [Int] = []) -> APIRequest {
+                        rating: Double, shout: String, containerId: Int? = nil, taggedUserIds: [Int] = [],
+                        isPhoto: Bool = false) -> APIRequest {
         let tz = TimeZone.current
         let df = DateFormatter()
         df.locale = Locale(identifier: "en_US_POSIX")
@@ -307,7 +323,8 @@ extension APIRequest {
             "created_at": df.string(from: .now),
             "platform": "android",
             "app_theme": "light",
-            "is_photo": "false",
+            "is_photo": isPhoto ? "true" : "false",
+            "photo_file_ext": "jpg",
             // Format not captured (the one sample was empty); comma-separated user ids is a guess.
             "checkin_tags": taggedUserIds.map(String.init).joined(separator: ","),
             "request_id": requestID(),

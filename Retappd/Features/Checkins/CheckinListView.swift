@@ -48,8 +48,8 @@ struct CheckinList<Header: View>: View {
         .refreshable { await model.refresh() }
         .task { await model.loadIfNeeded() }
         .modifier(CheckinDestinations(enabled: registersDestinations, me: model.me))
-        .sheet(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
-        .sheet(item: $editing) { CheckInSheet(editing: $0) }
+        .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
+        .fullScreenCover(item: $editing) { CheckInSheet(editing: $0) }
         .confirmationDialog("Delete this checkin?", isPresented: isConfirmingDelete,
                             titleVisibility: .visible, presenting: deleting) { c in
             Button("Delete", role: .destructive) { Task { await model.delete(c) } }

@@ -165,4 +165,23 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(e.comment?.text, "Test 2")
         XCTAssertEqual(e.comment?.id, 11)
     }
+
+    func testAccountSettingsRatingBump() throws {
+        let on = #"{"meta":{"code":200},"response":{"user":{"uid":1,"user_name":"a","rating_bump":1}}}"#
+        XCTAssertTrue(try UntappdAPI.decode(AccountSettings.self, from: Data(on.utf8)).ratingBump)
+        let off = #"{"meta":{"code":200},"response":{"user":{"uid":1,"user_name":"a","rating_bump":0}}}"#
+        XCTAssertFalse(try UntappdAPI.decode(AccountSettings.self, from: Data(off.utf8)).ratingBump)
+    }
+
+    func testCheckinAddPhotoUpload() throws {
+        let json = """
+        {"meta":{"code":200},"response":{"result":"success","checkin_id":1614085178,
+         "photo_upload":{"url":"https://untappd.s3.amazonaws.com/photos/x_raw.jpg?x-amz-acl=public-read&X-Amz-Expires=120",
+           "destination_url":"https://untappd.s3.amazonaws.com/photos/x_raw.jpg"}}}
+        """
+        let r = try UntappdAPI.decode(CheckinAddResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(r.checkinId, 1614085178)
+        XCTAssertEqual(r.photoUploadURL?.query?.contains("X-Amz-Expires=120"), true)
+        XCTAssertEqual(r.photoDestinationURL?.absoluteString, "https://untappd.s3.amazonaws.com/photos/x_raw.jpg")
+    }
 }

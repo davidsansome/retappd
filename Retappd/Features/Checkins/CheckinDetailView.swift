@@ -84,8 +84,8 @@ struct CheckinDetailView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-        .sheet(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
-        .sheet(item: $editing) { CheckInSheet(editing: $0) }
+        .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
+        .fullScreenCover(item: $editing) { CheckInSheet(editing: $0) }
         .confirmationDialog("Delete this checkin?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) { Task { await delete() } }
         } message: {

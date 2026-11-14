@@ -155,7 +155,7 @@ struct VenueDetailView: View {
         .searchable(text: $filter, prompt: "Filter beers")
         .task { await model.load() }
         .refreshable { await model.load(force: true) }
-        .sheet(item: $checkInBeer) { CheckInSheet(beer: $0, venue: model.venue) }
+        .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: model.venue) }
     }
 
     private func matches(_ b: BeerLite) -> Bool {

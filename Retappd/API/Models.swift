@@ -659,13 +659,21 @@ extension UserInfo.Profile {
     }
 }
 
+/// The response to `checkin/add` and `checkin/edit`.
 struct CheckinAddResponse: Decodable {
     var result: String?
     var checkinId: Int?
+    /// With `is_photo=true`: a presigned S3 URL (valid for 120 seconds) to PUT the photo to.
+    var photoUploadURL: URL?
+    /// Where the uploaded photo will then be served from.
+    var photoDestinationURL: URL?
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
         result = c.text("result")
         checkinId = c.int("checkin_id")
+        let upload = c.nested("photo_upload")
+        photoUploadURL = upload?.text("url").flatMap(URL.init(string:))
+        photoDestinationURL = upload?.text("destination_url").flatMap(URL.init(string:))
     }
 }
 

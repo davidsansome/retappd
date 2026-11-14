@@ -77,6 +77,8 @@ struct RootTabs: View {
         // you're at, even before the Discover tab is opened.
         .task { location.start() }
         .task { await loadMe() }
+        .task { await CheckInOptions.shared.loadAccountSettings() }
+        .task { await CheckInOptions.shared.loadRecentVenues(username: username) }
         .task(id: location.location.map { "\($0.coordinate.latitude),\($0.coordinate.longitude)" }) {
             await discover.update(location: location.location)
         }
@@ -84,6 +86,7 @@ struct RootTabs: View {
             Task {
                 await feed.refresh()
                 await profile.refresh()
+                await CheckInOptions.shared.loadRecentVenues(username: username)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .checkinDeleted)) { n in
