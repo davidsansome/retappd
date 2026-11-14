@@ -218,7 +218,7 @@ struct FriendActivityRow: View {
             ForEach(activity.checkins.prefix(3)) { c in
                 HStack(spacing: 8) {
                     CachedImage(url: c.user?.avatar, maxPixel: 60).frame(width: 22, height: 22).clipShape(Circle())
-                    (Text(c.user?.displayName ?? "").bold() + Text(" · \(c.beer?.name ?? "")"))
+                    (Text(c.user?.shortName ?? "").bold() + Text(" · \(c.beer?.name ?? "")"))
                         .font(.caption).lineLimit(1)
                     Spacer(minLength: 4)
                     if let d = c.createdAt {

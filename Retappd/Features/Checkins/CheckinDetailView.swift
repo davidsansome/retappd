@@ -193,7 +193,7 @@ struct UserChip: View {
     var body: some View {
         HStack(spacing: 6) {
             Avatar(url: user.avatar, size: 22)
-            Text(user.displayName).font(.caption).lineLimit(1)
+            Text(user.shortName).font(.caption).lineLimit(1)
         }
         .padding(.leading, 2).padding(.trailing, 8).padding(.vertical, 2)
         .background(Color(.secondarySystemFill), in: Capsule())

@@ -15,7 +15,7 @@ struct CheckinRow: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             if showUser, let u = checkin.user {
-                                Text(u.displayName).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                Text(u.shortName).font(.subheadline.weight(.semibold)).lineLimit(1)
                             }
                             if let d = checkin.createdAt {
                                 Text(RelativeTime.string(d)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -77,7 +77,7 @@ struct CheckinRow: View {
             }
 
             if !checkin.taggedFriends.isEmpty {
-                Label("with " + checkin.taggedFriends.map(\.displayName).formatted(.list(type: .and)),
+                Label("with " + checkin.taggedFriends.map(\.shortName).formatted(.list(type: .and)),
                       systemImage: "person.2.fill")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     .labelStyle(TightLabel())
