@@ -207,6 +207,42 @@ extension APIRequest {
         APIRequest(method: .post, path: "/v4/checkin/toast/\(checkinId)", form: [:])
     }
 
+    static func deleteCheckin(_ id: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/checkin/delete/\(id)", form: [:])
+    }
+
+    /// Changes a checkin's rating, comment and serving type, sending its beer and venue back
+    /// unchanged as the official app does. Untappd treats an empty `shout`, `checkin_tags` or
+    /// `flavor_profiles` as "leave as is", so a comment can be changed but not cleared.
+    static func editCheckin(_ checkin: Checkin, rating: Double, shout: String, containerId: Int?) -> APIRequest {
+        let tz = TimeZone.current
+        var form = [
+            "rating": rating > 0 ? String(format: "%.2f", rating) : "0",
+            "shout": shout,
+            "checkin_tags": "",
+            "flavor_profiles": "",
+            "is_photo": "false",
+            "gmt_offset": "\(tz.secondsFromGMT() / 3600)",
+            "timezone": tz.identifier,
+            "request_id": requestID(),
+        ]
+        if let bid = checkin.beerLite?.bid { form["bid"] = "\(bid)" }
+        if let containerId { form["container_id"] = "\(containerId)" }
+        if let v = checkin.venue {
+            if let f = v.foursquareId { form["foursquare_id"] = f }
+            if let lat = v.lat, let lng = v.lng {
+                form["geolat"] = String(format: "%.6f", lat)
+                form["geolng"] = String(format: "%.6f", lng)
+            }
+        }
+        return APIRequest(method: .post, path: "/v4/checkin/edit/\(checkin.id)", form: form)
+    }
+
+    /// The 24-hex-digit id the official app sends with checkins and edits.
+    private static func requestID() -> String {
+        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(24).description
+    }
+
     static func checkinView(_ id: Int) -> APIRequest {
         APIRequest(path: "/v4/checkin/view/\(id)")
     }
@@ -237,7 +273,7 @@ extension APIRequest {
             "is_photo": "false",
             // Format not captured (the one sample was empty); comma-separated user ids is a guess.
             "checkin_tags": taggedUserIds.map(String.init).joined(separator: ","),
-            "request_id": UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(24).description,
+            "request_id": requestID(),
         ]
         if let foursquareId { form["foursquare_id"] = foursquareId }
         if let containerId { form["container_id"] = "\(containerId)" }

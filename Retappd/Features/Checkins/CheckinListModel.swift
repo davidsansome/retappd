@@ -119,6 +119,27 @@ final class CheckinListModel {
         }
     }
 
+    /// Optimistically deletes one of the user's checkins, putting it back if the server refuses.
+    func delete(_ c: Checkin) async {
+        guard let i = items.firstIndex(where: { $0.id == c.id }) else { return }
+        let removed = items.remove(at: i)
+        do {
+            _ = try await UntappdAPI.shared.data(.deleteCheckin(c.id))
+            NotificationCenter.default.post(name: .checkinDeleted, object: c.id)
+        } catch {
+            if !items.contains(where: { $0.id == c.id }) { items.insert(removed, at: min(i, items.count)) }
+            self.error = "Couldn't delete: \(error.localizedDescription)"
+        }
+    }
+
+    /// Drops a checkin that was deleted elsewhere.
+    func remove(id: Int) { items.removeAll { $0.id == id } }
+
+    /// Swaps in a checkin that was edited elsewhere.
+    func replace(_ c: Checkin) {
+        if let i = items.firstIndex(where: { $0.id == c.id }) { items[i] = c }
+    }
+
     private func apply(_ page: CheckinPage, replacing: Bool) {
         items = page.checkins
         nextMaxId = page.nextMaxId
@@ -143,5 +164,20 @@ final class CheckinListModel {
             [c.beer?.label, c.user?.avatar, c.photo?.medium].compactMap { $0 }
         })
         Task.detached(priority: .utility) { await LocalIndex.shared.add(checkins: checkins) }
+    }
+}
+
+extension Notification.Name {
+    /// Posted with the deleted checkin's id (an `Int`) as the object.
+    static let checkinDeleted = Notification.Name("checkinDeleted")
+    /// Posted with the edited `Checkin` as the object.
+    static let checkinEdited = Notification.Name("checkinEdited")
+}
+
+extension Checkin {
+    /// Whether the signed-in user (`username`) made this checkin, so may edit or delete it.
+    func isBy(username: String?) -> Bool {
+        guard let username, let name = user?.userName, !name.isEmpty else { return false }
+        return name.caseInsensitiveCompare(username) == .orderedSame
     }
 }

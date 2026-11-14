@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct CheckInSheet: View {
-    let beer: BeerLite
+    let beer: BeerLite?
+    /// The user's own checkin being edited; nil when making a new one.
+    let editing: Checkin?
     @State var venue: Venue?
     @Environment(\.dismiss) private var dismiss
     @Environment(LocationProvider.self) private var location
@@ -13,17 +15,30 @@ struct CheckInSheet: View {
     @State private var tagged: [User] = []
     @State private var busy = false
     @State private var error: String?
+    @State private var preselectedServing = false
 
     init(beer: BeerLite, venue: Venue?) {
         self.beer = beer
+        editing = nil
         _venue = State(initialValue: venue?.foursquareId != nil ? venue : nil)
+    }
+
+    /// Edits the rating, comment and serving type of one of the user's checkins.
+    init(editing checkin: Checkin) {
+        beer = checkin.beerLite
+        editing = checkin
+        _venue = State(initialValue: nil)
+        _rating = State(initialValue: checkin.rating ?? 0)
+        _shout = State(initialValue: checkin.comment ?? "")
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    BeerRow(beer: beer)
+                if let beer {
+                    Section {
+                        BeerRow(beer: beer)
+                    }
                 }
                 Section("Rating") {
                     HStack {
@@ -36,48 +51,55 @@ struct CheckInSheet: View {
                 Section {
                     TextField("What did you think?", text: $shout, axis: .vertical)
                         .lineLimit(3...6)
+                } footer: {
+                    if editing?.comment != nil {
+                        Text("Untappd keeps the existing comment if you leave this empty.")
+                    }
                 }
                 Section("Serving") {
                     servingPicker
                 }
-                Section("Where") {
-                    Picker("Venue", selection: $venue) {
-                        Text("No venue").tag(Venue?.none)
-                        ForEach(venueChoices) { v in Text(v.name).tag(Optional(v)) }
-                    }
-                }
-                Section("Friends") {
-                    if !tagged.isEmpty {
-                        FlowLayout(spacing: 6) {
-                            ForEach(tagged) { u in
-                                Button { tagged.removeAll { $0.id == u.id } } label: { UserChip(user: u) }
-                                    .buttonStyle(.plain)
-                                    .accessibilityHint("Removes the tag")
-                            }
+                if editing == nil {
+                    Section("Where") {
+                        Picker("Venue", selection: $venue) {
+                            Text("No venue").tag(Venue?.none)
+                            ForEach(venueChoices) { v in Text(v.name).tag(Optional(v)) }
                         }
-                        .padding(.vertical, 2)
                     }
-                    NavigationLink {
-                        FriendPicker(selected: $tagged)
-                    } label: {
-                        Label(tagged.isEmpty ? "Tag friends" : "Edit tagged friends", systemImage: "person.badge.plus")
+                    Section("Friends") {
+                        if !tagged.isEmpty {
+                            FlowLayout(spacing: 6) {
+                                ForEach(tagged) { u in
+                                    Button { tagged.removeAll { $0.id == u.id } } label: { UserChip(user: u) }
+                                        .buttonStyle(.plain)
+                                        .accessibilityHint("Removes the tag")
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        NavigationLink {
+                            FriendPicker(selected: $tagged)
+                        } label: {
+                            Label(tagged.isEmpty ? "Tag friends" : "Edit tagged friends", systemImage: "person.badge.plus")
+                        }
                     }
                 }
                 if let error {
                     Section { Text(error).foregroundStyle(.red).font(.footnote) }
                 }
             }
-            .navigationTitle("Check in")
+            .navigationTitle(editing == nil ? "Check in" : "Edit checkin")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    if busy { ProgressView() } else { Button("Check in", action: submit).bold() }
+                    if busy { ProgressView() } else { Button(editing == nil ? "Check in" : "Save", action: submit).bold() }
                 }
             }
             .interactiveDismissDisabled(busy)
             .task { await options.loadServingTypes() }
-            .task { await options.loadFriends() }
+            .task { if editing == nil { await options.loadFriends() } }
+            .onChange(of: options.servingTypes, initial: true) { preselectServing() }
         }
         .presentationDetents([.large])
     }
@@ -119,9 +141,23 @@ struct CheckInSheet: View {
         return vs
     }
 
+    /// Selects the edited checkin's serving type once the list of types has loaded.
+    private func preselectServing() {
+        guard !preselectedServing, let name = editing?.servingType else { return }
+        guard let match = options.servingTypes.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame })
+        else { return }
+        serving = match
+        preselectedServing = true
+    }
+
     private func submit() {
         busy = true
         error = nil
+        if let editing {
+            save(editing)
+            return
+        }
+        guard let beer else { return }
         let loc = location.location
         let req = APIRequest.checkin(beer: beer.bid, foursquareId: venue?.foursquareId,
                                      lat: loc?.coordinate.latitude, lng: loc?.coordinate.longitude,
@@ -132,6 +168,28 @@ struct CheckInSheet: View {
             do {
                 _ = try await UntappdAPI.shared.fetch(req, as: CheckinAddResponse.self)
                 NotificationCenter.default.post(name: .didCheckIn, object: nil)
+                dismiss()
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+}
+
+extension CheckInSheet {
+    private func save(_ original: Checkin) {
+        let trimmed = shout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let req = APIRequest.editCheckin(original, rating: rating, shout: trimmed, containerId: serving?.id)
+        Task {
+            defer { busy = false }
+            do {
+                _ = try await UntappdAPI.shared.data(req)
+                var updated = original
+                updated.rating = rating > 0 ? rating : nil
+                // Untappd leaves the comment alone when it's sent empty.
+                updated.comment = trimmed.isEmpty ? original.comment : trimmed
+                updated.servingType = serving?.name ?? original.servingType
+                NotificationCenter.default.post(name: .checkinEdited, object: updated)
                 dismiss()
             } catch {
                 self.error = error.localizedDescription

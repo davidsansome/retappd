@@ -326,7 +326,10 @@ struct Checkin: Decodable, Hashable, Identifiable {
 
     var beerLite: BeerLite? { beer.map { BeerLite(beer: $0, brewery: brewery) } }
 
-    static func == (a: Checkin, b: Checkin) -> Bool { a.id == b.id && a.toastCount == b.toastCount }
+    static func == (a: Checkin, b: Checkin) -> Bool {
+        a.id == b.id && a.toastCount == b.toastCount && a.youToasted == b.youToasted
+            && a.rating == b.rating && a.comment == b.comment && a.servingType == b.servingType
+    }
     func hash(into h: inout Hasher) { h.combine(id) }
 
     init(from decoder: Decoder) throws {

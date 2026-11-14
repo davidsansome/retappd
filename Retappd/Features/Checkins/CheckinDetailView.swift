@@ -4,7 +4,13 @@ struct CheckinDetailView: View {
     @State private var checkin: Checkin
     @State private var showPhoto = false
     @State private var checkInBeer: BeerLite?
+    @State private var editing: Checkin?
+    @State private var confirmDelete = false
+    @State private var deleting = false
+    @State private var deleteError: String?
     @Environment(DiscoverModel.self) private var discover
+    @Environment(AuthStore.self) private var auth
+    @Environment(\.dismiss) private var dismiss
 
     init(checkin: Checkin) { _checkin = State(initialValue: checkin) }
 
@@ -41,6 +47,35 @@ struct CheckinDetailView: View {
             }
         }
         .sheet(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
+        .sheet(item: $editing) { CheckInSheet(editing: $0) }
+        .toolbar {
+            if checkin.isBy(username: auth.username) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if deleting {
+                        ProgressView()
+                    } else {
+                        Menu("More", systemImage: "ellipsis") {
+                            Button("Edit checkin", systemImage: "pencil") { editing = checkin }
+                            Button("Delete checkin", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                        }
+                    }
+                }
+            }
+        }
+        .confirmationDialog("Delete this checkin?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) { Task { await delete() } }
+        } message: {
+            Text("This can't be undone.")
+        }
+        .alert("Couldn't delete the checkin", isPresented: Binding(get: { deleteError != nil },
+                                                                  set: { if !$0 { deleteError = nil } })) {
+            Button("OK") {}
+        } message: {
+            Text(deleteError ?? "")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .checkinEdited)) { n in
+            if let c = n.object as? Checkin, c.id == checkin.id { checkin = c }
+        }
         .task { await load() }
         .refreshable { await load() }
     }
@@ -50,6 +85,18 @@ struct CheckinDetailView: View {
                                                onCached: { if let c = $0.checkin { checkin = c } }),
            let c = r.checkin {
             checkin = c
+        }
+    }
+
+    private func delete() async {
+        deleting = true
+        defer { deleting = false }
+        do {
+            _ = try await UntappdAPI.shared.data(.deleteCheckin(checkin.id))
+            NotificationCenter.default.post(name: .checkinDeleted, object: checkin.id)
+            dismiss()
+        } catch {
+            deleteError = error.localizedDescription
         }
     }
 

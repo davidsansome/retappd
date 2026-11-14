@@ -8,7 +8,10 @@ struct CheckinList<Header: View>: View {
     var emptyText = "No checkins yet."
     @ViewBuilder var header: () -> Header
     @State private var checkInBeer: BeerLite?
+    @State private var editing: Checkin?
+    @State private var deleting: Checkin?
     @Environment(DiscoverModel.self) private var discover
+    @Environment(AuthStore.self) private var auth
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -21,25 +24,21 @@ struct CheckinList<Header: View>: View {
         List {
             header().id(Self.topID)
             ForEach(model.items) { c in
+                let mine = c.isBy(username: auth.username)
                 // A zero-opacity link keeps the whole row tappable without List's disclosure chevron.
                 ZStack {
                     NavigationLink(value: c) { EmptyView() }.opacity(0)
                     VStack(alignment: .leading, spacing: 0) {
-                        CheckinRow(checkin: c, showUser: showUser)
+                        CheckinRow(checkin: c, showUser: showUser,
+                                   menu: CheckinMenuItems.hasItems(c, isMine: mine) ? { menuItems(c, isMine: mine) } : nil)
                         if showActions {
-                            CheckinActions(checkin: c,
-                                           toast: { Task { await model.toggleToast(c) } },
-                                           checkIn: { checkInBeer = c.beerLite })
+                            CheckinActions(checkin: c, toast: { Task { await model.toggleToast(c) } })
                         }
                     }
                 }
                 .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }  // full-width divider
                 .onAppear { model.onAppear(c) }
-                .contextMenu {
-                    if let b = c.beerLite {
-                        Button("Check in \(b.name)", systemImage: "plus.circle") { checkInBeer = b }
-                    }
-                }
+                .contextMenu { menuItems(c, isMine: mine) }
             }
             footer
         }
@@ -50,6 +49,24 @@ struct CheckinList<Header: View>: View {
         .navigationDestination(for: Checkin.self) { CheckinDetailView(checkin: $0) }
         .navigationDestination(for: Venue.self) { VenueDetailView(venue: $0) }
         .sheet(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
+        .sheet(item: $editing) { CheckInSheet(editing: $0) }
+        .confirmationDialog("Delete this checkin?", isPresented: isConfirmingDelete,
+                            titleVisibility: .visible, presenting: deleting) { c in
+            Button("Delete", role: .destructive) { Task { await model.delete(c) } }
+        } message: { _ in
+            Text("This can't be undone.")
+        }
+    }
+
+    private func menuItems(_ c: Checkin, isMine: Bool) -> CheckinMenuItems {
+        CheckinMenuItems(checkin: c, isMine: isMine,
+                         checkIn: { checkInBeer = $0 },
+                         edit: { editing = c },
+                         delete: { deleting = c })
+    }
+
+    private var isConfirmingDelete: Binding<Bool> {
+        Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })
     }
 
     private static var topID: String { "CheckinList.top" }
@@ -87,11 +104,10 @@ extension CheckinList where Header == EmptyView {
     }
 }
 
-/// Toast and check-in buttons under a feed row.
+/// The toast button under a feed row.
 struct CheckinActions: View {
     let checkin: Checkin
     let toast: () -> Void
-    let checkIn: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -100,20 +116,15 @@ struct CheckinActions: View {
                     Text("🍻")
                     Text(checkin.youToasted ? "Toasted" : "Toast").font(.subheadline.weight(.medium))
                 }
-                .frame(maxWidth: .infinity, minHeight: 34)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 34)
                 .foregroundStyle(checkin.youToasted ? Color.orange : Color.primary)
                 .background(checkin.youToasted ? Color.orange.opacity(0.15) : Color(.tertiarySystemFill),
                             in: Capsule())
             }
             .accessibilityLabel(checkin.youToasted ? "Remove toast" : "Toast")
 
-            Button(action: checkIn) {
-                Label("Check in", systemImage: "plus")
-                    .font(.subheadline.weight(.medium))
-                    .frame(maxWidth: .infinity, minHeight: 34)
-                    .background(Color(.tertiarySystemFill), in: Capsule())
-            }
-            .disabled(checkin.beerLite == nil)
+            Spacer(minLength: 0)
         }
         .buttonStyle(.borderless)  // keeps taps on the buttons, not the row's navigation link
         .tint(.primary)

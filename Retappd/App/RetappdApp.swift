@@ -82,6 +82,16 @@ struct RootTabs: View {
                 await profile.refresh()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .checkinDeleted)) { n in
+            guard let id = n.object as? Int else { return }
+            feed.remove(id: id)
+            profile.remove(id: id)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .checkinEdited)) { n in
+            guard let c = n.object as? Checkin else { return }
+            feed.replace(c)
+            profile.replace(c)
+        }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background:

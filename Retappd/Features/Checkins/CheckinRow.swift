@@ -1,9 +1,11 @@
 import SwiftUI
 
-struct CheckinRow: View {
+struct CheckinRow<MenuItems: View>: View {
     let checkin: Checkin
     /// Shows the user's name; the avatar is always shown.
     var showUser = true
+    /// Items for the overflow menu at the top right; the menu is hidden when this is nil.
+    var menu: (() -> MenuItems)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -38,6 +40,18 @@ struct CheckinRow: View {
                             if let s = checkin.servingType { ServingChip(name: s) }
                         }
                         .fixedSize(horizontal: true, vertical: false)
+                    }
+
+                    if let menu {
+                        Menu(content: menu) {
+                            Image(systemName: "ellipsis")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 32, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("More")
+                        .padding(.trailing, -6)  // line the dots up with the content's trailing edge
                     }
                 }
             }
@@ -88,6 +102,36 @@ struct CheckinRow: View {
             }
         }
         .padding(.vertical, 6)
+    }
+}
+
+extension CheckinRow where MenuItems == EmptyView {
+    init(checkin: Checkin, showUser: Bool = true) {
+        self.init(checkin: checkin, showUser: showUser, menu: nil)
+    }
+}
+
+/// What a checkin's overflow (and context) menu offers: checking in the beer, and editing or
+/// deleting the checkin when it's the user's own.
+struct CheckinMenuItems: View {
+    let checkin: Checkin
+    let isMine: Bool
+    let checkIn: (BeerLite) -> Void
+    let edit: () -> Void
+    let delete: () -> Void
+
+    /// Whether there's anything to show at all.
+    static func hasItems(_ c: Checkin, isMine: Bool) -> Bool { isMine || c.beerLite != nil }
+
+    var body: some View {
+        if let b = checkin.beerLite {
+            Button("Check in this beer", systemImage: "plus.circle") { checkIn(b) }
+        }
+        if isMine {
+            Divider()
+            Button("Edit checkin", systemImage: "pencil", action: edit)
+            Button("Delete checkin", systemImage: "trash", role: .destructive, action: delete)
+        }
     }
 }
 
