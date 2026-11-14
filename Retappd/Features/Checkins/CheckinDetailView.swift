@@ -289,7 +289,24 @@ struct CheckinDetailView: View {
 
     // MARK: Sections
 
-    private var userHeader: some View {
+    /// The author, opening their profile when tapped.
+    @ViewBuilder private var userHeader: some View {
+        if let u = checkin.user, !u.userName.isEmpty {
+            NavigationLink(value: u) {
+                HStack {
+                    userHeaderContent
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            userHeaderContent
+        }
+    }
+
+    private var userHeaderContent: some View {
         HStack(spacing: 12) {
             Avatar(url: checkin.user?.avatar, size: 48)
             VStack(alignment: .leading, spacing: 2) {
@@ -372,7 +389,7 @@ struct CheckinDetailView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("With").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     FlowLayout(spacing: 6) {
-                        ForEach(checkin.taggedFriends) { UserChip(user: $0) }
+                        ForEach(checkin.taggedFriends) { UserChipLink(user: $0) }
                     }
                 }
             }
@@ -396,7 +413,7 @@ struct CheckinDetailView: View {
             Label { Text("\(checkin.toastCount) \(checkin.toastCount == 1 ? "toast" : "toasts")") } icon: { Image("toast").foregroundStyle(.orange) }
                 .font(.headline)
             FlowLayout(spacing: 6) {
-                ForEach(checkin.toasters) { UserChip(user: $0) }
+                ForEach(checkin.toasters) { UserChipLink(user: $0) }
             }
         }
     }
@@ -493,6 +510,17 @@ struct UserChip: View {
         }
         .padding(.leading, 2).padding(.trailing, 8).padding(.vertical, 2)
         .background(Color(.secondarySystemFill), in: Capsule())
+    }
+}
+
+/// A person chip that opens their profile.
+struct UserChipLink: View {
+    let user: User
+
+    var body: some View {
+        NavigationLink(value: user) { UserChip(user: user) }
+            .buttonStyle(.plain)
+            .disabled(user.userName.isEmpty)
     }
 }
 

@@ -5,11 +5,16 @@ struct CheckinList<Header: View>: View {
     let model: CheckinListModel
     var showUser = true
     var showActions = false
+    /// Whether to declare where checkins, venues and people open. Only the list at the root of a
+    /// navigation stack should, as SwiftUI ignores (and warns about) repeats further up the stack.
+    var registersDestinations = true
     var emptyText = "No checkins yet."
     @ViewBuilder var header: () -> Header
     @State private var checkInBeer: BeerLite?
     @State private var editing: Checkin?
     @State private var deleting: Checkin?
+    /// Tags this list's links, so its rows only show as selected for checkins it opened itself.
+    @State private var listID = UUID()
     @Environment(DiscoverModel.self) private var discover
     @Environment(AuthStore.self) private var auth
 
@@ -27,7 +32,7 @@ struct CheckinList<Header: View>: View {
                 let mine = c.isBy(username: auth.username)
                 // A zero-opacity link keeps the whole row tappable without List's disclosure chevron.
                 ZStack {
-                    NavigationLink(value: c) { EmptyView() }.opacity(0)
+                    NavigationLink(value: CheckinRoute(checkin: c, listID: listID)) { EmptyView() }.opacity(0)
                     CheckinRow(checkin: c, showUser: showUser,
                                menu: CheckinMenuItems.hasItems(c, isMine: mine) ? { menuItems(c, isMine: mine) } : nil,
                                toast: showActions ? { toggleToast(c) } : nil)
@@ -42,8 +47,7 @@ struct CheckinList<Header: View>: View {
         .readableContentWidth()
         .refreshable { await model.refresh() }
         .task { await model.loadIfNeeded() }
-        .navigationDestination(for: Checkin.self) { CheckinDetailView(checkin: $0, me: model.me) }
-        .navigationDestination(for: Venue.self) { VenueDetailView(venue: $0) }
+        .modifier(CheckinDestinations(enabled: registersDestinations, me: model.me))
         .sheet(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
         .sheet(item: $editing) { CheckInSheet(editing: $0) }
         .confirmationDialog("Delete this checkin?", isPresented: isConfirmingDelete,
@@ -101,6 +105,31 @@ extension CheckinList where Header == EmptyView {
     init(model: CheckinListModel, showUser: Bool = true, showActions: Bool = false,
          emptyText: String = "No checkins yet.") {
         self.init(model: model, showUser: showUser, showActions: showActions, emptyText: emptyText) { EmptyView() }
+    }
+}
+
+/// A checkin opened from a particular list. List highlights any row whose link value is already on
+/// the navigation stack, so pushing bare `Checkin`s would highlight a row on someone's profile when
+/// that same checkin was opened further back (e.g. from the feed).
+struct CheckinRoute: Hashable {
+    let checkin: Checkin
+    let listID: UUID
+}
+
+/// Where checkins, venues and people open within a navigation stack.
+private struct CheckinDestinations: ViewModifier {
+    let enabled: Bool
+    let me: User?
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .navigationDestination(for: CheckinRoute.self) { CheckinDetailView(checkin: $0.checkin, me: me) }
+                .navigationDestination(for: Venue.self) { VenueDetailView(venue: $0) }
+                .navigationDestination(for: User.self) { UserProfileView(user: $0, me: me) }
+        } else {
+            content
+        }
     }
 }
 

@@ -1,17 +1,25 @@
 import SwiftUI
 
+/// A user's stats and checkins. The Profile tab shows the signed-in user's; other people's are
+/// pushed from a checkin (see `UserProfileView`).
 struct ProfileView: View {
     let username: String
     let model: CheckinListModel
+    /// Whether this is the Profile tab, which has the account menu and no navigation bar.
+    var isAccountTab = true
+    /// Shown in the header until the full profile loads.
+    var placeholder: User? = nil
     @Environment(AuthStore.self) private var auth
     @State private var info: UserInfo.Profile?
     @State private var confirmSignOut = false
 
     var body: some View {
-        CheckinList(model: model, showUser: false, emptyText: "You haven't checked in anything yet.") {
+        CheckinList(model: model, showUser: false, registersDestinations: isAccountTab, emptyText: emptyText) {
             header.listRowSeparator(.hidden)
         }
-        .toolbar(.hidden, for: .navigationBar)
+        .toolbar(isAccountTab ? .hidden : .automatic, for: .navigationBar)
+        .navigationTitle(isAccountTab ? "" : (info?.userName ?? username))
+        .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog("Sign out of Untappd?", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) { auth.signOut() }
         }
@@ -25,19 +33,12 @@ struct ProfileView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 14) {
-            Avatar(url: info?.avatar, size: 64)
+            Avatar(url: info?.avatar ?? placeholder?.avatar, size: 64)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(info?.displayName ?? username).font(.title3.bold())
+                    Text(info?.displayName ?? placeholder?.displayName ?? username).font(.title3.bold())
                     Spacer()
-                    Menu {
-                        Button("Sign out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                            confirmSignOut = true
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(.secondary)
-                    }
-                    .accessibilityLabel("Account")
+                    if isAccountTab { accountMenu }
                 }
                 if let loc = info?.location { Text(loc).font(.subheadline).foregroundStyle(.secondary) }
                 HStack(spacing: 16) {
@@ -51,6 +52,23 @@ struct ProfileView: View {
         .padding(.vertical, 8)
     }
 
+    private var accountMenu: some View {
+        Menu {
+            Button("Sign out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                confirmSignOut = true
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(.secondary)
+        }
+        .accessibilityLabel("Account")
+    }
+
+    private var emptyText: String {
+        if isAccountTab { return "You haven't checked in anything yet." }
+        let name = info?.firstName ?? placeholder?.firstName ?? username
+        return "\(name) hasn't checked in anything yet."
+    }
+
     private func stat(_ n: Int?, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(n.map { $0.formatted() } ?? "–").font(.subheadline.bold().monospacedDigit())
@@ -62,5 +80,22 @@ struct ProfileView: View {
         if let i = try? await cacheThenNetwork(.userInfo(username), as: UserInfo.self, onCached: { info = $0.user }) {
             info = i.user
         }
+    }
+}
+
+/// Someone's profile, pushed from a person chip on a checkin.
+struct UserProfileView: View {
+    let user: User
+    @State private var model: CheckinListModel
+
+    init(user: User, me: User?) {
+        self.user = user
+        let model = CheckinListModel(source: .user(user.userName))
+        model.me = me
+        _model = State(initialValue: model)
+    }
+
+    var body: some View {
+        ProfileView(username: user.userName, model: model, isAccountTab: false, placeholder: user)
     }
 }
