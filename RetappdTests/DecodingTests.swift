@@ -184,4 +184,47 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(r.photoUploadURL?.query?.contains("X-Amz-Expires=120"), true)
         XCTAssertEqual(r.photoDestinationURL?.absoluteString, "https://untappd.s3.amazonaws.com/photos/x_raw.jpg")
     }
+
+    func testBarcodeMatchesShapes() throws {
+        let blocks = """
+        {"meta":{"code":200},"response":{"count":3,
+         "verified":{"count":1,"items":[{"beer":{"bid":2,"beer_name":"Two"},"brewery":{"brewery_id":9,"brewery_name":"Brew Co"}}]},
+         "unverified":[{"beer":{"bid":1,"beer_name":"One","brewery":{"brewery_id":8,"brewery_name":"Nested"}}},
+                       {"beer":{"bid":2,"beer_name":"Two"}}]}}
+        """
+        let m = try UntappdAPI.decode(BarcodeMatches.self, from: Data(blocks.utf8))
+        XCTAssertEqual(m.beers.map(\.bid), [2, 1])
+        XCTAssertEqual(m.beers.map(\.brewery), ["Brew Co", "Nested"])
+
+        let items = #"{"meta":{"code":200},"response":{"items":[{"beer":{"bid":5,"beer_name":"Five"}}]}}"#
+        XCTAssertEqual(try UntappdAPI.decode(BarcodeMatches.self, from: Data(items.utf8)).beers.map(\.bid), [5])
+
+        let none = #"{"meta":{"code":200},"response":{"count":0,"verified":[],"unverified":[]}}"#
+        XCTAssertEqual(try UntappdAPI.decode(BarcodeMatches.self, from: Data(none.utf8)).beers, [])
+    }
+
+    func testBarcodeMatchesCaptured() throws {
+        // As Untappd answered for a Corona Extra bottle (trimmed).
+        let json = """
+        {"meta":{"code":200},"response":{"barcode":"75032715","barcode_stripped":"075032715","count":1,
+         "items":[{"beer":{"bid":5848,"beer_name":"Corona Extra","beer_abv":4.5,"beer_style":"Lager - Mexican",
+                           "rating_score":3.163,"rating_count":706999,"has_had":true},
+                   "brewery":{"brewery_id":618,"brewery_name":"Grupo Modelo","country_name":"Mexico"}}],
+         "unverified":{"enabled":false,"count":0,"items":[]}}}
+        """
+        let b = try XCTUnwrap(UntappdAPI.decode(BarcodeMatches.self, from: Data(json.utf8)).beers.first)
+        XCTAssertEqual(b.bid, 5848)
+        XCTAssertEqual(b.brewery, "Grupo Modelo")
+        XCTAssertEqual(b.style, "Lager - Mexican")
+        XCTAssertEqual(b.rating, 3.163)
+        XCTAssertEqual(b.hasHad, true)
+    }
+
+    func testBarcodeCandidates() {
+        XCTAssertEqual(BarcodeLookup.candidates("0853993007033"), ["0853993007033", "853993007033"])
+        XCTAssertEqual(BarcodeLookup.candidates("853993007033"), ["0853993007033", "853993007033"])
+        XCTAssertEqual(BarcodeLookup.candidates("9300617003168"), ["9300617003168"])
+        XCTAssertEqual(BarcodeLookup.candidates(" 5 056412 031946 "), ["5056412031946"])
+        XCTAssertEqual(BarcodeLookup.candidates("abc"), [])
+    }
 }

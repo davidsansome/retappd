@@ -6,6 +6,8 @@ struct DiscoverView: View {
     @Environment(LocationProvider.self) private var location
     @State private var query = ""
     @State private var checkInBeer: BeerLite?
+    @State private var scanning = false
+    @State private var scannedBeer: BeerLite?
 
     var body: some View {
         List {
@@ -19,10 +21,17 @@ struct DiscoverView: View {
         .contentMargins(.top, 4, for: .scrollContent)
         .scrollDismissesKeyboard(.immediately)
         .safeAreaInset(edge: .top, spacing: 0) {
-            SearchField(text: $query, prompt: "Beers or venues")
-                .padding(.horizontal)
-                .padding(.vertical, 6)
-                .background(.bar)
+            HStack(spacing: 10) {
+                SearchField(text: $query, prompt: "Beers or venues")
+                Button("Find a beer by barcode", systemImage: "barcode.viewfinder") { scanning = true }
+                    .labelStyle(.iconOnly)
+                    .font(.title2)
+                    .frame(width: 38, height: 38)
+                    .contentShape(Rectangle())
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 6)
+            .background(.bar)
         }
         .toolbar(.hidden, for: .navigationBar)
         .task(id: query) { await model.search(query) }
@@ -30,6 +39,12 @@ struct DiscoverView: View {
         .refreshable { await model.update(location: location.location, force: true) }
         .navigationDestination(for: Venue.self) { VenueDetailView(venue: $0) }
         .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: model.here.first) }
+        .sheet(isPresented: $scanning, onDismiss: {
+            // Open the check-in once the scanner has gone, as only one modal shows at a time.
+            if let b = scannedBeer { scannedBeer = nil; checkInBeer = b }
+        }) {
+            BarcodeSearchSheet { scannedBeer = $0 }
+        }
     }
 
     // MARK: Nearby

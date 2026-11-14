@@ -125,6 +125,45 @@ extension BeerLite {
     }
 }
 
+// MARK: - Barcodes
+
+/// `/v4/beer/checkbarcodemultiple`: the beers Untappd's users have given a barcode. The app
+/// gets `items` (a plain list) and `unverified` (`{enabled, count, items}`); metabeer-v2 has also
+/// seen a `verified` block. Each may be a list or a `{count, items}` wrapper. Verified beers and
+/// `items` come before unverified ones, without duplicates.
+struct BarcodeMatches: Decodable {
+    var beers: [BeerLite]
+
+    private struct Item: Decodable {
+        var beer: BeerLite?
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            guard let beer = c.obj("beer", BeerRef.self), beer.bid != 0 else { beer = nil; return }
+            // The brewery is usually beside the beer, but some endpoints nest it inside.
+            let b = c.nested("beer")
+            let brewery = c.obj("brewery", BreweryRef.self) ?? b?.obj("brewery", BreweryRef.self)
+            var lite = BeerLite(beer: beer, brewery: brewery)
+            lite.rating = b?.double("rating_score")
+            lite.ratingCount = b?.int("rating_count")
+            self.beer = lite
+        }
+    }
+
+    init(beers: [BeerLite]) { self.beers = beers }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        func block(_ key: String) -> [Item] {
+            let list: [Item] = c.list(key)
+            return list.isEmpty ? c.items(key) : list
+        }
+        var seen = Set<Int>()
+        beers = (block("verified") + block("items") + block("unverified"))
+            .compactMap(\.beer)
+            .filter { seen.insert($0.bid).inserted }
+    }
+}
+
 // MARK: - Venues
 
 struct Venue: Codable, Hashable, Identifiable {

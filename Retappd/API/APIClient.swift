@@ -275,6 +275,12 @@ extension APIRequest {
         APIRequest(path: "/v4/checkin/view/\(id)")
     }
 
+    /// The beers Untappd's users have given barcode `upc` (digits as printed), most trusted first.
+    /// What the official app calls on a scan (documented in untappd-private-api).
+    static func checkBarcode(_ upc: String) -> APIRequest {
+        APIRequest(path: "/v4/beer/checkbarcodemultiple", query: ["upc": upc])
+    }
+
     static let servingTypes = APIRequest(path: "/v4/checkin/serving_types")
 
 
