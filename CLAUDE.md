@@ -18,8 +18,8 @@ When you need a new shared style, add it to `Taproom.swift` and describe it in D
 - The Xcode project is generated from `project.yml` and isn't committed. Run
   `xcodegen generate` after adding, removing or renaming files, and after pulling changes
   that do.
-- Run the unit tests (`RetappdTests`) with `xcodebuild … test` before committing; CI runs the
-  same on every pull request and push to `main`.
+- Run the unit tests (`RetappdTests`) with `xcodebuild … test` before committing; CI doesn't
+  run them.
 - Info.plist keys (permission prompts and so on) are `INFOPLIST_KEY_…` settings in
   `project.yml`.
 
@@ -32,5 +32,5 @@ user to sign in, and never enter their password.
 
 ## Releasing
 
-Every push to `main` that passes CI goes to TestFlight; see [RELEASING.md](RELEASING.md).
+Every push to `main` is built by Xcode Cloud and goes to TestFlight; see [RELEASING.md](RELEASING.md).
 Never rewrite `main`'s history: build numbers are its commit count.
