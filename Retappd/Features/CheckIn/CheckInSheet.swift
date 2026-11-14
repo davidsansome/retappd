@@ -92,8 +92,7 @@ struct CheckInSheet: View {
                     let on = serving?.id == t.id
                     Button { serving = on ? nil : t } label: {
                         VStack(spacing: 4) {
-                            CachedImage(url: t.image, maxPixel: 120) { Image(systemName: "mug").foregroundStyle(.secondary) }
-                                .aspectRatio(contentMode: .fit)
+                            ServingIcon(name: t.name, size: 26)
                                 .frame(width: 32, height: 32)
                             Text(t.name).font(.caption2).lineLimit(1)
                         }

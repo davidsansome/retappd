@@ -398,7 +398,6 @@ struct CheckinView: Decodable {
 struct ServingType: Decodable, Hashable, Identifiable {
     var id: Int
     var name: String
-    var image: URL?
     var position: Int
 
     init(from decoder: Decoder) throws {
@@ -408,7 +407,6 @@ struct ServingType: Decodable, Hashable, Identifiable {
         }
         self.id = id
         name = c.string("container_name") ?? ""
-        image = c.text("container_image_url").flatMap(URL.init(string:))
         position = c.int("container_position") ?? id
     }
 }

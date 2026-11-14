@@ -35,14 +35,7 @@ struct CheckinRow: View {
                     if checkin.rating != nil || checkin.servingType != nil {
                         VStack(alignment: .trailing, spacing: 4) {
                             if let r = checkin.rating { RatingView(rating: r) }
-                            if let s = checkin.servingType {
-                                Text(s)
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(Color(.secondarySystemFill), in: Capsule())
-                            }
+                            if let s = checkin.servingType { ServingChip(name: s) }
                         }
                         .fixedSize(horizontal: true, vertical: false)
                     }
@@ -216,6 +209,52 @@ struct RatingView: View {
         .padding(.horizontal, 6).padding(.vertical, 2)
         .background(.orange.opacity(0.12), in: Capsule())
         .accessibilityLabel("Rated \(rating) out of 5")
+    }
+}
+
+/// The serving style ("Draft", "Can"…) as a chip matching `RatingView`.
+struct ServingChip: View {
+    let name: String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ServingIcon(name: name, size: 13)
+            Text(name).font(.caption.weight(.semibold)).lineLimit(1)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(.orange.opacity(0.12), in: Capsule())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Icon for a serving style, drawn orange; a generic glass for styles without one.
+struct ServingIcon: View {
+    let name: String
+    @ScaledMetric private var size: CGFloat
+
+    init(name: String, size: CGFloat) {
+        self.name = name
+        _size = ScaledMetric(wrappedValue: size)
+    }
+
+    static func assetName(for name: String) -> String? {
+        let key = name.lowercased().filter(\.isLetter)
+        let known: Set = ["draft", "bottle", "can", "cask", "crowler", "growler", "taster",
+                          "nitro", "box", "sidepull", "tank", "slushie"]
+        return known.contains(key) ? "serving-\(key)" : nil
+    }
+
+    var body: some View {
+        Group {
+            if let asset = Self.assetName(for: name) {
+                Image(asset).resizable().scaledToFit()
+            } else {
+                Image(systemName: "wineglass").resizable().scaledToFit()
+            }
+        }
+        .frame(width: size, height: size)
+        .foregroundStyle(.orange)
+        .accessibilityHidden(true)
     }
 }
 

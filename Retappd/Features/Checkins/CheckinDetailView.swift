@@ -124,7 +124,7 @@ struct CheckinDetailView: View {
                 .buttonStyle(.plain)
             }
             if let s = checkin.servingType {
-                Label(s, systemImage: "wineglass").font(.subheadline)
+                Label { Text(s) } icon: { ServingIcon(name: s, size: 17) }.font(.subheadline)
             }
             if !checkin.flavors.isEmpty {
                 FlowLayout(spacing: 6) {
