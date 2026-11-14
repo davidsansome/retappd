@@ -28,13 +28,9 @@ struct CheckinList<Header: View>: View {
                 // A zero-opacity link keeps the whole row tappable without List's disclosure chevron.
                 ZStack {
                     NavigationLink(value: c) { EmptyView() }.opacity(0)
-                    VStack(alignment: .leading, spacing: 0) {
-                        CheckinRow(checkin: c, showUser: showUser,
-                                   menu: CheckinMenuItems.hasItems(c, isMine: mine) ? { menuItems(c, isMine: mine) } : nil)
-                        if showActions {
-                            CheckinActions(checkin: c, toast: { Task { await model.toggleToast(c) } })
-                        }
-                    }
+                    CheckinRow(checkin: c, showUser: showUser,
+                               menu: CheckinMenuItems.hasItems(c, isMine: mine) ? { menuItems(c, isMine: mine) } : nil,
+                               toast: showActions ? { toggleToast(c) } : nil)
                 }
                 .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }  // full-width divider
                 .onAppear { model.onAppear(c) }
@@ -63,6 +59,10 @@ struct CheckinList<Header: View>: View {
                          checkIn: { checkInBeer = $0 },
                          edit: { editing = c },
                          delete: { deleting = c })
+    }
+
+    private func toggleToast(_ c: Checkin) {
+        Task { await model.toggleToast(c) }
     }
 
     private var isConfirmingDelete: Binding<Bool> {
@@ -104,31 +104,26 @@ extension CheckinList where Header == EmptyView {
     }
 }
 
-/// The toast button under a feed row.
-struct CheckinActions: View {
+/// The Toast button at the end of a feed row's toasts.
+struct ToastButton: View {
     let checkin: Checkin
     let toast: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            Button(action: toast) {
-                HStack(spacing: 4) {
-                    Text("🍻")
-                    Text(checkin.youToasted ? "Toasted" : "Toast").font(.subheadline.weight(.medium))
-                }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 34)
-                .foregroundStyle(checkin.youToasted ? Color.orange : Color.primary)
-                .background(checkin.youToasted ? Color.orange.opacity(0.15) : Color(.tertiarySystemFill),
-                            in: Capsule())
+        Button(action: toast) {
+            HStack(spacing: 4) {
+                Image("toast").resizable().scaledToFit().frame(width: 18, height: 18)
+                Text(checkin.youToasted ? "Toasted" : "Toast").font(.subheadline.weight(.medium))
             }
-            .accessibilityLabel(checkin.youToasted ? "Remove toast" : "Toast")
-
-            Spacer(minLength: 0)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 34)
+            .foregroundStyle(checkin.youToasted ? Color.orange : Color.primary)
+            .background(checkin.youToasted ? Color.orange.opacity(0.15) : Color(.tertiarySystemFill),
+                        in: Capsule())
         }
-        .buttonStyle(.borderless)  // keeps taps on the buttons, not the row's navigation link
+        .buttonStyle(.borderless)  // keeps taps on the button, not the row's navigation link
         .tint(.primary)
-        .padding(.bottom, 6)
+        .accessibilityLabel(checkin.youToasted ? "Remove toast" : "Toast")
     }
 }
 

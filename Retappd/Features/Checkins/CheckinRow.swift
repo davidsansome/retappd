@@ -6,6 +6,8 @@ struct CheckinRow<MenuItems: View>: View {
     var showUser = true
     /// Items for the overflow menu at the top right; the menu is hidden when this is nil.
     var menu: (() -> MenuItems)?
+    /// Shows a Toast button at the end of the toasts row when set.
+    var toast: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -42,17 +44,6 @@ struct CheckinRow<MenuItems: View>: View {
                         .fixedSize(horizontal: true, vertical: false)
                     }
 
-                    if let menu {
-                        Menu(content: menu) {
-                            Image(systemName: "ellipsis")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 32, height: 28)
-                                .contentShape(Rectangle())
-                        }
-                        .accessibilityLabel("More")
-                        .padding(.trailing, -6)  // line the dots up with the content's trailing edge
-                    }
                 }
             }
 
@@ -62,11 +53,27 @@ struct CheckinRow<MenuItems: View>: View {
                     .frame(width: 48, height: 48)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(checkin.beer?.name ?? "Unknown beer").font(.headline).lineLimit(2)
+                HStack(alignment: .top, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(checkin.beer?.name ?? "Unknown beer").font(.headline).lineLimit(2)
 
-                    if let b = checkin.brewery?.name {
-                        Text(b).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                        if let b = checkin.brewery?.name {
+                            Text(b).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+
+                    Spacer(minLength: 4)
+
+                    if let menu {
+                        Menu(content: menu) {
+                            Image(systemName: "ellipsis")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 32, height: 24)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("More")
+                        .padding(.trailing, -6)  // line the dots up with the content's trailing edge
                     }
                 }
             }
@@ -90,14 +97,15 @@ struct CheckinRow<MenuItems: View>: View {
                     .labelStyle(TightLabel())
             }
 
-            if checkin.toastCount > 0 || checkin.commentCount > 0 {
-                HStack(alignment: .top, spacing: 10) {
+            if checkin.toastCount > 0 || checkin.commentCount > 0 || toast != nil {
+                HStack(alignment: .center, spacing: 10) {
                     if checkin.toastCount > 0 { ToastChips(checkin: checkin) }
                     Spacer(minLength: 0)
                     if checkin.commentCount > 0 {
                         Label("\(checkin.commentCount)", systemImage: "bubble.right")
                             .font(.caption).foregroundStyle(.secondary).labelStyle(TightLabel())
                     }
+                    if let toast { ToastButton(checkin: checkin, toast: toast) }
                 }
             }
         }
@@ -107,7 +115,7 @@ struct CheckinRow<MenuItems: View>: View {
 
 extension CheckinRow where MenuItems == EmptyView {
     init(checkin: Checkin, showUser: Bool = true) {
-        self.init(checkin: checkin, showUser: showUser, menu: nil)
+        self.init(checkin: checkin, showUser: showUser, menu: nil, toast: nil)
     }
 }
 
@@ -142,7 +150,9 @@ struct ToastChips: View {
 
     var body: some View {
         FlowLayout(spacing: 4) {
-            Text("🍻").font(.system(size: size * 0.7)).frame(height: size)
+            Image("toast").resizable().scaledToFit()
+                .frame(width: size * 0.8, height: size * 0.8).frame(height: size)
+                .foregroundStyle(.secondary)
             ForEach(checkin.toasters) { u in
                 Avatar(url: u.avatar, size: size)
                     .accessibilityLabel(u.displayName)

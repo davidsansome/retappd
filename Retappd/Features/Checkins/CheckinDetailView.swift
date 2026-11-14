@@ -393,7 +393,8 @@ struct CheckinDetailView: View {
 
     private var toasts: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("🍻 \(checkin.toastCount) \(checkin.toastCount == 1 ? "toast" : "toasts")").font(.headline)
+            Label { Text("\(checkin.toastCount) \(checkin.toastCount == 1 ? "toast" : "toasts")") } icon: { Image("toast").foregroundStyle(.orange) }
+                .font(.headline)
             FlowLayout(spacing: 6) {
                 ForEach(checkin.toasters) { UserChip(user: $0) }
             }
