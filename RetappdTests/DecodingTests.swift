@@ -136,4 +136,33 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(u(nil, "Curtis").shortName, "Curtis")
         XCTAssertEqual(u(nil, nil).shortName, "jc99")
     }
+
+    func testCommentListAndEditedComment() throws {
+        let added = """
+        {"meta":{"code":200},"response":{"result":"success","comments":{"total_count":2,"count":2,"items":[
+          {"user":{"uid":1,"user_name":"a"},"checkin_id":5,"comment_id":10,"comment_owner":false,"comment_editor":false,
+           "comment":"Hi","created_at":"Sat, 14 Nov 2026 05:39:49 +0000"},
+          {"user":{"uid":2,"user_name":"me"},"checkin_id":5,"comment_id":11,"comment_owner":true,"comment_editor":true,
+           "comment":"Test"}]}}}
+        """
+        let list = try UntappdAPI.decode(CommentList.self, from: Data(added.utf8))
+        XCTAssertEqual(list.totalCount, 2)
+        XCTAssertEqual(list.comments.map(\.id), [10, 11])
+        XCTAssertEqual(list.comments[0].canDelete, false)
+        XCTAssertEqual(list.comments[1].canEdit, true)
+        XCTAssertNotNil(list.comments[0].createdAt)
+
+        let deleted = """
+        {"meta":{"code":200},"response":{"result":"success","comments":{"total_count":0,"count":0,"items":[]}}}
+        """
+        XCTAssertEqual(try UntappdAPI.decode(CommentList.self, from: Data(deleted.utf8)).comments.count, 0)
+
+        let edited = """
+        {"meta":{"code":200},"response":{"result":"success","comment":{"user":{"uid":2,"user_name":"me"},
+          "checkin_id":5,"comment_id":11,"comment_owner":true,"comment_editor":true,"comment":"Test 2"}}}
+        """
+        let e = try UntappdAPI.decode(EditedComment.self, from: Data(edited.utf8))
+        XCTAssertEqual(e.comment?.text, "Test 2")
+        XCTAssertEqual(e.comment?.id, 11)
+    }
 }

@@ -303,12 +303,19 @@ struct Checkin: Decodable, Hashable, Identifiable {
         var user: User?
         var text: String
         var createdAt: Date?
+        /// Whether the signed-in user may delete this comment (`comment_owner`).
+        var canDelete: Bool?
+        /// Whether the signed-in user may edit this comment (`comment_editor`).
+        var canEdit: Bool?
+
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: AnyKey.self)
             id = c.int("comment_id") ?? 0
             user = c.obj("user")
             text = c.string("comment") ?? ""
             createdAt = UntappdDate.parse(c.string("created_at"))
+            canDelete = c.bool("comment_owner")
+            canEdit = c.bool("comment_editor")
         }
     }
 
@@ -396,6 +403,23 @@ struct Checkin: Decodable, Hashable, Identifiable {
 
 struct CheckinView: Decodable {
     var checkin: Checkin?
+}
+
+/// The response to adding or deleting a comment: the checkin's comments afterwards.
+struct CommentList: Decodable {
+    var comments: [Checkin.Comment]
+    var totalCount: Int
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        comments = c.items("comments")
+        totalCount = c.nested("comments")?.int("total_count") ?? comments.count
+    }
+}
+
+/// The response to editing a comment.
+struct EditedComment: Decodable {
+    var comment: Checkin.Comment?
 }
 
 struct ServingType: Decodable, Hashable, Identifiable {

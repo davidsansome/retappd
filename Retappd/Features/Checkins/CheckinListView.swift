@@ -46,7 +46,7 @@ struct CheckinList<Header: View>: View {
         .readableContentWidth()
         .refreshable { await model.refresh() }
         .task { await model.loadIfNeeded() }
-        .navigationDestination(for: Checkin.self) { CheckinDetailView(checkin: $0) }
+        .navigationDestination(for: Checkin.self) { CheckinDetailView(checkin: $0, me: model.me) }
         .navigationDestination(for: Venue.self) { VenueDetailView(venue: $0) }
         .sheet(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
         .sheet(item: $editing) { CheckInSheet(editing: $0) }

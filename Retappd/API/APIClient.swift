@@ -243,6 +243,20 @@ extension APIRequest {
         UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(24).description
     }
 
+    static func addComment(_ text: String, to checkinId: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/checkin/addcomment/\(checkinId)", form: ["comment": text])
+    }
+
+    /// Takes the comment's id, not the checkin's.
+    static func editComment(_ commentId: Int, text: String) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/checkin/editcomment/\(commentId)", form: ["comment": text])
+    }
+
+    /// Takes the comment's id, not the checkin's.
+    static func deleteComment(_ commentId: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/checkin/deletecomment/\(commentId)", form: [:])
+    }
+
     static func checkinView(_ id: Int) -> APIRequest {
         APIRequest(path: "/v4/checkin/view/\(id)")
     }
@@ -294,3 +308,4 @@ enum DeviceID {
         return v
     }
 }
+
