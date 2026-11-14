@@ -305,8 +305,14 @@ struct TaproomTabBar<Value: Hashable, Action: View>: View {
                 .padding(.horizontal, Taproom.margin)
                 .padding(.top, 8)
                 .padding(.bottom, 2)
-                .background(Taproom.background)
-                .overlay(alignment: .top) { Rectangle().fill(Taproom.border).frame(height: 1) }
+                // Frosted glass, like the system bars: the page scrolls on underneath it, blurred,
+                // with a wash of the page colour so it stays warm.
+                .background {
+                    Rectangle().fill(.ultraThinMaterial)
+                        .overlay(Taproom.background.opacity(0.55))
+                        .ignoresSafeArea(edges: .bottom)
+                }
+                .overlay(alignment: .top) { Rectangle().fill(Taproom.border.opacity(0.6)).frame(height: 0.5) }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in

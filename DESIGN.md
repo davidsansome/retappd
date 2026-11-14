@@ -34,7 +34,7 @@ All colours come from `Taproom` and have light and dark values. Never use raw `.
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
-| `background` | `#FBF8F3` | `#17130E` | Screen background, nav bar, bottom bar |
+| `background` | `#FBF8F3` | `#17130E` | Screen background, nav bar; a wash over the tab bar's frosted glass |
 | `card` | `#FFFFFF` | `#241E17` | Cards, fields, unselected chips |
 | `border` | `#E7DDCE` | `#3A3128` | 1pt borders on cards, fields, chips |
 | `ink` | `#2B2118` | `#F4ECDF` | Primary text; primary button fill |
@@ -83,7 +83,7 @@ System font throughout (SF Pro), so Dynamic Type works.
 | `TaproomRating(rating:size:)` | The score in heavy type beside a small glass filled to match | Showing a checkin's rating (feed cards at 30, checkin screen at 44). Never stars. |
 | `FilledGlass(rating:)` | A static pint glass filled to a rating, optional foam | Inside `TaproomRating`, and decoration (the login glass). `GlassRating` is the draggable one. |
 | `BeerLabel(beer:brewery:size:)` | A beer's label, else its brewery's logo, else the app icon; Untappd's stock "default" badges count as none | Every beer image in a row, card or hero |
-| `TaproomTabBar` | The app's bottom bar: tabs on the left, one dark context action on the right | Each tab's root screen, via `.safeAreaInset(edge: .bottom)`. Not on pushed screens, so it slides away on push; it hides itself while the keyboard is up. |
+| `TaproomTabBar` | The app's bottom bar: tabs on the left, one dark context action on the right | Each tab's root screen, via `.safeAreaInset(edge: .bottom)`. Not on pushed screens, so it slides away on push; it hides itself while the keyboard is up. Its background is frosted glass (`.ultraThinMaterial` under a wash of `background`), so the page shows through as it scrolls under. |
 | `TaproomSearchField` | Card-style search field with Cancel; `focusRequests` focuses it from elsewhere | Searching or filtering on a page (Discover, a venue's menu) instead of `.searchable` |
 | `TaproomRowStyle` + `.taproomRowDivider()` | Full-width tappable row with a pressed highlight, and a 1pt warm line under it | Lists laid out on the page: venues, beers, search results |
 | `CardLinkStyle` | Dims a whole card a little while pressed | A card that opens something (feed cards, the "You're probably at" card) |
