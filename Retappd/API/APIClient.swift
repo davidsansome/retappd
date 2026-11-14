@@ -122,7 +122,8 @@ final class UntappdAPI: @unchecked Sendable {
     private struct Ignored: Decodable {}
 
     /// PUTs a checkin's JPEG to the presigned S3 URL that `checkin/add` or `checkin/edit` returned.
-    /// The official app's upload wasn't captured; this is a plain presigned PUT.
+    /// This goes to S3, not Untappd, so it carries none of the API's headers. The photo isn't
+    /// attached to the checkin until `photoUploadComplete` is then posted.
     func uploadPhoto(_ jpeg: Data, to url: URL) async throws {
         var req = URLRequest(url: url)
         req.httpMethod = "PUT"
@@ -217,6 +218,16 @@ extension APIRequest {
     /// API's endpoint (POST /v4/checkin/toast/{id}), which toasts or un-toasts.
     static func toggleToast(_ checkinId: Int) -> APIRequest {
         APIRequest(method: .post, path: "/v4/checkin/toast/\(checkinId)", form: [:])
+    }
+
+    /// Attaches a photo PUT to `photo_upload.url` to its checkin. Not in the Android capture; from
+    /// Metabeer (see `POST /v4/photo/uploadComplete` in the API docs). Without it the checkin has
+    /// no photo.
+    static func photoUploadComplete(checkinId: Int, destination: URL) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/photo/uploadComplete", form: [
+            "checkin_id": "\(checkinId)",
+            "destination_url": destination.absoluteString,
+        ])
     }
 
     static func deleteCheckin(_ id: Int) -> APIRequest {

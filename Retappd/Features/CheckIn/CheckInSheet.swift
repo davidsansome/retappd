@@ -336,7 +336,7 @@ struct CheckInSheet: View {
             self.error = error.localizedDescription
             return
         }
-        let uploaded = await upload(jpeg, r)
+        let uploaded = await upload(jpeg, r, checkinId: r.checkinId)
         NotificationCenter.default.post(name: .didCheckIn, object: nil)
         if uploaded { dismiss() }
     }
@@ -352,7 +352,8 @@ struct CheckInSheet: View {
             self.error = error.localizedDescription
             return
         }
-        let uploaded = await upload(jpeg, r)
+        // The edit response has no `checkin_id`.
+        let uploaded = await upload(jpeg, r, checkinId: original.id)
         var updated = original
         updated.rating = rating > 0 ? rating : nil
         // Untappd leaves the comment alone when it's sent empty.
@@ -365,13 +366,16 @@ struct CheckInSheet: View {
         if uploaded { dismiss() }
     }
 
-    /// Uploads the photo, if there is one, to where the checkin response said. Returns false
-    /// (leaving the screen up with an error) if that fails: the checkin itself is already saved.
-    private func upload(_ jpeg: Data?, _ r: CheckinAddResponse) async -> Bool {
+    /// Uploads the photo, if there is one, to where the checkin response said, then tells Untappd
+    /// to attach it to the checkin. Returns false (leaving the screen up with an error) if that
+    /// fails: the checkin itself is already saved.
+    private func upload(_ jpeg: Data?, _ r: CheckinAddResponse, checkinId: Int?) async -> Bool {
         guard let jpeg else { return true }
         do {
-            guard let url = r.photoUploadURL else { throw APIError.decoding }
+            guard let url = r.photoUploadURL, let destination = r.photoDestinationURL, let checkinId
+            else { throw APIError.decoding }
             try await UntappdAPI.shared.uploadPhoto(jpeg, to: url)
+            _ = try await UntappdAPI.shared.data(.photoUploadComplete(checkinId: checkinId, destination: destination))
             return true
         } catch {
             self.error = "Your checkin was saved, but the photo couldn't be uploaded."

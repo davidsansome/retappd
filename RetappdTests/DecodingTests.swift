@@ -205,6 +205,14 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(r.photoDestinationURL?.absoluteString, "https://untappd.s3.amazonaws.com/photos/x_raw.jpg")
     }
 
+    func testPhotoUploadCompleteRequest() throws {
+        let dest = URL(string: "https://untappd.s3.amazonaws.com/photos/x_raw.jpg")!
+        let r = APIRequest.photoUploadComplete(checkinId: 1614085178, destination: dest)
+        XCTAssertEqual(r.method, .post)
+        XCTAssertEqual(r.path, "/v4/photo/uploadComplete")
+        XCTAssertEqual(r.form, ["checkin_id": "1614085178", "destination_url": dest.absoluteString])
+    }
+
     func testBarcodeMatchesShapes() throws {
         let blocks = """
         {"meta":{"code":200},"response":{"count":3,
