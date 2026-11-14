@@ -33,4 +33,3 @@ user to sign in, and never enter their password.
 ## Releasing
 
 Every push to `main` is built by Xcode Cloud and goes to TestFlight; see [RELEASING.md](RELEASING.md).
-Never rewrite `main`'s history: build numbers are its commit count.

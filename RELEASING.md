@@ -11,12 +11,11 @@ or run the tests, to save compute hours (the Developer Program includes 25 a mon
 `RetappdTests` locally before pushing.
 
 What is in the repository is `ci_scripts/ci_post_clone.sh`, which Xcode Cloud runs after it
-clones. The Xcode project isn't committed, so the script installs XcodeGen, sets the build
-number, and generates the project.
+clones. The Xcode project isn't committed, so the script installs XcodeGen and generates it.
 
-Build numbers are `main`'s commit count, so each upload's is higher than the last. Don't rewrite
-`main`'s history: a lower count would repeat a build number, and App Store Connect would refuse
-the upload. The version is `MARKETING_VERSION` in `project.yml`.
+Build numbers are Xcode Cloud's own counter (`CI_BUILD_NUMBER`): it sets the build number
+itself, replacing `CURRENT_PROJECT_VERSION` from `project.yml`, so they don't match commit
+counts. The version is `MARKETING_VERSION` in `project.yml`.
 
 Signing is Xcode Cloud's: it makes and keeps the distribution certificate and profile itself.
 There are no certificates, keys or secrets in the repository.
@@ -61,8 +60,9 @@ There are no certificates, keys or secrets in the repository.
   does with `CI_PRIMARY_REPOSITORY_PATH=$PWD ci_scripts/ci_post_clone.sh` in a throwaway clone,
   since it edits `project.yml`.
 - *"The bundle version must be higher than the previously uploaded version"*: a build with that
-  number, or a higher one, was uploaded already, by hand, by the old GitHub workflow, or before
-  a history rewrite. Add a commit.
+  number, or a higher one, was uploaded already, by hand or by the old GitHub workflow. Xcode
+  Cloud's counter can't be set, so upload nothing by hand: each build then takes the next
+  number.
 - *"Invalid bundle … iPad Multitasking support requires these orientations"*: an iPad app
   has to support every orientation. Either support them on iPad
   (`INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad` in `project.yml`), or make the app
