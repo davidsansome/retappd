@@ -75,10 +75,10 @@ struct CheckinDetailView: View {
         .toolbar {
             if let beer = checkin.beerLite {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { checkInBeer = beer } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("Check in this beer")
+                    Button("Check in") { checkInBeer = beer }
+                        .fontWeight(.semibold)
+                        .tint(Taproom.ink)  // amber text is too faint on the light bar
+                        .accessibilityHint("Checks in this beer yourself")
                 }
             }
             if checkin.isBy(username: auth.username) {

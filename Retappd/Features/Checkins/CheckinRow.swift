@@ -110,27 +110,42 @@ struct CheckinRow<MenuItems: View>: View {
         checkin.toastCount > 0 || checkin.commentCount > 0 || !checkin.taggedFriends.isEmpty || toast != nil
     }
 
+    /// Who they were with, then the toasts with the Toast button. With no toasts yet, the Toast
+    /// button sits beside the friends instead of on a row of its own.
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !checkin.taggedFriends.isEmpty {
-                Label("with " + checkin.taggedFriends.map(\.shortName).formatted(.list(type: .and)),
-                      systemImage: "person.2.fill")
-                    .font(.caption).foregroundStyle(Taproom.muted).lineLimit(2)
-                    .labelStyle(TightLabel())
-            }
-            if checkin.toastCount > 0 || checkin.commentCount > 0 || toast != nil {
+            if checkin.toastCount > 0 {
+                if !checkin.taggedFriends.isEmpty { withFriends }
                 HStack(alignment: .center, spacing: 10) {
-                    if checkin.toastCount > 0 { ToastChips(checkin: checkin) }
+                    ToastChips(checkin: checkin)
                     Spacer(minLength: 0)
-                    if checkin.commentCount > 0 {
-                        Label("\(checkin.commentCount)", systemImage: "bubble.right")
-                            .font(.caption).foregroundStyle(Taproom.muted).labelStyle(TightLabel())
-                            .accessibilityLabel("\(checkin.commentCount) comments")
-                    }
-                    if let toast { ToastButton(checkin: checkin, toast: toast) }
+                    actions
+                }
+            } else {
+                HStack(alignment: .center, spacing: 10) {
+                    if !checkin.taggedFriends.isEmpty { withFriends }
+                    Spacer(minLength: 0)
+                    actions
                 }
             }
         }
+    }
+
+    private var withFriends: some View {
+        Label("with " + checkin.taggedFriends.map(\.shortName).formatted(.list(type: .and)),
+              systemImage: "person.2.fill")
+            .font(.caption).foregroundStyle(Taproom.muted).lineLimit(2)
+            .labelStyle(TightLabel())
+    }
+
+    /// The comment count and the Toast button, at the right of the footer.
+    @ViewBuilder private var actions: some View {
+        if checkin.commentCount > 0 {
+            Label("\(checkin.commentCount)", systemImage: "bubble.right")
+                .font(.caption).foregroundStyle(Taproom.muted).labelStyle(TightLabel())
+                .accessibilityLabel("\(checkin.commentCount) comments")
+        }
+        if let toast { ToastButton(checkin: checkin, toast: toast) }
     }
 }
 
