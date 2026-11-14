@@ -82,9 +82,7 @@ struct CheckinRow<MenuItems: View>: View {
     /// The beer, with the rating as the card's hero on the right.
     private var beer: some View {
         HStack(alignment: .center, spacing: 12) {
-            if checkin.photo == nil {
-                BeerLabel(beer: checkin.beer?.label, brewery: checkin.brewery?.label, size: 56)
-            }
+            BeerLabel(beer: checkin.beer?.label, brewery: checkin.brewery?.label, size: 56)
             VStack(alignment: .leading, spacing: 2) {
                 if let b = checkin.brewery?.name {
                     Text(b).font(.footnote).foregroundStyle(Taproom.muted).lineLimit(1)

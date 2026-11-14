@@ -376,9 +376,7 @@ struct CheckinDetailView: View {
     /// The beer, with the rating beside it as the hero.
     private var beerHero: some View {
         HStack(alignment: .top, spacing: 12) {
-            if !hasPhoto {
-                BeerLabel(beer: checkin.beer?.labelHD ?? checkin.beer?.label, brewery: checkin.brewery?.label, size: 64)
-            }
+            BeerLabel(beer: checkin.beer?.labelHD ?? checkin.beer?.label, brewery: checkin.brewery?.label, size: 64)
             VStack(alignment: .leading, spacing: 2) {
                 if let b = checkin.brewery?.name {
                     Text(b).font(.subheadline).foregroundStyle(Taproom.muted).lineLimit(1)
