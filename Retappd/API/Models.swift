@@ -35,6 +35,14 @@ struct User: Decodable, Hashable, Identifiable {
         let full = [firstName, lastName].compactMap { $0 }.joined(separator: " ")
         return full.isEmpty ? userName : full
     }
+    /// First name plus last initial ("Jamie Curtis" → "Jamie C"), for space-constrained places.
+    var shortName: String {
+        let first = firstName?.trimmingCharacters(in: .whitespaces) ?? ""
+        let last = lastName?.trimmingCharacters(in: .whitespaces) ?? ""
+        guard !first.isEmpty else { return displayName }
+        guard let initial = last.first else { return first }
+        return "\(first) \(initial)"
+    }
     var isFriend: Bool { relationship == "friends" }
 
     init(id: Int, userName: String, firstName: String?, lastName: String?, avatar: URL?) {

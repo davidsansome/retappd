@@ -127,4 +127,13 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(model.checkInVenues.first, .atHome)
         XCTAssertEqual(model.checkInVenues.first?.foursquareId, "5e7b4d99c91df60008e8b168")
     }
+
+    func testShortName() {
+        func u(_ f: String?, _ l: String?) -> User { User(id: 1, userName: "jc99", firstName: f, lastName: l, avatar: nil) }
+        XCTAssertEqual(u("Jamie", "Curtis").shortName, "Jamie C")
+        XCTAssertEqual(u("Jamie", nil).shortName, "Jamie")
+        XCTAssertEqual(u("Jamie", " ").shortName, "Jamie")
+        XCTAssertEqual(u(nil, "Curtis").shortName, "Curtis")
+        XCTAssertEqual(u(nil, nil).shortName, "jc99")
+    }
 }
