@@ -1,75 +1,22 @@
-# Builds the app and runs its tests on every pull request and every push to main. Each push to
-# main that passes them is then uploaded to TestFlight, for the App Store Connect team's internal
-# testers. See RELEASING.md.
+# Uploads each push to main to TestFlight, for the App Store Connect team's internal testers.
+# Tests aren't run here, to save Actions minutes: run them locally before pushing. See
+# RELEASING.md.
 name: ci
 
 on:
-  pull_request:
   push:
     branches: [main]
+    # Docs-only pushes don't need a new build.
+    paths-ignore:
+      - '**.md'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  test:
-    runs-on: macos-26
-    timeout-minutes: 30
-    # A new push to a pull request cancels its older run; runs on main all finish.
-    concurrency:
-      group: test-${{ github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Show Xcode
-        run: xcodebuild -version
-
-      - name: Install XcodeGen
-        run: brew install xcodegen
-
-      - name: Generate the Xcode project
-        run: xcodegen generate --quiet
-
-      - name: Pick a simulator
-        run: |
-          id=$(xcrun simctl list devices available --json | python3 -c '
-          import json, sys
-          runtimes = json.load(sys.stdin)["devices"]
-          for runtime in sorted(runtimes, reverse=True):
-              if "SimRuntime.iOS-" not in runtime:
-                  continue
-              for device in runtimes[runtime]:
-                  if device["name"].startswith("iPhone"):
-                      print(device["udid"])
-                      sys.exit()
-          ')
-          [ -n "$id" ] || { echo "::error::No iPhone simulator on this runner."; exit 1; }
-          echo "Using simulator $id"
-          echo "DESTINATION=id=$id" >> "$GITHUB_ENV"
-          # Booted before the tests: booting can take minutes on a runner.
-          xcrun simctl boot "$id"
-          xcrun simctl bootstatus "$id" -b
-
-      - name: Build and test
-        # CI has no signing account: build for the simulator without a team.
-        run: |
-          xcodebuild test -project Retappd.xcodeproj -scheme Retappd \
-            -destination "$DESTINATION" -derivedDataPath build/DerivedData \
-            -resultBundlePath build/Tests.xcresult \
-            DEVELOPMENT_TEAM=
-
-      - uses: actions/upload-artifact@v5
-        if: failure()
-        with:
-          name: test-results
-          path: build/Tests.xcresult
-          if-no-files-found: ignore
-
   testflight:
-    needs: test
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     runs-on: macos-26
     timeout-minutes: 60
     # One upload at a time, in order, and never cancelled part way.

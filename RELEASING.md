@@ -2,12 +2,11 @@
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every pull request and every push to `main`:
+`.github/workflows/ci.yml` runs on every push to `main` (except pushes that only change
+Markdown files). It doesn't run on pull requests or run the tests, to save Actions minutes, so
+run `RetappdTests` locally before pushing.
 
-- **test** generates the Xcode project from `project.yml`, builds the app for an iPhone
-  simulator and runs `RetappdTests`. Require it in branch protection.
-- **testflight** runs only on `main`, after **test** passes. It builds the app with
-  `scripts/archive.sh` and uploads it to TestFlight. The *Internal testers* group gets it as
+- **testflight** builds the app with `scripts/archive.sh` and uploads it to TestFlight. The *Internal testers* group gets it as
   soon as Apple has processed it (about 5–15 minutes), with no review.
 
 Build numbers are `main`'s commit count, so each upload's is higher than the last. Don't rewrite
