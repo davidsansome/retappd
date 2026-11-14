@@ -236,8 +236,9 @@ struct FlowLayout: Layout {
         for row in arrange(width: bounds.width, subviews: subviews) {
             var x = bounds.minX
             for i in row.indices {
-                let size = subviews[i].sizeThatFits(.unspecified)
-                subviews[i].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2), proposal: .unspecified)
+                let proposal = fitting(subviews[i], width: bounds.width)
+                let size = subviews[i].sizeThatFits(proposal)
+                subviews[i].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2), proposal: proposal)
                 x += size.width + spacing
             }
             y += row.height + spacing
@@ -249,7 +250,7 @@ struct FlowLayout: Layout {
     private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
         var rows: [Row] = [Row()]
         for i in subviews.indices {
-            let size = subviews[i].sizeThatFits(.unspecified)
+            let size = subviews[i].sizeThatFits(fitting(subviews[i], width: width))
             let needed = rows[rows.count - 1].indices.isEmpty ? size.width : rows[rows.count - 1].width + spacing + size.width
             if needed > width, !rows[rows.count - 1].indices.isEmpty {
                 rows.append(Row())
@@ -261,6 +262,13 @@ struct FlowLayout: Layout {
             rows[rows.count - 1] = r
         }
         return rows
+    }
+
+    /// The size to offer a subview: its ideal size, but no wider than a whole row, so a long chip
+    /// (a venue with a very long name, say) truncates rather than running off the edge.
+    private func fitting(_ subview: LayoutSubview, width: CGFloat) -> ProposedViewSize {
+        let ideal = subview.sizeThatFits(.unspecified)
+        return ideal.width > width ? ProposedViewSize(width: width, height: nil) : .unspecified
     }
 }
 
