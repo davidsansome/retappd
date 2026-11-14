@@ -2,15 +2,14 @@ import SwiftUI
 
 struct CheckinRow: View {
     let checkin: Checkin
+    /// Shows the user's name; the avatar is always shown.
     var showUser = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Only the who/when/where header sits beside the photo; the rest uses the full width.
             HStack(alignment: .center, spacing: 12) {
-                if showUser {
-                    Avatar(url: checkin.user?.avatar, size: 40)
-                }
+                Avatar(url: checkin.user?.avatar, size: 40)
 
                 HStack(alignment: .top, spacing: 6) {
                     VStack(alignment: .leading, spacing: 2) {
