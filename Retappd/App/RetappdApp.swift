@@ -4,6 +4,7 @@ import SwiftUI
 struct RetappdApp: App {
     @State private var auth = AuthStore()
     @State private var location = LocationProvider()
+    @AppStorage(Appearance.storageKey) private var appearance = Appearance.system
 
     init() {
         Task { await LocalIndex.shared.warmUp() }
@@ -22,6 +23,7 @@ struct RetappdApp: App {
             .environment(auth)
             .environment(location)
             .tint(.orange)
+            .preferredColorScheme(appearance.colorScheme)
         }
     }
 }
@@ -65,7 +67,9 @@ struct RootTabs: View {
                 NavigationStack { DiscoverView(model: discover) }
             }
             Tab("Profile", systemImage: "person.crop.circle", value: .profile) {
-                NavigationStack(path: $profilePath) { ProfileView(username: username, model: profile) }
+                NavigationStack(path: $profilePath) { ProfileView(username: username, model: profile) {
+                        profilePath.append(ProfileRoute.settings)
+                    } }
             }
         }
         .environment(discover)

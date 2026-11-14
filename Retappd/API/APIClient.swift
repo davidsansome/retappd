@@ -269,6 +269,29 @@ extension APIRequest {
 
     static let recentlyTagged = APIRequest(path: "/v4/user/recently_tagged", query: ["friendTaggingLimit": "20"])
 
+    static let userSettings = APIRequest(path: "/v4/account/usersettings")
+
+    /// Changes one setting. `name` is the form field: `account_private`, `is_search`,
+    /// `oc_privacy` or `public_toasts`.
+    static func updateSetting(_ name: String, _ on: Bool) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/account/updatesettings", form: [name: on ? "1" : "0"])
+    }
+
+    static func setRatingBump(_ on: Bool) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/account/toggle_rating_bump", form: ["rating_bump": on ? "1" : "0"])
+    }
+
+    static func setRetroactiveBadges(_ on: Bool) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/account/retroactive_badges", form: ["is_retro": on ? "1" : "0"])
+    }
+
+    static let parentStyleOptOuts = APIRequest(path: "/v4/account/user_parent_style_opt_outs", query: ["mode": "v2"])
+
+    static func setParentStyle(_ id: Int, enabled: Bool) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/account/update_parent_style_opt_outs",
+                   form: ["parent_id": "\(id)", "is_enabled": enabled ? "true" : "false"])
+    }
+
     static func checkin(beer: Int, foursquareId: String?, lat: Double?, lng: Double?,
                         rating: Double, shout: String, containerId: Int? = nil, taggedUserIds: [Int] = []) -> APIRequest {
         let tz = TimeZone.current

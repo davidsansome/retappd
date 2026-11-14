@@ -9,6 +9,7 @@ struct ProfileView: View {
     var isAccountTab = true
     /// Shown in the header until the full profile loads.
     var placeholder: User? = nil
+    var openSettings: () -> Void = {}
     @Environment(AuthStore.self) private var auth
     @State private var info: UserInfo.Profile?
     @State private var confirmSignOut = false
@@ -20,6 +21,7 @@ struct ProfileView: View {
         .toolbar(isAccountTab ? .hidden : .automatic, for: .navigationBar)
         .navigationTitle(isAccountTab ? "" : (info?.userName ?? username))
         .navigationBarTitleDisplayMode(.inline)
+        .modifier(SettingsDestination(enabled: isAccountTab))
         .confirmationDialog("Sign out of Untappd?", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) { auth.signOut() }
         }
@@ -54,6 +56,7 @@ struct ProfileView: View {
 
     private var accountMenu: some View {
         Menu {
+            Button("Settings", systemImage: "gearshape") { openSettings() }
             Button("Sign out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
                 confirmSignOut = true
             }
@@ -97,5 +100,19 @@ struct UserProfileView: View {
 
     var body: some View {
         ProfileView(username: user.userName, model: model, isAccountTab: false, placeholder: user)
+    }
+}
+
+/// Declares where the Settings route opens, only on the Profile tab's root (repeats further up the
+/// stack are ignored and warned about).
+private struct SettingsDestination: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.navigationDestination(for: ProfileRoute.self) { _ in SettingsView() }
+        } else {
+            content
+        }
     }
 }

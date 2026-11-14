@@ -693,3 +693,48 @@ struct AlgoliaBeerHits: Decodable {
         hits = c.list("hits", Hit.self).compactMap(\.beer)
     }
 }
+
+// MARK: - Account settings
+
+/// The parts of `/v4/account/usersettings` that the API lets us change.
+struct AccountSettings: Decodable {
+    var isPrivate: Bool
+    var isSearchable: Bool
+    var publicToasts: Bool
+    var ocOptOut: Bool
+    var ratingBump: Bool
+    var retroactiveBadges: Bool
+    var emailAddress: String?
+
+    init(from decoder: Decoder) throws {
+        let root = try decoder.container(keyedBy: AnyKey.self)
+        let u = root.nested("user") ?? root
+        let s = u.nested("settings")
+        isPrivate = u.bool("is_private") ?? false
+        isSearchable = s?.bool("is_search") ?? true
+        publicToasts = s?.bool("public_toasts") ?? true
+        ocOptOut = s?.bool("is_oc_opt") ?? false
+        ratingBump = u.bool("rating_bump") ?? false
+        retroactiveBadges = u.bool("retro_status") ?? false
+        emailAddress = s?.text("email_address")
+    }
+}
+
+/// A parent style (Non-Alcoholic, Hard Seltzer, …) that can be hidden from menus and recommendations.
+struct ParentStyleOptOut: Decodable, Identifiable {
+    var id: Int
+    var name: String
+    var description: String?
+    var isEnabled: Bool
+    var isLocked: Bool
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        guard let id = c.int("parent_id") else { throw APIError.decoding }
+        self.id = id
+        name = c.text("parent_name") ?? "Style \(id)"
+        description = c.text("description")
+        isEnabled = c.bool("is_enabled") ?? true
+        isLocked = c.bool("is_locked") ?? false
+    }
+}
