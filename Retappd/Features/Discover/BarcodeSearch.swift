@@ -25,7 +25,7 @@ enum BarcodeLookup {
     }
 }
 
-/// A sheet that scans (or takes a typed) barcode and lists the beers it belongs to.
+/// A sheet that scans a barcode (Debug builds also take a typed one) and lists the beers it belongs to.
 struct BarcodeSearchSheet: View {
     /// Called with the beer the user picks; the sheet dismisses itself first.
     var onPick: (BeerLite) -> Void
@@ -67,7 +67,9 @@ struct BarcodeSearchSheet: View {
         case .scanning:
             VStack(spacing: 0) {
                 scanner
+                #if DEBUG
                 manualEntry
+                #endif
             }
         case .looking(let code):
             VStack(spacing: 12) {
@@ -114,12 +116,15 @@ struct BarcodeSearchSheet: View {
                 Label("Can't scan here", systemImage: "barcode.viewfinder")
             } description: {
                 Text(cameraAllowed == false
-                     ? "Camera access is off. Turn it on in Settings to scan barcodes, or type one below."
-                     : "This device can't scan barcodes. Type one below instead.")
+                     ? "Camera access is off. Turn it on in Settings to scan barcodes."
+                     : "This device can't scan barcodes.")
             }
         }
     }
 
+    #if DEBUG
+    /// Typed entry, for driving the sheet from the simulator (which has no camera). Compiled out
+    /// of Release builds, so TestFlight and the App Store never show it.
     private var manualEntry: some View {
         HStack(spacing: 8) {
             TextField("Or type the barcode", text: $typed)
@@ -135,6 +140,7 @@ struct BarcodeSearchSheet: View {
         .padding()
         .background(.bar)
     }
+    #endif
 
     private func results(code: String, beers: [BeerLite]) -> some View {
         List {
