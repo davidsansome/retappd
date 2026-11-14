@@ -2,6 +2,26 @@ import XCTest
 @testable import Retappd
 
 final class DecodingTests: XCTestCase {
+    func testStockLabelsCountAsMissing() {
+        let stock = URL(string: "https://assets.untappd.com/site/assets/images/temp/badge-beer-default.png")!
+        let brewery = URL(string: "https://assets.untappd.com/site/assets/images/temp/badge-brewery-default.png")!
+        let real = URL(string: "https://assets.untappd.com/site/beer_logos/beer-8676_379f5_sm.jpeg")!
+        XCTAssertTrue(BeerLabel.isPlaceholder(stock))
+        XCTAssertTrue(BeerLabel.isPlaceholder(brewery))
+        XCTAssertFalse(BeerLabel.isPlaceholder(real))
+    }
+
+    func testBeerLiteKeepsBreweryLogo() throws {
+        let json = """
+        {"bid": 5, "beer_name": "Amber", "beer_label": "https://x/badge-beer-default.png"}
+        """
+        let beer = try JSONDecoder().decode(BeerRef.self, from: Data(json.utf8))
+        let brewery = try JSONDecoder().decode(BreweryRef.self, from: Data("""
+        {"brewery_id": 9, "brewery_name": "Brew Co", "brewery_label": "https://x/brewery-9.jpeg"}
+        """.utf8))
+        XCTAssertEqual(BeerLite(beer: beer, brewery: brewery).breweryLabel?.lastPathComponent, "brewery-9.jpeg")
+    }
+
     func testCheckinWithEmptyVenueAndExtras() throws {
         let json = """
         {"meta":{"code":200},"response":{"checkins":{"count":1,"items":[{

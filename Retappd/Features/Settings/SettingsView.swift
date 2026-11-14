@@ -68,7 +68,7 @@ struct SettingsView: View {
             .padding(.horizontal, Taproom.margin)
             .padding(.top, 8)
             .padding(.bottom, 24)
-            .frame(maxWidth: .readableContentWidth)
+            .frame(maxWidth: .readableContentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
         .foregroundStyle(Taproom.ink)

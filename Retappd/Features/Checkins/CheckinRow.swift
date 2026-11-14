@@ -83,10 +83,7 @@ struct CheckinRow<MenuItems: View>: View {
     private var beer: some View {
         HStack(alignment: .center, spacing: 12) {
             if checkin.photo == nil {
-                CachedImage(url: checkin.beer?.label, maxPixel: 160)
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 56, height: 56)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                BeerLabel(beer: checkin.beer?.label, brewery: checkin.brewery?.label, size: 56)
             }
             VStack(alignment: .leading, spacing: 2) {
                 if let b = checkin.brewery?.name {

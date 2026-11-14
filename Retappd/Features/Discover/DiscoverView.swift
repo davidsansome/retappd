@@ -25,7 +25,7 @@ struct DiscoverView: View {
             .padding(.horizontal, Taproom.margin)
             .padding(.top, 8)
             .padding(.bottom, 16)
-            .frame(maxWidth: .readableContentWidth)
+            .frame(maxWidth: .readableContentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.immediately)
@@ -268,9 +268,7 @@ struct BeerRow: View {
                     .background(Taproom.ink, in: RoundedRectangle(cornerRadius: 8))
                     .accessibilityLabel("Number \(number)")
             }
-            CachedImage(url: beer.label, maxPixel: 132)
-                .frame(width: 44, height: 44)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+            BeerLabel(beer: beer.label, brewery: beer.breweryLabel, size: 44, cornerRadius: 8)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(beer.name).font(.body.weight(.semibold)).lineLimit(1)

@@ -114,6 +114,8 @@ struct BeerLite: Codable, Hashable, Identifiable {
     var ratingCount: Int?
     var popularity: Int?
     var hasHad: Bool?
+    /// The brewery's logo, shown when the beer has no label of its own.
+    var breweryLabel: URL? = nil
 
     var id: Int { bid }
 }
@@ -121,7 +123,7 @@ struct BeerLite: Codable, Hashable, Identifiable {
 extension BeerLite {
     init(beer: BeerRef, brewery: BreweryRef?) {
         self.init(bid: beer.bid, name: beer.name, brewery: brewery?.name ?? "", style: beer.style,
-                  abv: beer.abv, label: beer.label, hasHad: beer.hasHad)
+                  abv: beer.abv, label: beer.label, hasHad: beer.hasHad, breweryLabel: brewery?.label)
     }
 }
 
@@ -628,6 +630,8 @@ struct MenuSections: Decodable {
                     brewery: c.text("brewery") ?? c.text("original_brewery") ?? "",
                     style: c.text("style") ?? c.text("short_style"),
                     abv: c.double("abv"),
+                    // Menu items' brewery logo field hasn't been captured, so they fall back
+                    // straight to the placeholder.
                     label: (c.text("label_image") ?? c.text("label_image_thumb")).flatMap(URL.init(string:)),
                     rating: c.double("rating"),
                     ratingCount: c.int("rating_count"),
@@ -731,7 +735,8 @@ struct AlgoliaBeerHits: Decodable {
                 style: c.text("type_name"), abv: c.double("beer_abv"),
                 label: c.text("beer_label").flatMap(URL.init(string:)),
                 rating: c.double("rating_score"), ratingCount: c.int("rating_count"),
-                popularity: c.int("popularity"))
+                popularity: c.int("popularity"),
+                breweryLabel: c.text("brewery_label").flatMap(URL.init(string:)))
         }
     }
 

@@ -377,10 +377,7 @@ struct CheckinDetailView: View {
     private var beerHero: some View {
         HStack(alignment: .top, spacing: 12) {
             if !hasPhoto {
-                CachedImage(url: checkin.beer?.labelHD ?? checkin.beer?.label, maxPixel: 300)
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 64, height: 64)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                BeerLabel(beer: checkin.beer?.labelHD ?? checkin.beer?.label, brewery: checkin.brewery?.label, size: 64)
             }
             VStack(alignment: .leading, spacing: 2) {
                 if let b = checkin.brewery?.name {

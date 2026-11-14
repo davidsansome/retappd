@@ -67,7 +67,8 @@ actor LocalIndex {
                 e.beer = BeerLite(bid: b.bid, name: b.name, brewery: b.brewery.isEmpty ? e.beer.brewery : b.brewery,
                                   style: b.style ?? e.beer.style, abv: b.abv ?? e.beer.abv, label: b.label ?? e.beer.label,
                                   rating: b.rating ?? e.beer.rating, ratingCount: b.ratingCount ?? e.beer.ratingCount,
-                                  popularity: b.popularity ?? e.beer.popularity, hasHad: b.hasHad ?? e.beer.hasHad)
+                                  popularity: b.popularity ?? e.beer.popularity, hasHad: b.hasHad ?? e.beer.hasHad,
+                                  breweryLabel: b.breweryLabel ?? e.beer.breweryLabel)
                 e.seen += 1
                 beers[b.bid] = e
             } else {

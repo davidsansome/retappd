@@ -317,3 +317,39 @@ struct TaproomTabBar<Value: Hashable, Action: View>: View {
         }
     }
 }
+
+/// A beer's label: its own if it has one, else its brewery's logo, else the app icon. Untappd's
+/// stock "no label" badges count as having none.
+struct BeerLabel: View {
+    let beer: URL?
+    let brewery: URL?
+    var size: CGFloat
+    var cornerRadius: CGFloat = 12
+
+    /// Untappd's generic pictures for a beer or brewery without one
+    /// (`…/site/assets/images/temp/badge-beer-default.png`, `badge-brewery-default.png`).
+    static func isPlaceholder(_ url: URL) -> Bool {
+        url.lastPathComponent.hasPrefix("badge-") && url.lastPathComponent.contains("default")
+    }
+
+    private var url: URL? {
+        [beer, brewery].compactMap { $0 }.first { !Self.isPlaceholder($0) }
+    }
+
+    var body: some View {
+        Group {
+            if let url {
+                // A warm blank while it loads, rather than flashing the app icon.
+                CachedImage(url: url, maxPixel: size * 3)
+            } else {
+                Image("LabelPlaceholder").resizable()
+            }
+        }
+            .aspectRatio(contentMode: .fill)
+            .frame(width: size, height: size)
+            .background(Taproom.card)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+            .accessibilityHidden(true)
+    }
+
+}

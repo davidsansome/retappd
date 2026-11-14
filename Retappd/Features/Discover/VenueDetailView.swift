@@ -115,7 +115,7 @@ struct VenueDetailView: View {
             .padding(.horizontal, Taproom.margin)
             .padding(.top, 8)
             .padding(.bottom, 16)
-            .frame(maxWidth: .readableContentWidth)
+            .frame(maxWidth: .readableContentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.immediately)
