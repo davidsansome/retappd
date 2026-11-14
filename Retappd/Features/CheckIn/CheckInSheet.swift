@@ -48,19 +48,19 @@ struct CheckInSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
                     hero
                     comment
-                    section("Serving") { servingChips }
+                    TaproomSection("Serving") { servingChips }
                     if editing == nil {
-                        section("Where") { venueChips }
+                        TaproomSection("Where") { venueChips }
                         friends
                     }
                     if let error {
                         Text(error).font(.footnote).foregroundStyle(.red)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, Taproom.margin)
                 .padding(.top, 8)
                 .padding(.bottom, 16)
             }
@@ -121,7 +121,7 @@ struct CheckInSheet: View {
                 .padding(.top, 14)
                 .accessibilityHidden(true)
                 Label(rating == 0 ? "Slide the glass to rate" : "Slide the glass up or down", systemImage: "arrow.right")
-                    .labelStyle(TrailingIconLabel())
+                    .labelStyle(TaproomTrailingIconLabel())
                     .font(.caption)
                     .foregroundStyle(Taproom.muted)
                     .accessibilityHidden(true)
@@ -158,12 +158,12 @@ struct CheckInSheet: View {
         } else {
             HStack(spacing: 8) {
                 Button { showingCamera = true } label: { Label("Camera", systemImage: "camera") }
-                    .buttonStyle(OutlineButton())
+                    .buttonStyle(TaproomOutlineButton())
                     .disabled(!CameraPicker.isAvailable)
                 PhotosPicker(selection: $libraryItem, matching: .images) {
                     Label("Photos", systemImage: "photo.on.rectangle")
                 }
-                .buttonStyle(OutlineButton())
+                .buttonStyle(TaproomOutlineButton())
             }
         }
     }
@@ -174,19 +174,11 @@ struct CheckInSheet: View {
                 .lineLimit(2...6)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
-                .background(Taproom.card, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Taproom.border))
+                .taproomCard()
             if editing?.comment != nil {
                 Text("Untappd keeps the existing comment if you leave this empty.")
                     .font(.caption).foregroundStyle(Taproom.muted)
             }
-        }
-    }
-
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.footnote.weight(.bold))
-            content()
         }
     }
 
@@ -204,7 +196,7 @@ struct CheckInSheet: View {
                             Text(t.name)
                         }
                     }
-                    .buttonStyle(Chip(on: on))
+                    .buttonStyle(TaproomChip(on: on))
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
@@ -225,20 +217,20 @@ struct CheckInSheet: View {
                         Text(v.name).lineLimit(1).frame(maxWidth: 200)
                     }
                 }
-                .buttonStyle(Chip(on: on))
+                .buttonStyle(TaproomChip(on: on))
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
             Button { showingVenuePicker = true } label: {
                 Image(systemName: "ellipsis").frame(width: 20)
             }
-            .buttonStyle(Chip(on: false))
+            .buttonStyle(TaproomChip(on: false))
             .accessibilityLabel("All venues")
         }
     }
 
     private var friends: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("With").font(.footnote.weight(.bold))
+            Text("With").font(Taproom.sectionLabel)
             FlowLayout(spacing: 6) {
                 ForEach(tagged) { u in
                     Button { tagged.removeAll { $0.id == u.id } } label: {
@@ -247,7 +239,7 @@ struct CheckInSheet: View {
                             Text(u.shortName).lineLimit(1)
                         }
                     }
-                    .buttonStyle(Chip(on: false, leading: 4))
+                    .buttonStyle(TaproomChip(on: false, leading: 4))
                     .accessibilityLabel(u.shortName)
                     .accessibilityHint("Removes the tag")
                 }
@@ -256,31 +248,22 @@ struct CheckInSheet: View {
                 } label: {
                     Text(tagged.isEmpty ? "+ Tag friends" : "+ Tag")
                 }
-                .buttonStyle(Chip(on: false, dashed: true))
+                .buttonStyle(TaproomChip(on: false, dashed: true))
             }
         }
     }
 
     private var submitButton: some View {
         Button(action: finished ? { dismiss() } : submit) {
-            ZStack {
-                if busy {
-                    ProgressView().tint(Taproom.background)
-                } else {
-                    Text(finished ? "Done" : editing == nil ? "Check in" : "Save")
-                        .font(.headline)
-                }
+            if busy {
+                ProgressView().tint(Taproom.background)
+            } else {
+                Text(finished ? "Done" : editing == nil ? "Check in" : "Save")
             }
-            .frame(maxWidth: .infinity, minHeight: 54)
-            .foregroundStyle(Taproom.background)
-            .background(Taproom.ink, in: RoundedRectangle(cornerRadius: 16))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TaproomPrimaryButton())
         .disabled(busy)
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 8)
-        .background(Taproom.background)
+        .taproomBottomBar()
     }
 
     // MARK: Venues
@@ -395,53 +378,6 @@ struct CheckInSheet: View {
             finished = true
             return false
         }
-    }
-}
-
-// MARK: - Styles
-
-/// A capsule chip; amber when selected.
-private struct Chip: ButtonStyle {
-    var on: Bool
-    var leading: CGFloat = 12
-    var dashed = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(on ? Taproom.onAmber : Taproom.ink)
-            .padding(.leading, leading)
-            .padding(.trailing, 12)
-            .frame(minHeight: 34)
-            .background(on ? Taproom.amber : dashed ? Color.clear : Taproom.card, in: Capsule())
-            .overlay {
-                Capsule().strokeBorder(on ? Taproom.amber : dashed ? Taproom.muted : Taproom.border,
-                                       style: StrokeStyle(lineWidth: 1, dash: dashed ? [4, 3] : []))
-            }
-            .opacity(configuration.isPressed ? 0.7 : 1)
-            .contentShape(Capsule())
-    }
-}
-
-/// A rounded, outlined button that shares a row with others.
-private struct OutlineButton: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .labelStyle(TightLabel())
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(Taproom.ink)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .background(Taproom.card, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Taproom.border))
-            .opacity(!isEnabled ? 0.4 : configuration.isPressed ? 0.7 : 1)
-    }
-}
-
-private struct TrailingIconLabel: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 4) { configuration.title; configuration.icon.imageScale(.small) }
     }
 }
 

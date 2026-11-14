@@ -1,31 +1,5 @@
 import SwiftUI
 
-/// The check-in screen's warm "taproom" palette, light and dark.
-enum Taproom {
-    static let background = dynamic(0xFBF8F3, 0x17130E)
-    static let card = dynamic(0xFFFFFF, 0x241E17)
-    static let border = dynamic(0xE7DDCE, 0x3A3128)
-    static let ink = dynamic(0x2B2118, 0xF4ECDF)
-    static let muted = dynamic(0x6F6252, 0xB0A38F)
-    static let amber = rgb(0xE9A23B)
-    /// Text and icons drawn on amber.
-    static let onAmber = rgb(0x2B2118)
-    static let glassRim = dynamic(0xCDBFA8, 0x5A4C3C)
-    static let glassInside = dynamic(0xF1EADF, 0x211B14)
-    static let foam = dynamic(0xFFFDF7, 0xF6EBD3)
-
-    private static func uiColor(_ hex: UInt32) -> UIColor {
-        UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
-                blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
-    }
-
-    private static func rgb(_ hex: UInt32) -> Color { Color(uiColor(hex)) }
-
-    private static func dynamic(_ light: UInt32, _ dark: UInt32) -> Color {
-        Color(UIColor { $0.userInterfaceStyle == .dark ? uiColor(dark) : uiColor(light) })
-    }
-}
-
 /// A tapered pint glass.
 struct PintShape: Shape {
     var taper: CGFloat = 0.13
