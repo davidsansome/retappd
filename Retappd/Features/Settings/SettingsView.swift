@@ -22,16 +22,21 @@ struct SettingsView: View {
                             toggle("Private account", \.isPrivate) { .updateSetting("account_private", $0) }
                             toggle("Appear in search", \.isSearchable) { .updateSetting("is_search", $0) }
                             toggle("Public toasts", \.publicToasts) { .updateSetting("public_toasts", $0) }
-                            toggle("Opt out of data sharing", \.ocOptOut) { .updateSetting("oc_privacy", $0) }
+                            // Sent inverted: oc_privacy=1 stops producers commenting.
+                            toggle("Allow producer comments", \.allowsProducerComments) { .updateSetting("oc_privacy", !$0) }
                         }
-                        caption("A private account's checkins are only visible to friends. Public toasts lets anyone toast your checkins, not only friends.")
+                        caption("A private account's checkins are only visible to friends. Public toasts lets anyone toast your checkins, not only friends. Producer comments lets breweries comment on your checkins of their drinks.")
                     }
 
                     TaproomSection("Checkins & badges") {
                         switchCard {
-                            toggle("Rating bump", \.ratingBump) { .setRatingBump($0) }
-                            toggle("Retroactive badges", \.retroactiveBadges) { .setRetroactiveBadges($0) }
+                            // Insiders only, but kept for anyone who has it on so they can turn it off.
+                            if settings.isInsider || settings.ratingBump {
+                                toggle("0.1 ratings", \.ratingBump) { .setRatingBump($0) }
+                            }
+                            toggle("Earn core badges retroactively", \.retroactiveBadges) { .setRetroactiveBadges($0) }
                         }
+                        caption("\(settings.isInsider || settings.ratingBump ? "0.1 ratings lets you rate in steps of 0.1 instead of 0.25. " : "")Earning core badges retroactively counts all your past checkins towards core badges. They're awarded after your next checkin of a qualifying drink.")
                     }
 
                     if !styles.isEmpty {

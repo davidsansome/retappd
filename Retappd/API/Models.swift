@@ -753,10 +753,21 @@ struct AccountSettings: Decodable {
     var isPrivate: Bool
     var isSearchable: Bool
     var publicToasts: Bool
+    /// `is_oc_opt`: stops producers commenting on checkins of their drinks. The official app shows
+    /// the opposite, "Allow producers to comment on my check-ins to their drinks".
     var ocOptOut: Bool
+    /// "Enable 0.1 Ratings": rate in steps of 0.1 instead of 0.25. Only for Untappd Insiders.
     var ratingBump: Bool
+    /// "Earn Core Badges Retroactively": past checkins count towards core badges.
     var retroactiveBadges: Bool
+    /// An Untappd Insider (the API's older name is "supporter").
+    var isInsider: Bool
     var emailAddress: String?
+
+    var allowsProducerComments: Bool {
+        get { !ocOptOut }
+        set { ocOptOut = !newValue }
+    }
 
     init(from decoder: Decoder) throws {
         let root = try decoder.container(keyedBy: AnyKey.self)
@@ -768,6 +779,7 @@ struct AccountSettings: Decodable {
         ocOptOut = s?.bool("is_oc_opt") ?? false
         ratingBump = u.bool("rating_bump") ?? false
         retroactiveBadges = u.bool("retro_status") ?? false
+        isInsider = u.bool("is_supporter") ?? false
         emailAddress = s?.text("email_address")
     }
 }
