@@ -69,7 +69,7 @@ struct CheckInSheet: View {
                     if editing == nil {
                         TaproomSection("Where") { venueChips }
                     }
-                    TaproomSection("Bought at") { shopChips }
+                    TaproomSection("Purchased at") { shopChips }
                     if editing == nil {
                         friends
                     }

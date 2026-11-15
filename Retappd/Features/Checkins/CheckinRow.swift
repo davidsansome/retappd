@@ -34,12 +34,19 @@ struct CheckinRow<MenuItems: View>: View {
                     .accessibilityLabel("Photo")
             }
 
+            if let shop = checkin.retailVenue {
+                purchasedAt(shop)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .overlay(alignment: .top) { if checkin.photo == nil { divider } }
+            }
+
             if hasFooter {
                 footer
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .overlay(alignment: .top) {
-                        if checkin.photo == nil { Rectangle().fill(Taproom.border).frame(height: 1) }
+                        if checkin.photo == nil || checkin.retailVenue != nil { divider }
                     }
             }
         }
@@ -106,6 +113,19 @@ struct CheckinRow<MenuItems: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             if let r = checkin.rating { TaproomRating(rating: r, size: 30) }
         }
+    }
+
+    private var divider: some View { Rectangle().fill(Taproom.border).frame(height: 1) }
+
+    /// Where the beer was bought, on a row of its own under the beer.
+    private func purchasedAt(_ shop: Venue) -> some View {
+        Label {
+            Text("Purchased at ").foregroundStyle(Taproom.muted) + Text(shop.name).foregroundStyle(Taproom.ink)
+        } icon: {
+            Image(systemName: "bag").foregroundStyle(Taproom.amber)
+        }
+        .font(.caption).lineLimit(1).labelStyle(TightLabel())
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var hasFooter: Bool {

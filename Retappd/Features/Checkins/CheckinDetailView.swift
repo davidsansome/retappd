@@ -441,11 +441,10 @@ struct CheckinDetailView: View {
                     NavigationLink(value: v) {
                         HStack(spacing: 5) {
                             Image(systemName: "bag").foregroundStyle(Taproom.amber)
-                            Text(v.name).lineLimit(1)
+                            (Text("Purchased at ").foregroundStyle(Taproom.muted) + Text(v.name)).lineLimit(1)
                         }
                     }
                     .buttonStyle(TaproomChip(on: false))
-                    .accessibilityLabel("Bought at \(v.name)")
                 }
                 ForEach(checkin.taggedFriends) { UserChipLink(user: $0) }
                 ForEach(checkin.flavors, id: \.self) { f in
