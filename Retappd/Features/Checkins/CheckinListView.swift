@@ -34,7 +34,9 @@ struct CheckinList<Header: View>: View {
                     NavigationLink(value: CheckinRoute(checkin: c, listID: listID)) {
                         CheckinRow(checkin: c, showUser: showUser,
                                    menu: CheckinMenuItems.hasItems(c, isMine: mine) ? { menuItems(c, isMine: mine) } : nil,
-                                   toast: showActions ? { toggleToast(c) } : nil)
+                                   toast: showActions ? { toggleToast(c) } : nil,
+                                   confirmingDelete: isConfirmingDelete(c),
+                                   delete: { Task { await model.delete(c) } })
                     }
                     .buttonStyle(CardLinkStyle())
                     .id(c.id)
@@ -54,12 +56,6 @@ struct CheckinList<Header: View>: View {
         .modifier(CheckinDestinations(enabled: registersDestinations, me: model.me))
         .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
         .fullScreenCover(item: $editing) { CheckInSheet(editing: $0) }
-        .confirmationDialog("Delete this checkin?", isPresented: isConfirmingDelete,
-                            titleVisibility: .visible, presenting: deleting) { c in
-            Button("Delete", role: .destructive) { Task { await model.delete(c) } }
-        } message: { _ in
-            Text("This can't be undone.")
-        }
     }
 
     private func menuItems(_ c: Checkin, isMine: Bool) -> CheckinMenuItems {
@@ -73,8 +69,8 @@ struct CheckinList<Header: View>: View {
         Task { await model.toggleToast(c) }
     }
 
-    private var isConfirmingDelete: Binding<Bool> {
-        Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })
+    private func isConfirmingDelete(_ c: Checkin) -> Binding<Bool> {
+        Binding(get: { deleting?.id == c.id }, set: { if !$0, deleting?.id == c.id { deleting = nil } })
     }
 
     private static var topID: String { "CheckinList.top" }

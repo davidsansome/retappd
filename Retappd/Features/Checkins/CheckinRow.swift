@@ -10,6 +10,9 @@ struct CheckinRow<MenuItems: View>: View {
     var menu: (() -> MenuItems)?
     /// Shows a Toast button at the end of the toasts row when set.
     var toast: (() -> Void)?
+    /// Whether to ask before deleting this checkin. The question points at the overflow menu.
+    var confirmingDelete: Binding<Bool> = .constant(false)
+    var delete: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -63,6 +66,7 @@ struct CheckinRow<MenuItems: View>: View {
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel("More")
+                .deleteCheckinConfirmation(isPresented: confirmingDelete, delete: delete)
                 .padding(.trailing, -12)  // line the dots up with the content's trailing edge
             }
         }
@@ -150,6 +154,18 @@ struct CheckinRow<MenuItems: View>: View {
 extension CheckinRow where MenuItems == EmptyView {
     init(checkin: Checkin, showUser: Bool = true) {
         self.init(checkin: checkin, showUser: showUser, menu: nil, toast: nil)
+    }
+}
+
+extension View {
+    /// Asks before deleting a checkin. The system points the question at the view this is on, so
+    /// put it on the button that offered the delete (the overflow menu), not on the whole screen.
+    func deleteCheckinConfirmation(isPresented: Binding<Bool>, delete: @escaping () -> Void) -> some View {
+        confirmationDialog("Delete this checkin?", isPresented: isPresented, titleVisibility: .visible) {
+            Button("Delete", role: .destructive, action: delete)
+        } message: {
+            Text("This can't be undone.")
+        }
     }
 }
 

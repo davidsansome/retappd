@@ -90,6 +90,7 @@ struct CheckinDetailView: View {
                             Button("Edit checkin", systemImage: "pencil") { editing = checkin }
                             Button("Delete checkin", systemImage: "trash", role: .destructive) { confirmDelete = true }
                         }
+                        .deleteCheckinConfirmation(isPresented: $confirmDelete) { Task { await delete() } }
                     }
                 }
             }
@@ -97,11 +98,6 @@ struct CheckinDetailView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
         .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
         .fullScreenCover(item: $editing) { CheckInSheet(editing: $0) }
-        .confirmationDialog("Delete this checkin?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) { Task { await delete() } }
-        } message: {
-            Text("This can't be undone.")
-        }
         .onReceive(NotificationCenter.default.publisher(for: .checkinEdited)) { n in
             if let c = n.object as? Checkin, c.id == checkin.id { checkin = c }
         }
