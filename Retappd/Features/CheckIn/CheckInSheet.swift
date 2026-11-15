@@ -17,6 +17,7 @@ struct CheckInSheet: View {
     @State private var serving: ServingType?
     @State private var tagged: [User] = []
     @State private var photo: UIImage?
+    @State private var editingPhoto = false
     @State private var libraryItem: PhotosPickerItem?
     @State private var showingCamera = false
     @State private var showingVenuePicker = false
@@ -83,6 +84,9 @@ struct CheckInSheet: View {
             .fullScreenCover(isPresented: $showingCamera) {
                 CameraPicker { photo = $0 }.ignoresSafeArea()
             }
+            .fullScreenCover(isPresented: $editingPhoto) {
+                if let current = photo { PhotoEditor(image: current) { photo = $0 } }
+            }
             .onChange(of: libraryItem) { _, item in loadLibraryPhoto(item) }
             .interactiveDismissDisabled(busy)
             .task { await options.loadServingTypes() }
@@ -140,12 +144,14 @@ struct CheckInSheet: View {
     @ViewBuilder private var photoControls: some View {
         if let photo {
             HStack(spacing: 10) {
-                Image(uiImage: photo)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 44, height: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .accessibilityHidden(true)
+                Button { editingPhoto = true } label: {
+                    Image(uiImage: photo)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 44, height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .accessibilityLabel("Edit photo")
                 Text("Photo added").font(.subheadline.weight(.medium))
                 Spacer(minLength: 0)
                 Button {
