@@ -108,6 +108,7 @@ struct CheckInSheet: View {
             .task { await options.loadServingTypes() }
             .task { if editing == nil { await options.loadFriends() } }
             .task { await loadEditedShop() }
+            .task { await prefillRating() }
             .onChange(of: options.servingTypes, initial: true) { preselectServing() }
         }
         .tint(Taproom.amber)
@@ -411,6 +412,16 @@ struct CheckInSheet: View {
                 error = "Couldn't load that photo."
             }
         }
+    }
+
+    /// Starts a new checkin at the rating the user last gave this beer, unless they've already
+    /// moved the glass. Silently leaves it at 0 if the request fails.
+    private func prefillRating() async {
+        guard editing == nil, let beer else { return }
+        guard let r = try? await UntappdAPI.shared.fetch(.userRating(beer.bid), as: UserBeerRating.self),
+              let last = r.rating, rating == 0 else { return }
+        let step = options.ratingStep
+        withAnimation { rating = min(max((last / step).rounded() * step, step), 5) }
     }
 
     /// Selects the edited checkin's serving type once the list of types has loaded.

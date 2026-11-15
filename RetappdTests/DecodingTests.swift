@@ -290,4 +290,14 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(BarcodeLookup.candidates(" 5 056412 031946 "), ["5056412031946"])
         XCTAssertEqual(BarcodeLookup.candidates("abc"), [])
     }
+
+    func testUserBeerRating() throws {
+        func rating(_ body: String) throws -> Double? {
+            try UntappdAPI.decode(UserBeerRating.self, from: Data(#"{"meta":{"code":200},"response":\#(body)}"#.utf8)).rating
+        }
+        XCTAssertNil(try rating(#"{"rating_score": 0}"#))
+        XCTAssertNil(try rating("{}"))
+        XCTAssertEqual(try rating(#"{"rating_score": 3.75}"#), 3.75)
+        XCTAssertEqual(try rating(#"{"rating_score": "4.2"}"#), 4.2)
+    }
 }

@@ -300,6 +300,13 @@ extension APIRequest {
         APIRequest(path: "/v4/beer/checkbarcodemultiple", query: ["upc": upc])
     }
 
+    /// The rating the signed-in user last gave a beer (`rating_score`, 0 if none). The official
+    /// app uses this to prefill its check-in screen. It stays 0 for a few minutes after a
+    /// beer's first checkin, until Untappd catches up.
+    static func userRating(_ bid: Int) -> APIRequest {
+        APIRequest(path: "/v4/beer/userrating/\(bid)")
+    }
+
     static let servingTypes = APIRequest(path: "/v4/checkin/serving_types")
 
 

@@ -738,6 +738,16 @@ struct CheckinAddResponse: Decodable {
     }
 }
 
+/// `/v4/beer/userrating/{bid}`: the user's own rating of a beer. Untappd sends 0 for a beer
+/// they haven't rated, which comes out as nil.
+struct UserBeerRating: Decodable {
+    var rating: Double?
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        rating = c.double("rating_score").flatMap { $0 > 0 ? $0 : nil }
+    }
+}
+
 // MARK: - Algolia
 
 struct AlgoliaBeerHits: Decodable {
