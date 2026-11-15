@@ -249,7 +249,6 @@ extension APIRequest {
             "photo_file_ext": "jpg",
             "gmt_offset": "\(tz.secondsFromGMT() / 3600)",
             "timezone": tz.identifier,
-            "request_id": requestID(),
         ]
         if let bid = checkin.beerLite?.bid { form["bid"] = "\(bid)" }
         if let containerId { form["container_id"] = "\(containerId)" }
@@ -261,11 +260,6 @@ extension APIRequest {
             }
         }
         return APIRequest(method: .post, path: "/v4/checkin/edit/\(checkin.id)", form: form)
-    }
-
-    /// The 24-hex-digit id the official app sends with checkins and edits.
-    private static func requestID() -> String {
-        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(24).description
     }
 
     static func addComment(_ text: String, to checkinId: Int) -> APIRequest {
@@ -328,23 +322,23 @@ extension APIRequest {
                         rating: Double, shout: String, containerId: Int? = nil, taggedUserIds: [Int] = [],
                         isPhoto: Bool = false) -> APIRequest {
         let tz = TimeZone.current
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "en_US_POSIX")
-        df.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        // No `created_at`: Untappd seems to treat a checkin that gives its own time as backdated
+        // and keeps it out of every friend feed (`checkin/recent`), even when the time is now.
+        // Without it the server uses the current time. No `request_id` either: the official app
+        // sends a MongoDB ObjectId, but Untappd doesn't need one (Metabeer never sends it).
+        // See `POST /v4/checkin/add` in untappd-private-api.
         var form = [
             "bid": "\(beer)",
             "rating": rating > 0 ? String(format: "%.2f", rating) : "0",
             "shout": shout,
             "gmt_offset": "\(tz.secondsFromGMT() / 3600)",
             "timezone": tz.identifier,
-            "created_at": df.string(from: .now),
             "platform": "android",
             "app_theme": "light",
             "is_photo": isPhoto ? "true" : "false",
             "photo_file_ext": "jpg",
             // Format not captured (the one sample was empty); comma-separated user ids is a guess.
             "checkin_tags": taggedUserIds.map(String.init).joined(separator: ","),
-            "request_id": requestID(),
         ]
         if let foursquareId { form["foursquare_id"] = foursquareId }
         if let containerId { form["container_id"] = "\(containerId)" }
