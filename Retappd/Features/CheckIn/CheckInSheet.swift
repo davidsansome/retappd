@@ -16,6 +16,10 @@ struct CheckInSheet: View {
     @State private var shout = ""
     @State private var serving: ServingType?
     @State private var tagged: [User] = []
+    /// The flavours picked for this checkin.
+    @State private var flavors: [FlavorTag] = []
+    /// The flavours people tag this beer with most, most used first.
+    @State private var beerFlavors: [FlavorTag] = []
     @State private var photo: UIImage?
     @State private var editingPhoto = false
     @State private var libraryItem: PhotosPickerItem?
@@ -65,14 +69,14 @@ struct CheckInSheet: View {
                 VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
                     hero
                     comment
+                    // The official app's order: serving, friends, venue, flavours, shop.
                     TaproomSection("Serving") { servingChips }
                     if editing == nil {
+                        TaproomSection("With") { friendChips }
                         TaproomSection("Where") { venueChips }
+                        TaproomSection("Flavours") { flavorChips }
                     }
                     TaproomSection("Purchased at") { shopChips }
-                    if editing == nil {
-                        friends
-                    }
                     if let error {
                         Text(error).font(.footnote).foregroundStyle(.red)
                     }
@@ -109,6 +113,7 @@ struct CheckInSheet: View {
             .task { if editing == nil { await options.loadFriends() } }
             .task { await loadEditedShop() }
             .task { await prefillRating() }
+            .task { await loadBeerFlavors() }
             .onChange(of: options.servingTypes, initial: true) { preselectServing() }
         }
         .tint(Taproom.amber)
@@ -281,28 +286,75 @@ struct CheckInSheet: View {
         }
     }
 
-    private var friends: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("With").font(Taproom.sectionLabel)
-            FlowLayout(spacing: 6) {
-                ForEach(tagged) { u in
-                    Button { tagged.removeAll { $0.id == u.id } } label: {
-                        HStack(spacing: 6) {
-                            Avatar(url: u.avatar, size: 24)
-                            Text(u.shortName).lineLimit(1)
-                        }
-                    }
-                    .buttonStyle(TaproomChip(on: false, leading: 4))
-                    .accessibilityLabel(u.shortName)
-                    .accessibilityHint("Removes the tag")
-                }
-                NavigationLink {
-                    FriendPicker(selected: $tagged)
+    /// Friends you're likely to tag as one-tap chips, then anyone else you tagged from the full
+    /// list, then "…" for the full list. Chips stay put when tapped; they just turn amber.
+    private var friendChips: some View {
+        let suggested = options.suggestedFriends()
+        let others = tagged.filter { t in !suggested.contains { $0.id == t.id } }
+        return FlowLayout(spacing: 6) {
+            ForEach(suggested + others) { u in
+                let on = tagged.contains { $0.id == u.id }
+                Button {
+                    if on { tagged.removeAll { $0.id == u.id } } else { tagged.append(u) }
                 } label: {
-                    Text(tagged.isEmpty ? "+ Tag friends" : "+ Tag")
+                    HStack(spacing: 6) {
+                        if on { Avatar(url: u.avatar, size: 24) } else { Image(systemName: "plus").font(.caption.weight(.semibold)) }
+                        Text(u.shortName).lineLimit(1).frame(maxWidth: 160)
+                    }
                 }
-                .buttonStyle(TaproomChip(on: false, dashed: true))
+                .buttonStyle(TaproomChip(on: on, leading: on ? 4 : 12))
+                .accessibilityLabel(u.shortName)
+                .accessibilityAddTraits(on ? .isSelected : [])
+                .accessibilityHint(on ? "Removes the tag" : "Tags them")
             }
+            if suggested.isEmpty && options.loadingFriends {
+                ProgressView().frame(height: 34)
+            }
+            NavigationLink {
+                FriendPicker(selected: $tagged)
+            } label: {
+                if suggested.isEmpty && others.isEmpty {
+                    Text("+ Tag friends")
+                } else {
+                    Image(systemName: "ellipsis").frame(width: 20)
+                }
+            }
+            .buttonStyle(TaproomChip(on: false, dashed: suggested.isEmpty && others.isEmpty))
+            .accessibilityLabel("All friends")
+        }
+    }
+
+    /// The flavours people tag this beer with most, then any others you picked, then "…" for
+    /// every flavour.
+    private var flavorChips: some View {
+        let common = Array(beerFlavors.prefix(6))
+        let others = flavors.filter { f in !common.contains { $0.id == f.id } }
+        return FlowLayout(spacing: 6) {
+            ForEach(common + others) { f in
+                let on = flavors.contains { $0.id == f.id }
+                Button {
+                    if on { flavors.removeAll { $0.id == f.id } } else { flavors.append(f) }
+                } label: {
+                    HStack(spacing: 5) {
+                        if !on { Image(systemName: "plus").font(.caption.weight(.semibold)) }
+                        Text(f.name).lineLimit(1)
+                    }
+                }
+                .buttonStyle(TaproomChip(on: on))
+                .accessibilityLabel(f.name)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+            NavigationLink {
+                FlavorPicker(selected: $flavors, common: beerFlavors)
+            } label: {
+                if common.isEmpty && others.isEmpty {
+                    Text("+ Add flavours")
+                } else {
+                    Image(systemName: "ellipsis").frame(width: 20)
+                }
+            }
+            .buttonStyle(TaproomChip(on: false, dashed: common.isEmpty && others.isEmpty))
+            .accessibilityLabel("All flavours")
         }
     }
 
@@ -424,6 +476,14 @@ struct CheckInSheet: View {
         withAnimation { rating = min(max((last / step).rounded() * step, step), 5) }
     }
 
+    private func loadBeerFlavors() async {
+        guard editing == nil, let beer else { return }
+        let apply = { (l: FlavorTagList) in beerFlavors = l.items }
+        if let l = try? await cacheThenNetwork(.beerFlavorProfile(beer.bid), as: FlavorTagList.self, onCached: apply) {
+            apply(l)
+        }
+    }
+
     /// Selects the edited checkin's serving type once the list of types has loaded.
     private func preselectServing() {
         guard !preselectedServing, let name = editing?.servingType else { return }
@@ -455,7 +515,7 @@ struct CheckInSheet: View {
                                      lat: loc?.coordinate.latitude, lng: loc?.coordinate.longitude,
                                      rating: rating, shout: shout, containerId: serving?.id,
                                      taggedUserIds: tagged.map(\.id), purchaseFoursquareId: shop?.foursquareId,
-                                     isPhoto: jpeg != nil)
+                                     flavorIds: flavors.map(\.id), isPhoto: jpeg != nil)
         let r: CheckinAddResponse
         do {
             r = try await UntappdAPI.shared.fetch(req, as: CheckinAddResponse.self)
@@ -517,6 +577,53 @@ struct CheckInSheet: View {
             finished = true
             return false
         }
+    }
+}
+
+/// Every flavour tag, searchable, with the beer's common ones first.
+struct FlavorPicker: View {
+    @Binding var selected: [FlavorTag]
+    let common: [FlavorTag]
+    @State private var options = CheckInOptions.shared
+    @State private var filter = ""
+
+    var body: some View {
+        let match = { (f: FlavorTag) in filter.isEmpty || LocalIndex.matches(query: filter, text: f.name) }
+        let commonIds = Set(common.map(\.id))
+        let top = common.filter(match)
+        let rest = options.flavorTags.filter { !commonIds.contains($0.id) && match($0) }
+        List {
+            if !top.isEmpty {
+                Section("Common for this beer") { ForEach(top) { row($0) } }
+            }
+            Section(top.isEmpty ? "Flavours" : "All flavours") {
+                ForEach(rest) { row($0) }
+                if options.flavorTags.isEmpty { ProgressView().frame(maxWidth: .infinity) }
+            }
+        }
+        .searchable(text: $filter, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search flavours")
+        .navigationTitle(selected.isEmpty ? "Flavours" : "\(selected.count) picked")
+        .navigationBarTitleDisplayMode(.inline)
+        .tint(Taproom.amber)
+        .task { await options.loadFlavorTags() }
+    }
+
+    private func row(_ f: FlavorTag) -> some View {
+        let on = selected.contains { $0.id == f.id }
+        return Button {
+            if on { selected.removeAll { $0.id == f.id } } else { selected.append(f) }
+        } label: {
+            HStack {
+                Text(f.name).foregroundStyle(Taproom.ink)
+                Spacer()
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(on ? Taproom.amber : Taproom.border)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 

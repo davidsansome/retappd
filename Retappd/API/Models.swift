@@ -504,6 +504,35 @@ struct ServingTypes: Decodable {
     }
 }
 
+/// A flavour tag ("Fruity", "Light Bodied") a checkin can be tagged with.
+struct FlavorTag: Decodable, Hashable, Identifiable {
+    var id: Int
+    var name: String
+
+    init(id: Int, name: String) {
+        self.id = id
+        self.name = name
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        guard let id = c.int("tag_id"), let name = c.text("tag_name") else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "no tag"))
+        }
+        self.id = id
+        self.name = name
+    }
+}
+
+/// `/v4/beer/flavor_profile/{bid}` (a beer's most-used tags, most used first) and
+/// `/v4/checkin/flavor_profiles` (every tag, alphabetically) both list tags as `items`.
+struct FlavorTagList: Decodable {
+    var items: [FlavorTag]
+    init(from decoder: Decoder) throws {
+        items = try decoder.container(keyedBy: AnyKey.self).list("items")
+    }
+}
+
 /// `/v4/user/friends` and `/v4/user/recently_tagged` both wrap users as `items[].user`.
 struct UserList: Decodable {
     var users: [User]

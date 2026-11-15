@@ -24,9 +24,30 @@ final class CheckInOptions {
     private(set) var recentlyTagged: [User] = []
     private(set) var friends: [User] = []
     private(set) var servingTypes: [ServingType] = []
+    /// Every flavour tag, alphabetically.
+    private(set) var flavorTags: [FlavorTag] = []
     private(set) var loadingFriends = false
     private var loadedFriends = false
     private var loadedServing = false
+    private var loadedFlavors = false
+
+    /// Friends to offer as one-tap chips: recently tagged ones, else the first of the rest.
+    func suggestedFriends(limit: Int = 5) -> [User] {
+        Array(orderedFriends.prefix(limit))
+    }
+
+    func loadFlavorTags() async {
+        guard !loadedFlavors else { return }
+        loadedFlavors = true
+        let apply = { (l: FlavorTagList) in
+            self.flavorTags = l.items.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+        if let l = try? await cacheThenNetwork(.flavorTags, as: FlavorTagList.self, onCached: apply) {
+            apply(l)
+        } else if flavorTags.isEmpty {
+            loadedFlavors = false  // try again next time
+        }
+    }
 
     /// Recently tagged friends first, then everyone else alphabetically.
     var orderedFriends: [User] {

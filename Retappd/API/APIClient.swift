@@ -309,6 +309,15 @@ extension APIRequest {
 
     static let servingTypes = APIRequest(path: "/v4/checkin/serving_types")
 
+    /// The flavour tags people have given a beer most, most used first, with their counts.
+    static func beerFlavorProfile(_ bid: Int) -> APIRequest {
+        APIRequest(path: "/v4/beer/flavor_profile/\(bid)")
+    }
+
+    /// Every flavour tag a checkin can have (about 340), alphabetically. A POST with no fields,
+    /// as the official app sends it, though it only reads.
+    static let flavorTags = APIRequest(method: .post, path: "/v4/checkin/flavor_profiles", form: [:])
+
 
     static func friends(offset: Int = 0, limit: Int = 50) -> APIRequest {
         APIRequest(path: "/v4/user/friends", query: ["limit": "\(limit)", "offset": "\(offset)"])
@@ -344,7 +353,8 @@ extension APIRequest {
     /// some unrelated place instead.
     static func checkin(beer: Int, foursquareId: String?, lat: Double?, lng: Double?,
                         rating: Double, shout: String, containerId: Int? = nil, taggedUserIds: [Int] = [],
-                        purchaseFoursquareId: String? = nil, isPhoto: Bool = false) -> APIRequest {
+                        purchaseFoursquareId: String? = nil, flavorIds: [Int] = [],
+                        isPhoto: Bool = false) -> APIRequest {
         let tz = TimeZone.current
         // No `created_at`: Untappd seems to treat a checkin that gives its own time as backdated
         // and keeps it out of every friend feed (`checkin/recent`), even when the time is now.
@@ -363,6 +373,8 @@ extension APIRequest {
             "photo_file_ext": "jpg",
             // Format not captured (the one sample was empty); comma-separated user ids is a guess.
             "checkin_tags": taggedUserIds.map(String.init).joined(separator: ","),
+            // Tag ids; the one captured sample had a single id. Comma-separated, like `checkin_tags`.
+            "flavor_profiles": flavorIds.map(String.init).joined(separator: ","),
         ]
         if let foursquareId { form["foursquare_id"] = foursquareId }
         if let purchaseFoursquareId { form["purchase_foursquare_id"] = purchaseFoursquareId }

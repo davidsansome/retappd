@@ -75,7 +75,8 @@ System font throughout (SF Pro), so Dynamic Type works.
 | Piece | What it is | When to use it |
 |---|---|---|
 | `TaproomChip(on:)` | Capsule, 34pt tall; card with border, amber when selected | Picking one of a few options (serving style, venue). Use a `FlowLayout` for chips that wrap, or a horizontal `ScrollView` for one row. End a short list with a "…" chip that opens the full picker. |
-| `TaproomChip(on: false, dashed: true)` | Dashed outline, no fill | An "add" action within a row of chips ("+ Tag friends") |
+| `TaproomChip(on: false, dashed: true)` | Dashed outline, no fill | An "add" action within a row of chips ("+ Tag friends") when there's nothing to suggest |
+| Suggestion chips | `TaproomChip` reading "+ Name" off, turning amber (with an avatar for people) when tapped; they stay in place | One-tap picks from a likely few (recently tagged friends, a beer's common flavours), ending in a "…" chip for the full list |
 | `TaproomOutlineButton()` | Rounded rectangle (12pt), card fill, 1pt border, 44pt tall | Secondary actions, usually two side by side ("Camera" / "Photos") |
 | `TaproomPrimaryButton()` | Full width, 54pt, ink fill, background-coloured text, 16pt corners | The screen's one main action, pinned at the bottom |
 | `.taproomCard()` | Card fill, 1pt border, 16pt corners | Text fields, photos, tappable rows that need a boundary |
@@ -87,6 +88,7 @@ System font throughout (SF Pro), so Dynamic Type works.
 | `TaproomSearchField` | Card-style search field with Cancel; `focusRequests` focuses it from elsewhere | Searching or filtering on a page (Discover, a venue's menu) instead of `.searchable` |
 | `TaproomRowStyle` + `.taproomRowDivider()` | Full-width tappable row with a pressed highlight, and a 1pt warm line under it | Lists laid out on the page: venues, beers, search results |
 | `CardLinkStyle` | Dims a whole card a little while pressed | A card that opens something (feed cards, the "You're probably at" card) |
+| `HadCorner` | An amber triangle with a tick in a card's top-right corner | A card about a beer the signed-in user has had (feed cards for other people's checkins) |
 
 Existing shared views that already fit: `ServingIcon` (pass `color:` — amber normally,
 `Taproom.onAmber` on an amber chip), `Avatar`, `FlowLayout`, `VenueRow`.
@@ -94,8 +96,8 @@ Existing shared views that already fit: `ServingIcon` (pass `color:` — amber n
 ## Screen patterns
 
 - **Tab bar.** The system tab bar is hidden. `TaproomTabBar` sits on each tab's root screen with
-  Feed, Discover and Profile on the left and one context action on the right: **Search** on Feed
-  and Profile (jumps to Discover and focuses its search field), **Scan** on Discover (opens the
+  Activity, Discover and Me on the left and one context action on the right: **Search** on Activity
+  and Me (jumps to Discover and focuses its search field), **Scan** on Discover (opens the
   barcode scanner). Choosing the tab you're on scrolls it back to the top.
 - **Lists of things to read** (the feed, a profile's checkins) are cards: `.taproomCard()` with the
   photo edge to edge inside, the rating as each card's hero on the right.

@@ -6,6 +6,9 @@ struct CheckinRow<MenuItems: View>: View {
     let checkin: Checkin
     /// Shows the user's avatar and name; off on a profile, where it's always the same person.
     var showUser = true
+    /// Marks the card's corner when the signed-in user has had this beer. Off for their own
+    /// checkins, where it'd always show.
+    var showHad = false
     /// Items for the overflow menu at the top right; the menu is hidden when this is nil.
     var menu: (() -> MenuItems)?
     /// Shows a Toast button at the end of the toasts row when set.
@@ -22,6 +25,7 @@ struct CheckinRow<MenuItems: View>: View {
                 if let comment = checkin.comment {
                     Text(comment).font(.body).lineLimit(4)
                 }
+                ForEach(checkin.badges) { earned($0) }
             }
             .padding(14)
 
@@ -49,21 +53,54 @@ struct CheckinRow<MenuItems: View>: View {
                         if checkin.photo == nil || checkin.retailVenue != nil { divider }
                     }
             }
+
+            if let c = latestComment {
+                CommentRow(user: c.user, text: c.text, date: c.createdAt, avatarSize: 28, lineLimit: 3)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .overlay(alignment: .top) { divider }
+            }
         }
         .foregroundStyle(Taproom.ink)
         .background(Taproom.card)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Taproom.border))
+        .clipShape(cardShape)
+        .overlay(cardShape.stroke(Taproom.border))
+        // On top of the border, filling the card's square corner.
+        .overlay(alignment: .topTrailing) {
+            if hadCorner { HadCorner() }
+        }
     }
 
-    /// Who, where and when, with the overflow menu.
+    private var hadCorner: Bool { showHad && checkin.beer?.hasHad == true }
+
+    /// Rounded, except for a square top-right corner under the "had it" corner.
+    private var cardShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(topLeadingRadius: 16, bottomLeadingRadius: 16, bottomTrailingRadius: 16,
+                               topTrailingRadius: hadCorner ? 0 : 16)
+    }
+
+    /// Who and when on the first line, where (opening the venue) on the second, with the
+    /// overflow menu.
     private var header: some View {
         HStack(spacing: 10) {
-            if showUser { Avatar(url: checkin.user?.avatar, size: 32) }
-            whoWhereWhen
-                .font(.subheadline)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if showUser { Avatar(url: checkin.user?.avatar, size: 36) }
+            VStack(alignment: .leading, spacing: 1) {
+                whoWhen
+                if let v = checkin.venue {
+                    NavigationLink(value: v) {
+                        HStack(spacing: 3) {
+                            Text(v.name).lineLimit(1)
+                            Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
+                                .foregroundStyle(Taproom.muted)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens the venue")
+                }
+            }
+            .font(.subheadline)
+            .frame(maxWidth: .infinity, alignment: .leading)
             if let menu {
                 Menu(content: menu) {
                     Image(systemName: "ellipsis")
@@ -79,53 +116,91 @@ struct CheckinRow<MenuItems: View>: View {
         }
     }
 
-    private var whoWhereWhen: Text {
-        var t = Text("")
-        if showUser, let u = checkin.user { t = Text(u.shortName).fontWeight(.semibold) }
-        var rest: [String] = []
-        if let v = checkin.venue { rest.append((showUser ? "at " : "") + v.name) }
-        if let d = checkin.createdAt { rest.append(RelativeTime.string(d)) }
-        let tail = rest.joined(separator: " · ")
-        if tail.isEmpty { return t }
-        return t + Text(showUser && checkin.user != nil ? " " + tail : tail).foregroundStyle(Taproom.muted)
+    /// The name, then the time. A long name is shortened rather than the time.
+    private var whoWhen: some View {
+        HStack(spacing: 0) {
+            let when = checkin.createdAt.map { RelativeTime.string($0) }
+            if showUser, let u = checkin.user {
+                Text(u.shortName).fontWeight(.semibold).lineLimit(1)
+                if let when {
+                    Text(" · " + when).foregroundStyle(Taproom.muted).lineLimit(1).fixedSize()
+                }
+            } else if let when {
+                Text(when).foregroundStyle(Taproom.muted).lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
-    /// The beer, with the rating as the card's hero on the right.
+    /// The beer, with the rating as the card's hero on the right and the serving style under it:
+    /// name, then brewery, then style, as the official app orders them.
     private var beer: some View {
         HStack(alignment: .center, spacing: 12) {
             BeerLabel(beer: checkin.beer?.label, brewery: checkin.brewery?.label, size: 56)
             VStack(alignment: .leading, spacing: 2) {
-                if let b = checkin.brewery?.name {
-                    Text(b).font(.footnote).foregroundStyle(Taproom.muted).lineLimit(1)
-                }
                 Text(checkin.beer?.name ?? "Unknown beer")
                     .font(.system(size: 22, weight: .heavy))
                     .tracking(-0.4)
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
-                let meta = [checkin.beer?.style,
-                            checkin.beer?.abv.map { "\($0.formatted(.number.precision(.fractionLength(0...1))))%" },
-                            checkin.servingType].compactMap { $0 }.joined(separator: " · ")
-                if !meta.isEmpty {
-                    Text(meta).font(.caption).foregroundStyle(Taproom.muted).lineLimit(2).padding(.top, 1)
+                if let b = checkin.brewery?.name {
+                    Text(b).font(.subheadline).foregroundStyle(Taproom.muted).lineLimit(1)
+                }
+                if let style = checkin.beer?.style {
+                    Text(style).font(.caption).foregroundStyle(Taproom.muted).lineLimit(2)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            if let r = checkin.rating { TaproomRating(rating: r, size: 30) }
+            if checkin.rating != nil || checkin.servingType != nil {
+                VStack(alignment: .trailing, spacing: 4) {
+                    if let r = checkin.rating { TaproomRating(rating: r, size: 30) }
+                    if let s = checkin.servingType {
+                        HStack(spacing: 4) {
+                            ServingIcon(name: s, size: 15)
+                            Text(s).font(.caption).foregroundStyle(Taproom.muted).lineLimit(1)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .fixedSize()
+            }
         }
     }
 
     private var divider: some View { Rectangle().fill(Taproom.border).frame(height: 1) }
 
-    /// Where the beer was bought, on a row of its own under the beer.
+    /// Where the beer was bought, on a row of its own under the beer; opens the shop.
     private func purchasedAt(_ shop: Venue) -> some View {
-        Label {
-            Text("Purchased at ").foregroundStyle(Taproom.muted) + Text(shop.name).foregroundStyle(Taproom.ink)
-        } icon: {
-            Image(systemName: "bag").foregroundStyle(Taproom.amber)
+        NavigationLink(value: shop) {
+            HStack(spacing: 4) {
+                Image(systemName: "bag").foregroundStyle(Taproom.amber)
+                (Text("Purchased at ").foregroundStyle(Taproom.muted) + Text(shop.name).foregroundStyle(Taproom.ink))
+                    .lineLimit(1)
+                Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(Taproom.muted)
+                Spacer(minLength: 0)
+            }
+            .font(.caption)
+            .frame(minHeight: 24)
+            .contentShape(Rectangle())
         }
-        .font(.caption).lineLimit(1).labelStyle(TightLabel())
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens the shop")
+    }
+
+    /// "Earned the Pale as the Moon (Level 98) badge", with the badge's picture.
+    private func earned(_ b: Checkin.Badge) -> some View {
+        HStack(spacing: 8) {
+            CachedImage(url: b.image, maxPixel: 72).frame(width: 22, height: 22).clipShape(Circle())
+                .accessibilityHidden(true)
+            (Text("Earned the ").foregroundStyle(Taproom.muted) + Text(b.name).fontWeight(.semibold)
+             + Text(" badge").foregroundStyle(Taproom.muted))
+                .font(.caption).lineLimit(2)
+        }
+    }
+
+    /// The newest comment, previewed under the card's toasts.
+    private var latestComment: Checkin.Comment? {
+        checkin.comments.max { ($0.createdAt ?? .distantPast, $0.id) < ($1.createdAt ?? .distantPast, $1.id) }
     }
 
     private var hasFooter: Bool {

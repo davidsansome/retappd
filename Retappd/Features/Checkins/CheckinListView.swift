@@ -32,7 +32,7 @@ struct CheckinList<Header: View>: View {
                 ForEach(model.items) { c in
                     let mine = c.isBy(username: auth.username)
                     NavigationLink(value: CheckinRoute(checkin: c, listID: listID)) {
-                        CheckinRow(checkin: c, showUser: showUser,
+                        CheckinRow(checkin: c, showUser: showUser, showHad: !mine,
                                    menu: CheckinMenuItems.hasItems(c, isMine: mine) ? { menuItems(c, isMine: mine) } : nil,
                                    toast: showActions ? { toggleToast(c) } : nil,
                                    confirmingDelete: isConfirmingDelete(c),

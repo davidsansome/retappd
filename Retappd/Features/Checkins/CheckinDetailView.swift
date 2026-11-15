@@ -517,10 +517,12 @@ struct CommentRow: View {
     var status: Status = .posted
     var retry: () -> Void = {}
     var edit: () -> Void = {}
+    var avatarSize: CGFloat = 32
+    var lineLimit: Int? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Avatar(url: user?.avatar, size: 32)
+            Avatar(url: user?.avatar, size: avatarSize)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(user?.displayName ?? "You").font(.subheadline.weight(.semibold))
@@ -535,6 +537,7 @@ struct CommentRow: View {
                     }
                 }
                 Text(text).font(.subheadline)
+                    .lineLimit(lineLimit)
                     .foregroundStyle(status == .failed ? Taproom.muted : Taproom.ink)
                 if status == .failed {
                     HStack(spacing: 6) {

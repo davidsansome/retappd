@@ -359,3 +359,27 @@ struct BeerLabel: View {
     }
 
 }
+
+/// An amber corner with a tick, on a card for a beer the signed-in user has had.
+struct HadCorner: View {
+    var size: CGFloat = 28
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Path { p in
+                p.move(to: .zero)
+                p.addLine(to: CGPoint(x: size, y: 0))
+                p.addLine(to: CGPoint(x: size, y: size))
+                p.closeSubpath()
+            }
+            .fill(Taproom.amber)
+            Image(systemName: "checkmark")
+                .font(.system(size: size * 0.3, weight: .heavy))
+                .foregroundStyle(Taproom.onAmber)
+                .padding(.top, size * 0.12).padding(.trailing, size * 0.12)
+        }
+        .frame(width: size, height: size)
+        .accessibilityElement()
+        .accessibilityLabel("You've had this beer")
+    }
+}

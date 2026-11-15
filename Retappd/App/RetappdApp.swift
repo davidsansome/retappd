@@ -67,7 +67,7 @@ struct RootTabs: View {
     var body: some View {
         // The system tab bar is hidden; each tab's root screen carries the Taproom bar instead.
         TabView(selection: $page) {
-            Tab("Feed", systemImage: "list.bullet.rectangle", value: .feed) {
+            Tab("Activity", systemImage: "list.bullet.rectangle", value: .feed) {
                 NavigationStack(path: $feedPath) {
                     FeedView(model: feed).safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
                 }
@@ -80,7 +80,7 @@ struct RootTabs: View {
                 }
                 .toolbarVisibility(.hidden, for: .tabBar)
             }
-            Tab("Profile", systemImage: "person.crop.circle", value: .profile) {
+            Tab("Me", systemImage: "person.crop.circle", value: .profile) {
                 NavigationStack(path: $profilePath) {
                     ProfileView(username: username, model: profile) { profilePath.append(ProfileRoute.settings) }
                         .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
@@ -147,9 +147,9 @@ struct RootTabs: View {
 
 extension RootTabs {
     private static let tabs = [
-        TaproomTab(value: Page.feed, title: "Feed", systemImage: "list.bullet.rectangle"),
+        TaproomTab(value: Page.feed, title: "Activity", systemImage: "list.bullet.rectangle"),
         TaproomTab(value: Page.discover, title: "Discover", systemImage: "mappin.and.ellipse"),
-        TaproomTab(value: Page.profile, title: "Profile", systemImage: "person.crop.circle"),
+        TaproomTab(value: Page.profile, title: "Me", systemImage: "person.crop.circle"),
     ]
 
     private var tabBar: some View {
