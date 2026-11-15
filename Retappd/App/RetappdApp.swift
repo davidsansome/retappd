@@ -18,6 +18,9 @@ struct RetappdApp: App {
                         .id(username)
                 } else {
                     LoginView()
+                        #if DEBUG
+                        .task { await auth.signInFromLaunchArguments() }
+                        #endif
                 }
             }
             .environment(auth)

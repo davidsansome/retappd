@@ -32,6 +32,28 @@ final class AuthStore {
         self.username = name
     }
 
+    #if DEBUG
+    @ObservationIgnored private var triedLaunchSignIn = false
+
+    /// Signs in to a test account given at launch, so a fresh simulator can be signed in without
+    /// typing: `xcrun simctl launch <udid> com.davidsansome.retappd -autoLoginUsername <name>
+    /// -autoLoginPassword <password>` (or `scripts/launch-test-account.sh`). Does nothing if
+    /// already signed in, and only tries once per launch, so signing out sticks. Debug builds
+    /// only, so TestFlight builds ignore it.
+    func signInFromLaunchArguments() async {
+        guard !triedLaunchSignIn, !isSignedIn,
+              let user = UserDefaults.standard.string(forKey: "autoLoginUsername"), !user.isEmpty,
+              let pass = UserDefaults.standard.string(forKey: "autoLoginPassword"), !pass.isEmpty
+        else { return }
+        triedLaunchSignIn = true
+        do {
+            try await signIn(username: user, password: pass)
+        } catch {
+            print("Auto sign-in as \(user) failed: \(error.localizedDescription)")
+        }
+    }
+    #endif
+
     func signOut() {
         Keychain.delete("access_token")
         UserDefaults.standard.removeObject(forKey: "username")

@@ -27,8 +27,11 @@ When you need a new shared style, add it to `Taproom.swift` and describe it in D
 
 Each session creates and uses its own simulator, named after its task, and never touches
 another session's: `xcrun simctl create "Untappd v2 <task>" "iPhone 18 Pro"`, boot it, and
-pass its UDID to every simulator command. A new simulator isn't signed in to Untappd: ask the
-user to sign in, and never enter their password.
+pass its UDID to every simulator command. A new simulator isn't signed in to Untappd: after
+installing a Debug build, run `scripts/launch-test-account.sh <udid> [1|2]` to launch it signed in
+to one of the user's test accounts (kept in the gitignored `test-accounts.local` at the root of
+the main checkout, shared by every worktree). Never type a password into the app, and never use
+or ask for the user's own account's password; if you need their real account, ask them to sign in.
 
 ## Releasing
 
