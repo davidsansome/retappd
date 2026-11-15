@@ -3,7 +3,7 @@ import PhotosUI
 import Photos
 
 /// The full-screen check-in (and edit checkin) view: rate by filling the glass, add a photo,
-/// pick a serving style and venue, and tag friends.
+/// pick a serving style, venue and the shop you bought it at, and tag friends.
 struct CheckInSheet: View {
     let beer: BeerLite?
     /// The user's own checkin being edited; nil when making a new one.
@@ -24,6 +24,14 @@ struct CheckInSheet: View {
     /// A venue shown as a chip although it isn't a recent one: the one you're at, or one picked
     /// from the full list.
     @State private var extraVenue: Venue?
+    /// Where the beer was bought ("Purchased at" in the official app).
+    @State private var shop: Venue?
+    /// A shop shown as a chip although it isn't a recent one: the edited checkin's, or one picked.
+    @State private var extraShop: Venue?
+    @State private var showingShopPicker = false
+    /// Whether `shop` holds the edited checkin's real shop yet. Saving an edit without sending the
+    /// shop back removes it, so it's looked up first if the checkin came without one.
+    @State private var shopLoaded = true
     @State private var busy = false
     /// Set once the checkin is saved but something after it (the photo upload) failed.
     @State private var finished = false
@@ -45,6 +53,10 @@ struct CheckInSheet: View {
         _venue = State(initialValue: nil)
         _rating = State(initialValue: checkin.rating ?? 0)
         _shout = State(initialValue: checkin.comment ?? "")
+        _shop = State(initialValue: checkin.retailVenue)
+        _extraShop = State(initialValue: checkin.retailVenue)
+        // A shop without a Foursquare id couldn't be sent back, so look it up properly.
+        _shopLoaded = State(initialValue: checkin.retailVenueKnown && checkin.retailVenue.map { $0.foursquareId != nil } ?? true)
     }
 
     var body: some View {
@@ -56,6 +68,9 @@ struct CheckInSheet: View {
                     TaproomSection("Serving") { servingChips }
                     if editing == nil {
                         TaproomSection("Where") { venueChips }
+                    }
+                    TaproomSection("Bought at") { shopChips }
+                    if editing == nil {
                         friends
                     }
                     if let error {
@@ -81,6 +96,7 @@ struct CheckInSheet: View {
                 }
             }
             .navigationDestination(isPresented: $showingVenuePicker) { VenuePicker(selection: pickedVenue) }
+            .navigationDestination(isPresented: $showingShopPicker) { VenuePicker(selection: pickedShop, kind: .shop) }
             .fullScreenCover(isPresented: $showingCamera) {
                 CameraPicker { photo = $0 }.ignoresSafeArea()
             }
@@ -91,6 +107,7 @@ struct CheckInSheet: View {
             .interactiveDismissDisabled(busy)
             .task { await options.loadServingTypes() }
             .task { if editing == nil { await options.loadFriends() } }
+            .task { await loadEditedShop() }
             .onChange(of: options.servingTypes, initial: true) { preselectServing() }
         }
         .tint(Taproom.amber)
@@ -239,6 +256,30 @@ struct CheckInSheet: View {
         }
     }
 
+    private var shopChips: some View {
+        FlowLayout(spacing: 6) {
+            ForEach(chipShops) { v in
+                let on = shop?.id == v.id
+                Button { shop = on ? nil : v; shopLoaded = true } label: {
+                    Text(v.name).lineLimit(1).frame(maxWidth: 200)
+                }
+                .buttonStyle(TaproomChip(on: on))
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+            if chipShops.isEmpty {
+                Button { showingShopPicker = true } label: { Text("+ Add shop") }
+                    .buttonStyle(TaproomChip(on: false, dashed: true))
+                    .disabled(!shopLoaded)
+            } else {
+                Button { showingShopPicker = true } label: {
+                    Image(systemName: "ellipsis").frame(width: 20)
+                }
+                .buttonStyle(TaproomChip(on: false))
+                .accessibilityLabel("All shops")
+            }
+        }
+    }
+
     private var friends: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("With").font(Taproom.sectionLabel)
@@ -294,6 +335,36 @@ struct CheckInSheet: View {
             venue = v
             if let v, !chipVenues.contains(where: { $0.id == v.id }) { extraVenue = v }
         })
+    }
+
+    // MARK: Shops
+
+    /// The shop you picked or are editing, then the shops you've recently bought beer at.
+    private var chipShops: [Venue] {
+        var out: [Venue] = []
+        for v in [extraShop].compactMap({ $0 }) + options.recentShops where !out.contains(where: { $0.id == v.id }) {
+            out.append(v)
+        }
+        return out
+    }
+
+    private var pickedShop: Binding<Venue?> {
+        Binding(get: { shop }, set: { v in
+            shop = v
+            shopLoaded = true
+            if let v, !chipShops.contains(where: { $0.id == v.id }) { extraShop = v }
+        })
+    }
+
+    /// Looks up the edited checkin's shop when the checkin it was given didn't say.
+    private func loadEditedShop() async {
+        guard let editing, !shopLoaded else { return }
+        guard let r = try? await UntappdAPI.shared.fetch(.checkinView(editing.id), as: CheckinView.self),
+              let c = r.checkin, c.retailVenueKnown, c.retailVenue.map({ $0.foursquareId != nil }) ?? true,
+              !shopLoaded else { return }
+        shop = c.retailVenue
+        extraShop = c.retailVenue ?? extraShop
+        shopLoaded = true
     }
 
     // MARK: Actions
@@ -372,7 +443,8 @@ struct CheckInSheet: View {
         let req = APIRequest.checkin(beer: beer.bid, foursquareId: venue?.foursquareId,
                                      lat: loc?.coordinate.latitude, lng: loc?.coordinate.longitude,
                                      rating: rating, shout: shout, containerId: serving?.id,
-                                     taggedUserIds: tagged.map(\.id), isPhoto: jpeg != nil)
+                                     taggedUserIds: tagged.map(\.id), purchaseFoursquareId: shop?.foursquareId,
+                                     isPhoto: jpeg != nil)
         let r: CheckinAddResponse
         do {
             r = try await UntappdAPI.shared.fetch(req, as: CheckinAddResponse.self)
@@ -387,8 +459,14 @@ struct CheckInSheet: View {
 
     private func save(_ original: Checkin, jpeg: Data?) async {
         let trimmed = shout.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !shopLoaded { await loadEditedShop() }
+        guard shopLoaded else {
+            // Saving now would remove the checkin's shop, if it has one.
+            error = "Couldn't load this checkin's shop. Check your connection and try again."
+            return
+        }
         let req = APIRequest.editCheckin(original, rating: rating, shout: trimmed, containerId: serving?.id,
-                                         isPhoto: jpeg != nil)
+                                         purchaseFoursquareId: shop?.foursquareId, isPhoto: jpeg != nil)
         let r: CheckinAddResponse
         do {
             r = try await UntappdAPI.shared.fetch(req, as: CheckinAddResponse.self)
@@ -403,6 +481,8 @@ struct CheckInSheet: View {
         // Untappd leaves the comment alone when it's sent empty.
         updated.comment = trimmed.isEmpty ? original.comment : trimmed
         updated.servingType = serving?.name ?? original.servingType
+        updated.retailVenue = shop
+        updated.retailVenueKnown = true
         if jpeg != nil, uploaded, let d = r.photoDestinationURL {
             updated.photo = Checkin.Photo(small: d, medium: d, large: d)
         }

@@ -18,6 +18,8 @@ final class CheckInOptions {
 
     /// The last few places the user checked in, newest first, excluding Untappd at Home.
     private(set) var recentVenues: [Venue] = []
+    /// The last few shops the user said they bought a beer at, newest first.
+    private(set) var recentShops: [Venue] = []
 
     private(set) var recentlyTagged: [User] = []
     private(set) var friends: [User] = []
@@ -45,17 +47,21 @@ final class CheckInOptions {
         UserDefaults.standard.set(ratingStep, forKey: Self.ratingStepKey)
     }
 
-    /// Finds the user's most recent distinct venues from their own checkins.
+    /// Finds the user's most recent distinct venues and shops from their own checkins.
     func loadRecentVenues(username: String, count: Int = 3) async {
-        let apply = { (page: CheckinPage) in
+        func recent(_ venues: [Venue]) -> [Venue] {
             var out: [Venue] = []
-            for v in page.checkins.compactMap(\.venue)
+            for v in venues
             where v.foursquareId != nil && !v.isCustom && v.venueId != Venue.atHome.venueId
                 && !out.contains(where: { $0.id == v.id }) {
                 out.append(v)
                 if out.count == count { break }
             }
-            self.recentVenues = out
+            return out
+        }
+        let apply = { (page: CheckinPage) in
+            self.recentVenues = recent(page.checkins.compactMap(\.venue))
+            self.recentShops = recent(page.checkins.compactMap(\.retailVenue))
         }
         if let p = try? await cacheThenNetwork(.userCheckins(username), as: CheckinPage.self, onCached: apply) { apply(p) }
     }

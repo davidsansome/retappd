@@ -423,9 +423,10 @@ struct CheckinDetailView: View {
         .contentShape(Rectangle())
     }
 
-    /// Where, who with, and flavours, as chips.
+    /// Where, where it was bought, who with, and flavours, as chips.
     @ViewBuilder private var details: some View {
-        if checkin.venue != nil || !checkin.taggedFriends.isEmpty || !checkin.flavors.isEmpty {
+        if checkin.venue != nil || checkin.retailVenue != nil || !checkin.taggedFriends.isEmpty
+            || !checkin.flavors.isEmpty {
             FlowLayout(spacing: 6) {
                 if let v = checkin.venue {
                     NavigationLink(value: v) {
@@ -435,6 +436,16 @@ struct CheckinDetailView: View {
                         }
                     }
                     .buttonStyle(TaproomChip(on: false))
+                }
+                if let v = checkin.retailVenue {
+                    NavigationLink(value: v) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "bag").foregroundStyle(Taproom.amber)
+                            Text(v.name).lineLimit(1)
+                        }
+                    }
+                    .buttonStyle(TaproomChip(on: false))
+                    .accessibilityLabel("Bought at \(v.name)")
                 }
                 ForEach(checkin.taggedFriends) { UserChipLink(user: $0) }
                 ForEach(checkin.flavors, id: \.self) { f in

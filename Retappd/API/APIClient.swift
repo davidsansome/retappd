@@ -175,6 +175,16 @@ extension APIRequest {
         ])
     }
 
+    /// Places to have bought a beer, in `foursquare`: everything nearby, not just shops, unless
+    /// `query` narrows it. Same shape as `/venue/around`; what the official app's "Purchased at"
+    /// picker calls. Not sent with `recent=true`, which empties the `foursquare` list.
+    static func retailVenuesAround(lat: Double, lng: Double, query: String = "", limit: Int = 25) -> APIRequest {
+        APIRequest(path: "/v4/venue/aroundretail", query: [
+            "lat": String(format: "%.6f", lat), "lng": String(format: "%.6f", lng),
+            "limit": "\(limit)", "dist_pref": "m", "q": query, "location": "",
+        ])
+    }
+
     /// Untappd's own venues (with ids and verified flags) inside a box of ±`span` degrees.
     static func venueMap(lat: Double, lng: Double, span: Double = 0.008, limit: Int = 60) -> APIRequest {
         let bounds = String(format: #"{"ne":[%.6f,%.6f],"sw":[%.6f,%.6f]}"#, lat + span, lng + span, lat - span, lng - span)
@@ -234,11 +244,14 @@ extension APIRequest {
         APIRequest(method: .post, path: "/v4/checkin/delete/\(id)", form: [:])
     }
 
-    /// Changes a checkin's rating, comment and serving type, sending its beer and venue back
+    /// Changes a checkin's rating, comment, serving type and shop, sending its beer and venue back
     /// unchanged as the official app does. Untappd treats an empty `shout`, `checkin_tags` or
     /// `flavor_profiles` as "leave as is", so a comment can be changed but not cleared.
+    ///
+    /// `purchase_foursquare_id` is the opposite: leaving it out (or sending it empty) removes the
+    /// checkin's shop, so `purchaseFoursquareId` must be the shop to keep, or nil to remove it.
     static func editCheckin(_ checkin: Checkin, rating: Double, shout: String, containerId: Int?,
-                            isPhoto: Bool = false) -> APIRequest {
+                            purchaseFoursquareId: String?, isPhoto: Bool = false) -> APIRequest {
         let tz = TimeZone.current
         var form = [
             "rating": rating > 0 ? String(format: "%.2f", rating) : "0",
@@ -249,6 +262,7 @@ extension APIRequest {
             "photo_file_ext": "jpg",
             "gmt_offset": "\(tz.secondsFromGMT() / 3600)",
             "timezone": tz.identifier,
+            "purchase_foursquare_id": purchaseFoursquareId ?? "",
         ]
         if let bid = checkin.beerLite?.bid { form["bid"] = "\(bid)" }
         if let containerId { form["container_id"] = "\(containerId)" }
@@ -318,9 +332,12 @@ extension APIRequest {
                    form: ["parent_id": "\(id)", "is_enabled": enabled ? "true" : "false"])
     }
 
+    /// `purchaseFoursquareId` is where the beer was bought, which can be set without a venue. It
+    /// has to be a Foursquare id: Untappd doesn't reject an Untappd venue id there, but saves
+    /// some unrelated place instead.
     static func checkin(beer: Int, foursquareId: String?, lat: Double?, lng: Double?,
                         rating: Double, shout: String, containerId: Int? = nil, taggedUserIds: [Int] = [],
-                        isPhoto: Bool = false) -> APIRequest {
+                        purchaseFoursquareId: String? = nil, isPhoto: Bool = false) -> APIRequest {
         let tz = TimeZone.current
         // No `created_at`: Untappd seems to treat a checkin that gives its own time as backdated
         // and keeps it out of every friend feed (`checkin/recent`), even when the time is now.
@@ -341,6 +358,7 @@ extension APIRequest {
             "checkin_tags": taggedUserIds.map(String.init).joined(separator: ","),
         ]
         if let foursquareId { form["foursquare_id"] = foursquareId }
+        if let purchaseFoursquareId { form["purchase_foursquare_id"] = purchaseFoursquareId }
         if let containerId { form["container_id"] = "\(containerId)" }
         if let lat, let lng {
             form["geolat"] = String(format: "%.6f", lat)

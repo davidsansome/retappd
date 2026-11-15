@@ -215,6 +215,16 @@ struct Venue: Codable, Hashable, Identifiable {
         self.popularity = popularity
     }
 
+    /// Whether a Foursquare result looks like somewhere that sells beer to take away. Untappd's
+    /// nearby "retail" list is really every nearby place (hotels, offices…), so the shop picker
+    /// lists these first.
+    var looksLikeShop: Bool {
+        guard let c = category?.lowercased() else { return false }
+        return ["liquor", "bottle", "beer", "wine", "grocery", "supermarket", "convenience", "market", "brew",
+                "deli", "off licen", "food and beverage", "retail", "warehouse", "department store", "gourmet"]
+            .contains { c.contains($0) }
+    }
+
     /// Whether a Foursquare-only result looks like somewhere you'd drink a beer.
     var looksLikeDrinkingPlace: Bool {
         guard let c = category?.lowercased() else { return false }
@@ -322,6 +332,11 @@ struct Checkin: Decodable, Hashable, Identifiable {
     var beer: BeerRef?
     var brewery: BreweryRef?
     var venue: Venue?
+    /// Where the beer was bought (`retail_venue`, "Purchased at" in the official app); nil if none.
+    var retailVenue: Venue?
+    /// Whether the response had a `retail_venue` key at all, so a nil `retailVenue` means "none"
+    /// rather than "not told". Editing a checkin clears its shop unless it's sent back.
+    var retailVenueKnown: Bool
     var toastCount: Int
     var toasters: [User]
     var youToasted: Bool
@@ -377,6 +392,7 @@ struct Checkin: Decodable, Hashable, Identifiable {
     static func == (a: Checkin, b: Checkin) -> Bool {
         a.id == b.id && a.toastCount == b.toastCount && a.youToasted == b.youToasted
             && a.rating == b.rating && a.comment == b.comment && a.servingType == b.servingType
+            && a.retailVenue?.id == b.retailVenue?.id
     }
     func hash(into h: inout Hasher) { h.combine(id) }
 
@@ -393,6 +409,8 @@ struct Checkin: Decodable, Hashable, Identifiable {
         beer = c.obj("beer")
         brewery = c.obj("brewery")
         venue = c.obj("venue")  // `[]` when there's no venue; obj() returns nil.
+        retailVenue = c.obj("retail_venue")  // also `[]` when there's none
+        retailVenueKnown = c.contains(AnyKey("retail_venue"))
 
         let toasts = c.nested("toasts")
         toastCount = toasts?.int("total_count") ?? toasts?.int("count") ?? 0

@@ -52,6 +52,41 @@ final class DecodingTests: XCTestCase {
         XCTAssertNotNil(c.createdAt)
     }
 
+    func testCheckinRetailVenue() throws {
+        let json = """
+        {"meta":{"code":200},"response":{"checkins":{"count":3,"items":[
+          {"checkin_id": 1, "venue": [], "retail_venue": {"venue_id": 6154402, "venue_name": "Beer Barrel",
+           "primary_category": "Retail", "foursquare": {"foursquare_id": "58fd2d34d7627e28e69cec9d"}}},
+          {"checkin_id": 2, "venue": [], "retail_venue": []},
+          {"checkin_id": 3, "venue": []}
+        ]}}}
+        """
+        let c = try UntappdAPI.decode(CheckinPage.self, from: Data(json.utf8)).checkins
+        XCTAssertEqual(c[0].retailVenue?.name, "Beer Barrel")
+        XCTAssertEqual(c[0].retailVenue?.foursquareId, "58fd2d34d7627e28e69cec9d")
+        XCTAssertTrue(c[0].retailVenueKnown)
+        XCTAssertNil(c[1].retailVenue)
+        XCTAssertTrue(c[1].retailVenueKnown)
+        XCTAssertNil(c[2].retailVenue)
+        XCTAssertFalse(c[2].retailVenueKnown)
+    }
+
+    /// Untappd removes a checkin's shop when an edit leaves `purchase_foursquare_id` out.
+    func testEditCheckinAlwaysSendsShop() throws {
+        let json = """
+        {"meta":{"code":200},"response":{"checkins":{"count":1,"items":[{"checkin_id": 7, "venue": []}]}}}
+        """
+        let c = try XCTUnwrap(UntappdAPI.decode(CheckinPage.self, from: Data(json.utf8)).checkins.first)
+        let keep = APIRequest.editCheckin(c, rating: 3, shout: "", containerId: nil, purchaseFoursquareId: "abc")
+        XCTAssertEqual(keep.form?["purchase_foursquare_id"], "abc")
+        let clear = APIRequest.editCheckin(c, rating: 3, shout: "", containerId: nil, purchaseFoursquareId: nil)
+        XCTAssertEqual(clear.form?["purchase_foursquare_id"], "")
+        let add = APIRequest.checkin(beer: 1, foursquareId: nil, lat: nil, lng: nil, rating: 0, shout: "",
+                                     purchaseFoursquareId: "abc")
+        XCTAssertEqual(add.form?["purchase_foursquare_id"], "abc")
+        XCTAssertNil(add.form?["foursquare_id"])
+    }
+
     func testVenueAroundAndRoundTrip() throws {
         let json = """
         {"meta":{"code":200},"response":{"location":{"lat":-33.86,"lng":151.2},
