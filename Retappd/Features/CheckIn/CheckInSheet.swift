@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import Photos
 
 /// The full-screen check-in (and edit checkin) view: rate by filling the glass, add a photo,
 /// pick a serving style and venue, and tag friends.
@@ -157,13 +158,17 @@ struct CheckInSheet: View {
             }
         } else {
             HStack(spacing: 8) {
-                Button { showingCamera = true } label: { Label("Camera", systemImage: "camera") }
+                Button { showingCamera = true } label: { Label("Camera", systemImage: "camera").lineLimit(1) }
                     .buttonStyle(TaproomOutlineButton())
                     .disabled(!CameraPicker.isAvailable)
+                Button { useLastPhoto() } label: { Label("Last", systemImage: "clock.arrow.circlepath").lineLimit(1) }
+                    .buttonStyle(TaproomOutlineButton())
                 PhotosPicker(selection: $libraryItem, matching: .images) {
-                    Label("Photos", systemImage: "photo.on.rectangle")
+                    Image(systemName: "photo.on.rectangle")
                 }
                 .buttonStyle(TaproomOutlineButton())
+                .frame(width: 44)
+                .accessibilityLabel("Photos")
             }
         }
     }
@@ -291,6 +296,39 @@ struct CheckInSheet: View {
         guard let item else { return }
         Task {
             if let data = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: data) {
+                photo = img
+            } else {
+                error = "Couldn't load that photo."
+            }
+        }
+    }
+
+    /// Attaches the most recent image in the photo library.
+    private func useLastPhoto() {
+        Task {
+            var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            if status == .notDetermined { status = await PHPhotoLibrary.requestAuthorization(for: .readWrite) }
+            guard status == .authorized || status == .limited else {
+                error = "Allow photo access in Settings to use your last photo."
+                return
+            }
+            let options = PHFetchOptions()
+            options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+            options.fetchLimit = 1
+            guard let asset = PHAsset.fetchAssets(with: .image, options: options).firstObject else {
+                error = "No photos found."
+                return
+            }
+            let request = PHImageRequestOptions()
+            request.deliveryMode = .highQualityFormat
+            request.isNetworkAccessAllowed = true
+            request.version = .current
+            let data: Data? = await withCheckedContinuation { cont in
+                PHImageManager.default().requestImageDataAndOrientation(for: asset, options: request) { data, _, _, _ in
+                    cont.resume(returning: data)
+                }
+            }
+            if let data, let img = UIImage(data: data) {
                 photo = img
             } else {
                 error = "Couldn't load that photo."
