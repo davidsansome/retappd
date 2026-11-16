@@ -201,9 +201,12 @@ extension APIRequest {
         ])
     }
 
-    static func venueCheckins(_ venueId: Int, friendsOnly: Bool = false, limit: Int = 25) -> APIRequest {
+    /// A venue's checkins, newest first; `friendsOnly` keeps just the user's friends'. Pages with
+    /// `max_id` like the other feeds.
+    static func venueCheckins(_ venueId: Int, friendsOnly: Bool = false, maxId: Int? = nil, limit: Int = 25) -> APIRequest {
         var q = ["limit": "\(limit)"]
         if friendsOnly { q["type"] = "friends" }
+        if let maxId { q["max_id"] = "\(maxId)" }
         return APIRequest(path: "/v4/venue/checkins/\(venueId)", query: q)
     }
 

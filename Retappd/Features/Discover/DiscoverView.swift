@@ -43,7 +43,8 @@ struct DiscoverView: View {
         .task(id: query) { await model.search(query) }
         .task { await model.refreshIfStale(location: location.location) }
         .refreshable { await model.update(location: location.location, force: true) }
-        .navigationDestination(for: Venue.self) { VenueDetailView(venue: $0) }
+        // Venues, and the checkins and people on their pages.
+        .modifier(CheckinDestinations(enabled: true, me: model.me))
         .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: model.here.first) }
         .sheet(isPresented: $scanning, onDismiss: {
             // Open the check-in once the scanner has gone, as only one modal shows at a time.

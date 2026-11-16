@@ -18,6 +18,8 @@ final class DiscoverModel {
     static let friendRadius: CLLocationDistance = 2_000
     static let friendWindow: TimeInterval = 4 * 3600
 
+    /// The signed-in user, for checkins opened from venue pages in this tab.
+    var me: User?
     private(set) var origin: CLLocation?
     private(set) var here: [Venue] = []
     private(set) var friendsNearby: [FriendActivity] = []

@@ -185,6 +185,7 @@ extension RootTabs {
             guard let me = info.user?.asUser, me.id != 0 else { return }
             feed.me = me
             profile.me = me
+            discover.me = me
         }
         if let info = try? await cacheThenNetwork(.userInfo(username), as: UserInfo.self, onCached: apply) {
             apply(info)

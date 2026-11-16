@@ -256,6 +256,7 @@ struct Venue: Codable, Hashable, Identifiable {
         category = category ?? other.category
         address = address ?? other.address
         city = city ?? other.city
+        state = state ?? other.state
         lat = lat ?? other.lat
         lng = lng ?? other.lng
         icon = icon ?? other.icon
@@ -605,6 +606,35 @@ struct VenueInfo: Decodable {
     var venue: Venue?
     /// Beers currently listed at the venue, with tap numbers where the venue sets them.
     var onTap: [TapItem]
+    var stats: Stats?
+    var country: String?
+    /// The venue's own website (`contact.venue_url`), if it gave one.
+    var website: URL?
+
+    /// Checkin counts. Meanings are read from the field names and the official web page's
+    /// "Total / Unique / Monthly / You" boxes; the API docs only capture the types.
+    struct Stats: Decodable, Equatable {
+        /// Every checkin here (`total_count`).
+        var total: Int?
+        /// People who've checked in here (`total_user_count`).
+        var people: Int?
+        /// The signed-in user's checkins here (`user_count`).
+        var yours: Int?
+        /// Checkins since the start of this calendar month (`monthly_count`).
+        var thisMonth: Int?
+        /// Checkins since the start of this calendar week (`weekly_count`): 6 against 529 for the
+        /// month at a busy pub on a Monday (2026-11-16), so it isn't a rolling seven days.
+        var thisWeek: Int?
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            total = c.int("total_count")
+            people = c.int("total_user_count")
+            yours = c.int("user_count")
+            thisMonth = c.int("monthly_count")
+            thisWeek = c.int("weekly_count")
+        }
+    }
 
     struct TapItem: Decodable {
         var beer: BeerLite?
@@ -626,6 +656,18 @@ struct VenueInfo: Decodable {
         let v = try decoder.container(keyedBy: AnyKey.self).nested("venue")
         venue = try? decoder.container(keyedBy: AnyKey.self).obj("venue")
         onTap = v?.items("recently_added") ?? []
+        stats = v?.obj("stats")
+        country = v?.nested("location")?.text("venue_country")
+        website = v?.nested("contact")?.text("venue_url").flatMap(Self.websiteURL)
+    }
+
+    /// A website as typed by the venue, with a scheme added when it's left off ("example.com").
+    static func websiteURL(_ s: String) -> URL? {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return nil }
+        let withScheme = t.lowercased().hasPrefix("http") ? t : "https://\(t)"
+        guard let url = URL(string: withScheme), url.host?.contains(".") == true else { return nil }
+        return url
     }
 }
 

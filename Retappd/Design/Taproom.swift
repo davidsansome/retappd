@@ -324,6 +324,44 @@ struct TaproomTabBar<Value: Hashable, Action: View>: View {
     }
 }
 
+/// Tabs splitting one page into views of different things (a venue's Menu and Check-ins): equal
+/// full-width tabs with an icon and a heavy label, the selected one in ink over a 3pt ink
+/// underline, all on a hairline that runs edge to edge. Chips go under it to narrow the
+/// selected tab further. Lay it out inside the page's side margins; the hairline bleeds past them.
+struct TaproomPageTabs<Value: Hashable>: View {
+    let tabs: [TaproomTab<Value>]
+    @Binding var selection: Value
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(tabs) { tab in
+                let on = tab.value == selection
+                Button {
+                    withAnimation(.interactiveSpring(response: 0.25, dampingFraction: 0.85)) { selection = tab.value }
+                } label: {
+                    Label(tab.title, systemImage: tab.systemImage)
+                        .labelStyle(TightLabel())
+                        .font(.body.weight(.heavy))
+                        .tracking(-0.2)
+                        .lineLimit(1)
+                        .foregroundStyle(on ? Taproom.ink : Taproom.muted)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .overlay(alignment: .bottom) {
+                            if on { Rectangle().fill(Taproom.ink).frame(height: 3) }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .background(alignment: .bottom) {
+            Rectangle().fill(Taproom.border).frame(height: 1).padding(.horizontal, -Taproom.margin)
+        }
+        .sensoryFeedback(.selection, trigger: selection)
+    }
+}
+
 /// A beer's label: its own if it has one, else its brewery's logo, else the app icon. Untappd's
 /// stock "no label" badges count as having none.
 struct BeerLabel: View {

@@ -315,6 +315,46 @@ struct ToastChips: View {
     }
 }
 
+/// A checkin as one row, for lists of many checkins at one place (a venue's): who and how long
+/// ago, the beer, a thumbnail of the photo, and the rating.
+struct CompactCheckinRow: View {
+    let checkin: Checkin
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Avatar(url: checkin.user?.avatar, size: 36)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 0) {
+                    Text(checkin.user?.shortName ?? "Someone").fontWeight(.semibold).lineLimit(1)
+                    if let d = checkin.createdAt {
+                        Text(" · " + RelativeTime.short(d)).foregroundStyle(Taproom.muted).lineLimit(1).fixedSize()
+                    }
+                }
+                .font(.footnote)
+                Text(checkin.beer?.name ?? "Unknown beer")
+                    .font(.body.weight(.heavy)).tracking(-0.2).lineLimit(1)
+                let meta = [checkin.brewery?.name, checkin.servingType].compactMap { $0 }.joined(separator: " · ")
+                if !meta.isEmpty {
+                    Text(meta).font(.footnote).foregroundStyle(Taproom.muted).lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let url = checkin.photo?.small ?? checkin.photo?.medium {
+                CachedImage(url: url, maxPixel: 150) { Taproom.glassInside }
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .accessibilityLabel("Photo")
+            }
+            if let r = checkin.rating { TaproomRating(rating: r, size: 22) }
+        }
+        .foregroundStyle(Taproom.ink)
+        .padding(.vertical, 10)
+        .frame(minHeight: 56)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
 struct Avatar: View {
     let url: URL?
     let size: CGFloat
@@ -449,6 +489,45 @@ enum RelativeTime {
         f.unitsStyle = .full
         return f
     }()
+
+    /// A compact age for tight rows: "now", "12m", "5h", "Yesterday", "3d", then "14 Sep", or
+    /// "Jun 2025" in an earlier year.
+    static func short(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
+        let age = now.timeIntervalSince(date)
+        if age < 60 { return "now" }
+        if age < 3600 { return "\(Int(age / 60))m" }
+        if calendar.isDate(date, inSameDayAs: now) { return "\(Int(age / 3600))h" }
+        if let y = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: y) {
+            return "Yesterday"
+        }
+        if age < 7 * 86_400 { return "\(max(2, Int(age / 86_400)))d" }
+        let sameYear = calendar.isDate(date, equalTo: now, toGranularity: .year)
+        return date.formatted(sameYear ? .dateTime.day().month(.abbreviated) : .dateTime.month(.abbreviated).year())
+    }
+
+    /// Buckets for grouping a list by how recent each item is.
+    enum Bucket: Int, CaseIterable, Comparable {
+        case lastHour, today, thisWeek, earlier
+
+        var title: String {
+            switch self {
+            case .lastHour: "Last hour"
+            case .today: "Today"
+            case .thisWeek: "This week"
+            case .earlier: "Earlier"
+            }
+        }
+
+        init(_ date: Date, now: Date = .now, calendar: Calendar = .current) {
+            let age = now.timeIntervalSince(date)
+            if age < 3600 { self = .lastHour }
+            else if calendar.isDate(date, inSameDayAs: now) { self = .today }
+            else if age < 7 * 86_400 { self = .thisWeek }
+            else { self = .earlier }
+        }
+
+        static func < (a: Bucket, b: Bucket) -> Bool { a.rawValue < b.rawValue }
+    }
 
     /// "16 minutes ago" within the last day, otherwise an absolute date and time.
     static func string(_ date: Date, now: Date = .now) -> String {

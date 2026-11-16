@@ -116,7 +116,7 @@ struct CheckinRoute: Hashable {
 }
 
 /// Where checkins, venues and people open within a navigation stack.
-private struct CheckinDestinations: ViewModifier {
+struct CheckinDestinations: ViewModifier {
     let enabled: Bool
     let me: User?
 

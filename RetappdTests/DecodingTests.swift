@@ -300,4 +300,51 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(try rating(#"{"rating_score": 3.75}"#), 3.75)
         XCTAssertEqual(try rating(#"{"rating_score": "4.2"}"#), 4.2)
     }
+
+    func testVenueInfoStatsAndWebsite() throws {
+        let json = """
+        {"meta":{"code":200},"response":{"venue":{"venue_id":17058,"venue_name":"Union Hotel Newtown",
+         "stats":{"total_count":48210,"user_count":3,"total_user_count":21900,"monthly_count":1200,"weekly_count":312},
+         "location":{"venue_address":"576 King St","venue_city":"Newtown","venue_state":"NSW","venue_country":"Australia","lat":-33.9,"lng":151.18},
+         "contact":{"twitter":"","venue_url":"www.example.com.au","facebook":""}}}}
+        """
+        let info = try UntappdAPI.decode(VenueInfo.self, from: Data(json.utf8))
+        XCTAssertEqual(info.stats?.total, 48210)
+        XCTAssertEqual(info.stats?.people, 21900)
+        XCTAssertEqual(info.stats?.yours, 3)
+        XCTAssertEqual(info.stats?.thisWeek, 312)
+        XCTAssertEqual(info.country, "Australia")
+        XCTAssertEqual(info.website?.absoluteString, "https://www.example.com.au")
+        XCTAssertEqual(info.venue?.address, "576 King St")
+    }
+
+    func testVenueWebsiteIgnoresJunk() {
+        XCTAssertNil(VenueInfo.websiteURL(""))
+        XCTAssertNil(VenueInfo.websiteURL("  "))
+        XCTAssertNil(VenueInfo.websiteURL("n/a"))
+        XCTAssertEqual(VenueInfo.websiteURL("http://a.com/x")?.absoluteString, "http://a.com/x")
+    }
+
+    func testShortRelativeTimeAndBuckets() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let now = cal.date(from: DateComponents(year: 2026, month: 11, day: 16, hour: 20))!
+        func ago(_ s: TimeInterval) -> Date { now.addingTimeInterval(-s) }
+        XCTAssertEqual(RelativeTime.short(ago(30), now: now, calendar: cal), "now")
+        XCTAssertEqual(RelativeTime.short(ago(12 * 60), now: now, calendar: cal), "12m")
+        XCTAssertEqual(RelativeTime.short(ago(5 * 3600), now: now, calendar: cal), "5h")
+        XCTAssertEqual(RelativeTime.short(ago(24 * 3600), now: now, calendar: cal), "Yesterday")
+        XCTAssertEqual(RelativeTime.short(ago(3 * 86_400), now: now, calendar: cal), "3d")
+        XCTAssertEqual(RelativeTime.Bucket(ago(10 * 60), now: now, calendar: cal), .lastHour)
+        XCTAssertEqual(RelativeTime.Bucket(ago(5 * 3600), now: now, calendar: cal), .today)
+        XCTAssertEqual(RelativeTime.Bucket(ago(3 * 86_400), now: now, calendar: cal), .thisWeek)
+        XCTAssertEqual(RelativeTime.Bucket(ago(30 * 86_400), now: now, calendar: cal), .earlier)
+    }
+
+    func testVenueCheckinsPaging() {
+        let r = APIRequest.venueCheckins(17058, friendsOnly: true, maxId: 99)
+        XCTAssertEqual(r.path, "/v4/venue/checkins/17058")
+        XCTAssertEqual(r.query["type"], "friends")
+        XCTAssertEqual(r.query["max_id"], "99")
+    }
 }

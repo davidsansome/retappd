@@ -7,11 +7,13 @@ final class CheckinListModel {
     enum Source: Equatable {
         case friends
         case user(String)
+        case venue(Int, friendsOnly: Bool)
 
         func request(maxId: Int? = nil) -> APIRequest {
             switch self {
             case .friends: .friendFeed(maxId: maxId)
             case .user(let u): .userCheckins(u, maxId: maxId)
+            case .venue(let id, let friendsOnly): .venueCheckins(id, friendsOnly: friendsOnly, maxId: maxId)
             }
         }
     }
@@ -72,9 +74,20 @@ final class CheckinListModel {
             merge(fresh: page)
             error = nil
         } catch is CancellationError {
+            retryIfEmpty()
         } catch {
-            if (error as? URLError)?.code != .cancelled { self.error = error.localizedDescription }
+            if (error as? URLError)?.code == .cancelled {
+                retryIfEmpty()
+            } else {
+                self.error = error.localizedDescription
+            }
         }
+    }
+
+    /// A first load that was cancelled (the view went away mid-request) shouldn't count, or the
+    /// list stays empty for good: let the next `loadIfNeeded()` try again.
+    private func retryIfEmpty() {
+        if items.isEmpty { hasLoaded = false }
     }
 
     /// Call when a row appears; fetches the next page as the user nears the bottom.

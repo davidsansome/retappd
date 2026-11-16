@@ -85,13 +85,17 @@ System font throughout (SF Pro), so Dynamic Type works.
 | `FilledGlass(rating:)` | A static pint glass filled to a rating, optional foam | Inside `TaproomRating`, and decoration (the login glass). `GlassRating` is the draggable one. |
 | `BeerLabel(beer:brewery:size:)` | A beer's label, else its brewery's logo, else the app icon; Untappd's stock "default" badges count as none | Every beer image in a row, card or hero |
 | `TaproomTabBar` | The app's bottom bar: tabs on the left, one dark context action on the right | Each tab's root screen, via `.safeAreaInset(edge: .bottom)`. Not on pushed screens, so it slides away on push; it hides itself while the keyboard is up. Its background is frosted glass (`.ultraThinMaterial` under a wash of `background`), so the page shows through as it scrolls under. |
+| `TaproomPageTabs` | Equal full-width tabs with an icon and heavy label; the selected one in ink over a 3pt ink underline, on a hairline that bleeds to the screen edges | Splitting one page into views of different kinds of thing (a venue's Menu and Check-ins). Chips go under it to narrow the selected tab; pin both under the navigation bar as a `LazyVStack` section header. Not for picking a value, which is what chips are for. |
 | `TaproomSearchField` | Card-style search field with Cancel; `focusRequests` focuses it from elsewhere | Searching or filtering on a page (Discover, a venue's menu) instead of `.searchable` |
 | `TaproomRowStyle` + `.taproomRowDivider()` | Full-width tappable row with a pressed highlight, and a 1pt warm line under it | Lists laid out on the page: venues, beers, search results |
 | `CardLinkStyle` | Dims a whole card a little while pressed | A card that opens something (feed cards, the "You're probably at" card) |
 | `HadCorner` | An amber triangle with a tick in a card's top-right corner | A card about a beer the signed-in user has had (feed cards for other people's checkins) |
 
 Existing shared views that already fit: `ServingIcon` (pass `color:` — amber normally,
-`Taproom.onAmber` on an amber chip), `Avatar`, `FlowLayout`, `VenueRow`.
+`Taproom.onAmber` on an amber chip), `Avatar`, `FlowLayout`, `VenueRow`, and
+`CompactCheckinRow` (who and how long ago, the beer, a photo thumbnail and the rating on one
+row) for lists of many checkins at one place, grouped under recency labels
+(`RelativeTime.Bucket`: Last hour, Today, This week, Earlier).
 
 ## Screen patterns
 
@@ -105,8 +109,9 @@ Existing shared views that already fit: `ServingIcon` (pass `color:` — amber n
   `TaproomRowStyle` and dividers, grouped under `TaproomSection`s. No `List`.
 - **Detail screens** lead with their hero: the checkin's photo square and edge to edge under the
   navigation bar, with the content sheet overlapping it by 28pt (24pt top corners); without a
-  photo, the label and a plain bar. A venue leads with its name in heavy type and its menu
-  sections as chips.
+  photo, the label and a plain bar. A venue leads with its name in heavy type and when it was last
+  checked in at, then a stats card (Check-ins, People, This month, Yours), a "Where" card (address to Google Maps, website), and
+  `TaproomPageTabs` for Menu (sections as chips) and Check-ins (Everyone / Friends chips).
 - **Settings** use cards of switch rows (`Toggle` tinted amber), chips for multi-select options
   and tiles with previews for the theme.
 
