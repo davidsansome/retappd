@@ -4,6 +4,8 @@ enum ProfileRoute: Hashable { case settings, friends, statistics }
 
 struct SettingsView: View {
     @AppStorage(Appearance.storageKey) private var appearance = Appearance.system
+    @AppStorage(MetabeerSettings.enabledKey) private var shopPrices = false
+    @AppStorage(MetabeerSettings.marketKey) private var market = MetabeerMarket.local
     @Environment(AuthStore.self) private var auth
     @State private var settings: AccountSettings?
     @State private var styles: [ParentStyleOptOut] = []
@@ -21,6 +23,7 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
                 TaproomSection("Theme") { themeTiles }
+                shopPricesSection
 
                 TaproomSection("Notifications") { notificationControls }
 
@@ -164,6 +167,27 @@ struct SettingsView: View {
             .tint(Taproom.amber)
     }
 
+    /// Prices from Metabeer: on or off, and which country's shops.
+    private var shopPricesSection: some View {
+        TaproomSection("Shop prices") {
+            switchCard {
+                Toggle("Show shop prices", isOn: $shopPrices).tint(Taproom.amber)
+                    .accessibilityIdentifier("Settings.shopPricesToggle")
+            }
+            if shopPrices {
+                HStack(spacing: 6) {
+                    ForEach(MetabeerMarket.allCases) { m in
+                        Button(m.name) { market = m }
+                            .buttonStyle(TaproomChip(on: market == m))
+                            .accessibilityAddTraits(market == m ? .isSelected : [])
+                            .accessibilityIdentifier("Settings.market.\(m.rawValue)")
+                    }
+                }
+                .sensoryFeedback(.selection, trigger: market)
+            }
+            caption("Shows where to buy a beer and what it costs, from Metabeer, which tracks beer shops in Australia and the UK.")
+        }
+    }
     /// Switch rows in a card, with a line between each.
     private func switchCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(spacing: 0) {

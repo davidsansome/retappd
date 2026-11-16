@@ -20,6 +20,8 @@ struct CheckinDetailView: View {
     /// What was in the composer before editing a comment started, restored afterwards.
     @State private var draftBeforeEditing = ""
     @State private var error: String?
+    /// The beer's prices at shops, from Metabeer, when shop prices are on and a shop has it.
+    @State private var shopPrices: MetabeerOffers?
     @FocusState private var composerFocused: Bool
     @Environment(DiscoverModel.self) private var discover
     @Environment(AuthStore.self) private var auth
@@ -37,6 +39,7 @@ struct CheckinDetailView: View {
                     photo
                     VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
                         beerHero
+                        if let shopPrices { ShopPriceChip(offers: shopPrices, beerName: checkin.beer?.name ?? "") }
                         author
                         details
                         if !checkin.badges.isEmpty { badges }
@@ -114,6 +117,7 @@ struct CheckinDetailView: View {
         } message: { Text($0) }
         .task { await load() }
         .refreshable { await load() }
+        .loadingShopPrices(beerID: checkin.beer?.bid, into: $shopPrices)
     }
 
     private static let bottomID = "CheckinDetail.bottom"
