@@ -170,7 +170,7 @@ struct FeedView: View {
 
     var body: some View {
         CheckinList(model: model, showActions: true, emptyText: "Your friends haven't checked in anything yet.") {
-            Text("Feed")
+            Text("Activity")
                 .font(.system(size: 34, weight: .heavy))
                 .tracking(-0.8)
                 .padding(.top, 4)
