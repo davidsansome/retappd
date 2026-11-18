@@ -326,6 +326,12 @@ extension APIRequest {
         APIRequest(path: "/v4/user/friends", query: ["limit": "\(limit)", "offset": "\(offset)"])
     }
 
+    /// Sends a friend request to a user by id. Accounts you follow rather than befriend (breweries)
+    /// answer with `request_type: "follow"`. A POST with no fields.
+    static func sendFriendRequest(_ uid: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/friend/request/\(uid)", form: [:])
+    }
+
     static let recentlyTagged = APIRequest(path: "/v4/user/recently_tagged", query: ["friendTaggingLimit": "20"])
 
     static let userSettings = APIRequest(path: "/v4/account/usersettings")

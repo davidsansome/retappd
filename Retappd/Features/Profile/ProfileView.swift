@@ -20,7 +20,7 @@ struct ProfileView: View {
         .toolbarBackground(Taproom.background, for: .navigationBar)
         .navigationTitle(isAccountTab ? "" : (info?.userName ?? username))
         .navigationBarTitleDisplayMode(.inline)
-        .modifier(SettingsDestination(enabled: isAccountTab))
+        .modifier(SettingsDestination(enabled: isAccountTab, username: username))
         .task(id: model.reloads) { await loadInfo() }
         .refreshable {
             async let a: () = model.refresh()
@@ -60,7 +60,13 @@ struct ProfileView: View {
                 stat(info?.totalCheckins, "Total")
                 stat(info?.totalBeers, "Unique")
                 stat(info?.totalBadges, "Badges")
-                stat(info?.totalFriends, "Friends")
+                if isAccountTab {
+                    NavigationLink(value: ProfileRoute.friends) { stat(info?.totalFriends, "Friends", chevron: true) }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Shows your friends")
+                } else {
+                    stat(info?.totalFriends, "Friends")
+                }
             }
             .padding(.vertical, 16)
             .overlay(alignment: .top) { Rectangle().fill(Taproom.border).frame(height: 1) }
@@ -80,16 +86,21 @@ struct ProfileView: View {
         return "\(name) hasn't checked in anything yet."
     }
 
-    private func stat(_ n: Int?, _ label: String) -> some View {
+    private func stat(_ n: Int?, _ label: String, chevron: Bool = false) -> some View {
         VStack(spacing: 2) {
             Text(n.map { $0.formatted() } ?? "–")
                 .font(.system(size: 22, weight: .heavy).monospacedDigit())
                 .tracking(-0.5)
                 .minimumScaleFactor(0.6)
                 .lineLimit(1)
-            Text(label).font(.caption).foregroundStyle(Taproom.muted)
+            HStack(spacing: 3) {
+                Text(label)
+                if chevron { Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold)) }
+            }
+            .font(.caption).foregroundStyle(Taproom.muted)
         }
         .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 
@@ -121,10 +132,16 @@ struct UserProfileView: View {
 /// stack are ignored and warned about).
 private struct SettingsDestination: ViewModifier {
     let enabled: Bool
+    let username: String
 
     func body(content: Content) -> some View {
         if enabled {
-            content.navigationDestination(for: ProfileRoute.self) { _ in SettingsView() }
+            content.navigationDestination(for: ProfileRoute.self) { route in
+                switch route {
+                case .settings: SettingsView()
+                case .friends: FriendsListView(username: username)
+                }
+            }
         } else {
             content
         }

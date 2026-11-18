@@ -548,6 +548,86 @@ struct UserList: Decodable {
     }
 }
 
+/// One entry of `GET /v4/user/friends`: the friend plus when the friendship was made.
+struct Friend: Decodable, Hashable, Identifiable {
+    var user: User
+    var location: String?
+    /// When the friendship was made. The only recency field the endpoint has: the user objects
+    /// carry no last-active or last-checkin time.
+    var createdAt: Date?
+
+    var id: Int { user.id }
+
+    init(user: User, location: String? = nil, createdAt: Date? = nil) {
+        self.user = user
+        self.location = location
+        self.createdAt = createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        guard let u: User = c.obj("user") else { throw APIError.decoding }
+        user = u
+        location = c.nested("user")?.text("location")
+        createdAt = UntappdDate.parse(c.string("created_at"))
+    }
+
+    /// Newest friendships first; ones without a date last, then by name.
+    static func sortedByRecent(_ friends: [Friend]) -> [Friend] {
+        friends.sorted { a, b in
+            switch (a.createdAt, b.createdAt) {
+            case let (x?, y?) where x != y: return x > y
+            case (_?, nil): return true
+            case (nil, _?): return false
+            default:
+                return a.user.displayName.localizedCaseInsensitiveCompare(b.user.displayName) == .orderedAscending
+            }
+        }
+    }
+
+    /// Keeps friends whose username, first name, last name or full name contains every word of
+    /// `query` (ignoring case and accents). An empty query keeps everyone.
+    static func filter(_ friends: [Friend], matching query: String) -> [Friend] {
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty else { return friends }
+        return friends.filter { f in
+            let haystack = [f.user.userName, f.user.firstName, f.user.lastName, f.user.displayName]
+                .compactMap { $0 }.joined(separator: " ")
+            return words.allSatisfy { haystack.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+        }
+    }
+}
+
+/// A page of the friends list. `found` is the total, across pages.
+struct FriendPage: Decodable {
+    var friends: [Friend]
+    var found: Int?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        friends = c.list("items", Friend.self)
+        found = c.int("found")
+    }
+}
+
+/// The reply to `POST /v4/friend/request/{id}`.
+struct FriendRequestResult: Decodable {
+    var requestType: String?
+    var friendshipType: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        requestType = c.text("request_type")
+        friendshipType = c.text("friendship_type")
+    }
+
+    /// Brewery and other accounts that you follow rather than befriend answer "follow" (the only
+    /// value captured in the API docs); anything else is treated as a friend request.
+    var isFollow: Bool { requestType == "follow" || friendshipType == "follow" }
+
+    var confirmation: String { isFollow ? "Following" : "Friend request sent" }
+}
+
 struct CheckinPage: Decodable {
     var checkins: [Checkin]
     var nextMaxId: Int?
@@ -765,10 +845,13 @@ struct UserInfo: Decodable {
         var totalBeers: Int?
         var totalBadges: Int?
         var totalFriends: Int?
+        /// The signed-in user's relationship to this person: "friends", "follow" or "none".
+        var relationship: String?
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: AnyKey.self)
             id = c.int("uid") ?? c.int("id") ?? 0
+            relationship = c.text("relationship")
             firstName = c.text("first_name")
             lastName = c.text("last_name")
             userName = c.string("user_name") ?? ""

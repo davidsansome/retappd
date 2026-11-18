@@ -23,6 +23,11 @@ final class CheckInOptions {
 
     private(set) var recentlyTagged: [User] = []
     private(set) var friends: [User] = []
+    /// The same friends with when each friendship was made, in the order the server sent them.
+    private(set) var friendships: [Friend] = []
+    /// Why the friends list couldn't load, when nothing is showing.
+    private(set) var friendsError: String?
+    private var loadTask: Task<Void, Never>?
     private(set) var servingTypes: [ServingType] = []
     /// Every flavour tag, alphabetically.
     private(set) var flavorTags: [FlavorTag] = []
@@ -113,22 +118,54 @@ final class CheckInOptions {
     }
 
     /// Pages through the whole friends list; each page is cached so the list is instant next time.
+    /// Fills `friendships` (with join dates, for the Friends screen) and `friends` (for tagging).
+    /// A caller that arrives while a load is running waits for that load instead of starting
+    /// another, so it returns only once the list is actually up to date.
     private func loadAll() async {
+        if let running = loadTask { await running.value; return }
+        let task = Task { await fetchAllPages() }
+        loadTask = task
+        await task.value
+        loadTask = nil
+    }
+
+    private func fetchAllPages() async {
+        friendsError = nil
         let pageSize = 50
         var offset = 0
-        var collected: [User] = []
+        var collected: [Friend] = []
         while offset < 2000 {
             let req = APIRequest.friends(offset: offset, limit: pageSize)
             let isFirst = offset == 0
-            guard let page = try? await cacheThenNetwork(req, as: UserList.self, onCached: { cached in
-                if isFirst && friends.isEmpty { friends = cached.users }
-            }) else { break }
-            collected += page.users
-            friends = dedupe(collected + friends)
-            if page.users.count < pageSize || (page.found.map { collected.count >= $0 } ?? false) { break }
+            let page: FriendPage
+            do {
+                page = try await cacheThenNetwork(req, as: FriendPage.self, onCached: { cached in
+                    if isFirst && friendships.isEmpty { setFriendships(cached.friends) }
+                })
+            } catch {
+                if collected.isEmpty { friendsError = error.localizedDescription; loadedFriends = false }
+                break
+            }
+            collected += page.friends
+            setFriendships(collected + friendships)
+            if page.friends.count < pageSize || (page.found.map { collected.count >= $0 } ?? false) { break }
             offset += pageSize
         }
-        if !collected.isEmpty { friends = dedupe(collected) }
+        if !collected.isEmpty { setFriendships(collected) }
+    }
+
+    private func setFriendships(_ list: [Friend]) {
+        var seen = Set<Int>()
+        friendships = list.filter { seen.insert($0.id).inserted }
+        friends = friendships.map(\.user)
+    }
+
+    /// Reloads the friends list from the network (the Friends screen's pull to refresh and each
+    /// time it opens), showing the cached list meanwhile.
+    func reloadFriends() async {
+        loadingFriends = true
+        defer { loadingFriends = false }
+        await loadAll()
     }
 
     private func dedupe(_ users: [User]) -> [User] {

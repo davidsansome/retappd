@@ -115,6 +115,9 @@ row) for lists of many checkins at one place, grouped under recency labels
   photo, the label and a plain bar. A venue leads with its name in heavy type and when it was last
   checked in at, then a stats card (Check-ins, People, This month, Yours), a "Where" card (address to Google Maps, website), and
   `TaproomPageTabs` for Menu (sections as chips) and Check-ins (Everyone / Friends chips).
+- **Friends** (pushed from the Friends stat on Me, which carries a small chevron) is a heavy
+  title, a `TaproomSearchField`, then plain rows with dividers; the add-friend action is an icon
+  button in the navigation bar, opening a sheet with a username field and a result card.
 - **Settings** use cards of switch rows (`Toggle` tinted amber), chips for multi-select options
   and tiles with previews for the theme.
 
