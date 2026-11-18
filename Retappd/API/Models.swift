@@ -644,7 +644,17 @@ struct FriendPage: Decodable {
     }
 }
 
-/// The reply to `POST /v4/friend/request/{id}`.
+/// The reply to `POST /v4/friend/remove/{id}`: only `result: "success"`.
+struct FriendActionResult: Decodable {
+    var result: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        result = c.text("result")
+    }
+}
+
+/// The reply to `POST /v4/friend/request/{id}` (and `friend/accept/{id}`, which has the same shape).
 struct FriendRequestResult: Decodable {
     var requestType: String?
     var friendshipType: String?
@@ -655,8 +665,9 @@ struct FriendRequestResult: Decodable {
         friendshipType = c.text("friendship_type")
     }
 
-    /// Brewery and other accounts that you follow rather than befriend answer "follow" (the only
-    /// value captured in the API docs); anything else is treated as a friend request.
+    /// Brewery and other accounts that you follow rather than befriend answer "follow"; a person
+    /// answers `request_type: "request"` (seen live, for a private account), a friend request
+    /// awaiting their approval. Anything but "follow" is treated as a friend request.
     var isFollow: Bool { requestType == "follow" || friendshipType == "follow" }
 
     var confirmation: String { isFollow ? "Following" : "Friend request sent" }
@@ -896,7 +907,8 @@ struct UserInfo: Decodable {
         var totalBeers: Int?
         var totalBadges: Int?
         var totalFriends: Int?
-        /// The signed-in user's relationship to this person: "friends", "follow" or "none".
+        /// The signed-in user's relationship to this person: "friends", "follow", "none", or while
+        /// a request is open "pending_them" (you sent it) or "pending_you" (they did).
         var relationship: String?
 
         init(from decoder: Decoder) throws {

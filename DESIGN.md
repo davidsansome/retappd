@@ -135,8 +135,14 @@ row) for lists of many checkins at one place, grouped under recency labels
   page with `NavigationLink(value: BeerBreweryRoute…)` and a `TaproomLinkLabel`; each
   `NavigationStack` has `.beerAndBreweryDestinations()` once on its root.
 - **Friends** (pushed from the Friends stat on Me, which carries a small chevron) is a heavy
-  title, a `TaproomSearchField`, then plain rows with dividers; the add-friend action is an icon
-  button in the navigation bar, opening a sheet with a username field and a result card.
+  title, a `TaproomSearchField`, then plain rows with dividers. Each row opens the profile and
+  ends in a trailing "…" menu (a 44pt target, muted ellipsis, like the check-in cards') holding
+  a destructive "Remove friend"; the row's chevron is dropped to make room. Destructive actions
+  sit behind a `confirmationDialog` naming the person, and the row leaves the list at once,
+  returning with an alert if the server refuses. The add-friend action is an icon button in the
+  navigation bar, opening a sheet with a username field and a result card; the card shows
+  "Add friend", or a muted line when they're already a friend, followed, or a request is pending
+  either way ("Friend request sent. Waiting for them to accept.").
 - **Settings** use cards of switch rows (`Toggle` tinted amber), chips for multi-select options
   and tiles with previews for the theme.
 

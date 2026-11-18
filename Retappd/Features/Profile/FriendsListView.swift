@@ -9,6 +9,8 @@ struct FriendsListView: View {
     @State private var options = CheckInOptions.shared
     @State private var query = ""
     @State private var showingAdd = false
+    @State private var confirmingRemoval: Friend?
+    @State private var removeError: String?
 
     var body: some View {
         let sorted = Friend.sortedByRecent(options.friendships)
@@ -30,9 +32,22 @@ struct FriendsListView: View {
                 } else {
                     VStack(spacing: 0) {
                         ForEach(shown) { friend in
-                            NavigationLink(value: friend.user) { FriendRow(friend: friend) }
-                                .buttonStyle(TaproomRowStyle())
-                                .taproomRowDivider()
+                            HStack(spacing: 0) {
+                                NavigationLink(value: friend.user) { FriendRow(friend: friend) }
+                                    .buttonStyle(TaproomRowStyle())
+                                Menu {
+                                    Button("Remove friend", role: .destructive) { confirmingRemoval = friend }
+                                } label: {
+                                    Image(systemName: "ellipsis")
+                                        .font(.body.weight(.semibold))
+                                        .foregroundStyle(Taproom.muted)
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Rectangle())
+                                }
+                                .accessibilityLabel("More options for \(friend.user.displayName)")
+                                .padding(.trailing, -12)  // line the dots up with the content's trailing edge
+                            }
+                            .taproomRowDivider()
                         }
                     }
                 }
@@ -52,8 +67,32 @@ struct FriendsListView: View {
             }
         }
         .sheet(isPresented: $showingAdd) { AddFriendView(username: username) }
+        .confirmationDialog(
+            confirmingRemoval.map { "Remove @\($0.user.userName) as a friend?" } ?? "",
+            isPresented: Binding(get: { confirmingRemoval != nil }, set: { if !$0 { confirmingRemoval = nil } }),
+            titleVisibility: .visible, presenting: confirmingRemoval
+        ) { friend in
+            Button("Remove friend", role: .destructive) { remove(friend) }
+        } message: { _ in
+            Text("They'll be taken off your friends list. You can send a new request later.")
+        }
+        .alert("Couldn't remove friend",
+               isPresented: Binding(get: { removeError != nil }, set: { if !$0 { removeError = nil } }),
+               presenting: removeError) { _ in
+            Button("OK") {}
+        } message: { Text($0) }
         .task { await options.reloadFriends() }
         .refreshable { await options.reloadFriends() }
+    }
+
+    private func remove(_ friend: Friend) {
+        Task {
+            do {
+                try await options.removeFriend(friend)
+            } catch {
+                removeError = "\(friend.user.displayName) is still your friend. \(error.localizedDescription)"
+            }
+        }
     }
 
     @ViewBuilder private var placeholder: some View {
@@ -87,9 +126,6 @@ private struct FriendRow: View {
                     .font(.footnote).foregroundStyle(Taproom.muted).lineLimit(1)
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .bold)).foregroundStyle(Taproom.glassRim)
-                .accessibilityHidden(true)
         }
         .padding(.vertical, 8)
         .frame(minHeight: 60)
@@ -252,6 +288,8 @@ enum Friends {
     /// Whether someone can be sent a request, and if not, why.
     enum Status: Equatable {
         case canAdd, you, friends, following
+        /// You've asked and they haven't answered, or they've asked you.
+        case requestSent, requestReceived
 
         var message: String {
             switch self {
@@ -259,6 +297,8 @@ enum Friends {
             case .you: "That's you."
             case .friends: "You're already friends."
             case .following: "You already follow this account."
+            case .requestSent: "Friend request sent. Waiting for them to accept."
+            case .requestReceived: "They've already sent you a friend request."
             }
         }
     }
@@ -267,6 +307,8 @@ enum Friends {
         if p.userName.caseInsensitiveCompare(me) == .orderedSame { return .you }
         if p.relationship == "friends" || friendIDs.contains(p.id) { return .friends }
         if p.relationship == "follow" { return .following }
+        if p.relationship == "pending_them" { return .requestSent }
+        if p.relationship == "pending_you" { return .requestReceived }
         return .canAdd
     }
 

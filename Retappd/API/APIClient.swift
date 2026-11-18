@@ -417,10 +417,31 @@ extension APIRequest {
         APIRequest(path: "/v4/user/friends", query: ["limit": "\(limit)", "offset": "\(offset)"])
     }
 
-    /// Sends a friend request to a user by id. Accounts you follow rather than befriend (breweries)
-    /// answer with `request_type: "follow"`. A POST with no fields.
+    /// Sends a friend request to a user by id. A POST with no fields. Accounts you follow rather
+    /// than befriend (breweries) answer with `request_type: "follow"`. Tried live on 2026-11-18
+    /// against a private account that wasn't a friend: `request_type: "request"`,
+    /// `friendship_type: "friend"`, and from then on the target's `relationship` reads
+    /// `pending_them` (`pending_you` from their side) until they accept.
     static func sendFriendRequest(_ uid: Int) -> APIRequest {
         APIRequest(method: .post, path: "/v4/friend/request/\(uid)", form: [:])
+    }
+
+    /// Removes a friend by id, from both sides. Not in the API docs: found by probing on
+    /// 2026-11-18 with the old public API's name. A POST with no fields (the first guess; GET was
+    /// never tried) answers HTTP 200 `{"meta":{"code":200},"response":{"result":"success"}}`.
+    /// Afterwards the person's `relationship` is `none` and `/v4/user/friends` no longer lists
+    /// them.
+    static func removeFriend(_ uid: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/friend/remove/\(uid)", form: [:])
+    }
+
+    /// Accepts the incoming friend request from a user, by id (the `uid` in an item of
+    /// `GET /v4/user/pending`). Not in the API docs: found by probing on 2026-11-18. A POST with
+    /// no fields (the first guess; GET was never tried) answers HTTP 200 with `result: "success"`,
+    /// `request_type: "accept"`, `friendship_type: "friend"` and the `target_user`. Afterwards
+    /// both sides' `relationship` is `friends`. There is no UI for it yet.
+    static func acceptFriendRequest(_ uid: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/friend/accept/\(uid)", form: [:])
     }
 
     static let recentlyTagged = APIRequest(path: "/v4/user/recently_tagged", query: ["friendTaggingLimit": "20"])

@@ -36,15 +36,76 @@ final class CheckInOptions {
     private var loadedRecent = false
     private var loadedServing = false
     private var loadedFlavors = false
+    /// How many friends have been removed, so other screens (the Me tab's count) can react.
+    private(set) var friendRemovals = 0
+    /// Friends whose removal is in flight: a friends load that finishes meanwhile mustn't bring
+    /// them back.
+    private var removingIDs = Set<Int>()
+    /// Friends whose removal succeeded, each with how many friends loads had started by then. A
+    /// load that started before the removal can still deliver a page listing them, so they stay
+    /// hidden until a load that started afterwards completes.
+    private var removedIDs: [Int: Int] = [:]
+    private var loadGeneration = 0
+    private var hiddenIDs: Set<Int> { removingIDs.union(removedIDs.keys) }
     @ObservationIgnored private let cachedPage: FriendPager.Fetch
     @ObservationIgnored private let networkPage: FriendPager.Fetch
+    @ObservationIgnored private let sendRemoval: (Int) async throws -> Void
+    @ObservationIgnored private let clearFriendCaches: () async -> Void
 
     init(
+        recentlyTagged: [User] = [],
         cachedPage: @escaping FriendPager.Fetch = FriendPager.cachedPage,
-        networkPage: @escaping FriendPager.Fetch = FriendPager.networkPage
+        networkPage: @escaping FriendPager.Fetch = FriendPager.networkPage,
+        sendRemoval: @escaping (Int) async throws -> Void = { uid in
+            _ = try await UntappdAPI.shared.fetch(.removeFriend(uid), as: FriendActionResult.self)
+        },
+        clearFriendCaches: @escaping () async -> Void = FriendPager.clearCaches
     ) {
+        self.recentlyTagged = recentlyTagged
         self.cachedPage = cachedPage
         self.networkPage = networkPage
+        self.sendRemoval = sendRemoval
+        self.clearFriendCaches = clearFriendCaches
+    }
+
+    /// Unfriends someone. They leave the list (and tagging suggestions) at once; if the server
+    /// refuses they come back in the same place and the error is thrown. On success the cached
+    /// friends pages are dropped, so a stale copy can't bring them back at the next launch.
+    func removeFriend(_ friend: Friend) async throws {
+        let id = friend.id
+        let oldFriendships = friendships
+        let oldRecent = recentlyTagged
+        removingIDs.insert(id)
+        setFriendships(friendships)
+        recentlyTagged = recentlyTagged.filter { $0.id != id }
+        do {
+            try await sendRemoval(id)
+        } catch {
+            removingIDs.remove(id)
+            // Put back only this friend, next to where they were, keeping whatever else changed
+            // meanwhile (other removals, friends a load added).
+            setFriendships(Self.reinserting(friend, into: friendships, was: oldFriendships))
+            if let user = oldRecent.first(where: { $0.id == id }), !hiddenIDs.contains(id) {
+                recentlyTagged = Self.reinserting(user, into: recentlyTagged, was: oldRecent)
+            }
+            throw error
+        }
+        removingIDs.remove(id)
+        removedIDs[id] = loadGeneration
+        friendRemovals += 1
+        await clearFriendCaches()
+    }
+
+    /// `list` with `item` put back just before the first of the items that followed it in `old`
+    /// that `list` still has, or at the end if none are.
+    private static func reinserting<T: Identifiable>(_ item: T, into list: [T], was old: [T]) -> [T]
+    where T.ID == Int {
+        guard !list.contains(where: { $0.id == item.id }) else { return list }
+        var out = list
+        let followers = old.drop { $0.id != item.id }.dropFirst().map(\.id)
+        let at = out.firstIndex { followers.contains($0.id) } ?? out.count
+        out.insert(item, at: at)
+        return out
     }
 
     /// Friends to offer as one-tap chips: recently tagged ones, else the first of the rest.
@@ -155,6 +216,9 @@ final class CheckInOptions {
     }
 
     private func fetchAllPages() async {
+        loadGeneration += 1
+        let generation = loadGeneration
+        let removalsAtStart = friendRemovals
         friendsError = nil
         if friendships.isEmpty {
             let cached = await FriendPager.fetchAll(fetch: cachedPage)
@@ -171,16 +235,20 @@ final class CheckInOptions {
         if complete {
             setFriendships(result.friends)
             loadedFriends = true
+            // This load began after these removals, so the server has caught up with them.
+            removedIDs = removedIDs.filter { $0.value >= generation }
         } else {
             loadedFriends = false
             if friendships.isEmpty {
                 friendsError = result.error?.localizedDescription
             }
         }
+        // Pages this load cached may predate a removal made while it ran.
+        if friendRemovals != removalsAtStart { await clearFriendCaches() }
     }
 
     private func setFriendships(_ list: [Friend]) {
-        var seen = Set<Int>()
+        var seen = hiddenIDs
         friendships = list.filter { seen.insert($0.id).inserted }
         friends = friendships.map(\.user)
     }
@@ -193,8 +261,9 @@ final class CheckInOptions {
         await loadAll()
     }
 
+    /// Drops repeats and anyone who has been (or is being) unfriended.
     private func dedupe(_ users: [User]) -> [User] {
-        var seen = Set<Int>()
+        var seen = hiddenIDs
         return users.filter { seen.insert($0.id).inserted }
     }
 }

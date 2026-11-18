@@ -22,6 +22,16 @@ struct ProfileView: View {
         .navigationBarTitleDisplayMode(.inline)
         .modifier(SettingsDestination(enabled: isAccountTab, username: username))
         .task(id: model.reloads) { await loadInfo() }
+        .onChange(of: CheckInOptions.shared.friendRemovals) {
+            // Someone was unfriended from the Friends screen: show the lower count at once, then
+            // refetch from a cache that no longer holds the old one.
+            guard isAccountTab else { return }
+            info?.totalFriends = ProfileFriendCount.adjusted(info?.totalFriends, removalsAtStart: 0, removalsNow: 1)
+            Task {
+                await ResponseCache.shared.remove(APIRequest.userInfo(username).cacheKey)
+                await loadInfo()
+            }
+        }
         .refreshable {
             async let a: () = model.refresh()
             async let b: () = loadInfo()
@@ -126,9 +136,25 @@ struct ProfileView: View {
     }
 
     private func loadInfo() async {
-        if let i = try? await cacheThenNetwork(.userInfo(username), as: UserInfo.self, onCached: { info = $0.user }) {
-            info = i.user
+        // A fetch that began before a friend was removed doesn't know about it: take those off.
+        let removalsAtStart = CheckInOptions.shared.friendRemovals
+        let current = { (p: UserInfo.Profile?) -> UserInfo.Profile? in
+            guard var p, isAccountTab else { return p }
+            p.totalFriends = ProfileFriendCount.adjusted(
+                p.totalFriends, removalsAtStart: removalsAtStart, removalsNow: CheckInOptions.shared.friendRemovals)
+            return p
         }
+        if let i = try? await cacheThenNetwork(.userInfo(username), as: UserInfo.self, onCached: { info = current($0.user) }) {
+            info = current(i.user)
+        }
+    }
+}
+
+/// The Me tab's friend count while friends are being removed.
+enum ProfileFriendCount {
+    /// `fetched` less the removals made since the fetch began (which it can't include).
+    static func adjusted(_ fetched: Int?, removalsAtStart: Int, removalsNow: Int) -> Int? {
+        fetched.map { max(0, $0 - max(0, removalsNow - removalsAtStart)) }
     }
 }
 

@@ -87,6 +87,21 @@ extension FriendPager {
 
     struct CacheMiss: Error {}
 
+    /// Drops every cached friends page (they are keyed by offset, and the offsets depend on how
+    /// many items each page really held, so this walks them as the pager did) and the cached
+    /// recently-tagged list, after the friends list changes.
+    static func clearCaches() async {
+        var offset = 0
+        for _ in 0..<maxPages {
+            let req = APIRequest.friends(offset: offset)
+            guard let page = await cachedValue(req, as: FriendPage.self) else { break }
+            await ResponseCache.shared.remove(req.cacheKey)
+            if page.friends.isEmpty { break }
+            offset += page.friends.count
+        }
+        await ResponseCache.shared.remove(APIRequest.recentlyTagged.cacheKey)
+    }
+
     /// The paging fields `FriendPage` doesn't keep, read only for logging.
     private struct PageMeta: Decodable {
         var count: Int?

@@ -214,7 +214,7 @@ final class FriendsTests: XCTestCase {
     }
 
     func testNonFollowResponseIsAFriendRequest() throws {
-        // Only "follow" was captured; the friend value here is an assumption.
+        // Any value but "follow" reads as a friend request ("request" is what the server sends).
         let r = try UntappdAPI.decode(FriendRequestResult.self, from: Data("""
         {"meta":{"code":200},"response":{"result":"success","request_type":"friend"}}
         """.utf8))
@@ -225,6 +225,94 @@ final class FriendsTests: XCTestCase {
         let r = APIRequest.sendFriendRequest(42)
         XCTAssertEqual(r.method, .post)
         XCTAssertEqual(r.path, "/v4/friend/request/42")
+    }
+
+    // Sample from probing the live API on 2026-11-18: a private, non-friend account.
+    func testPersonRequestResponseIsAFriendRequest() throws {
+        let r = try UntappdAPI.decode(FriendRequestResult.self, from: Data("""
+        {"meta":{"code":200},"response":{"result":"success","request_type":"request","friendship_type":"friend",
+         "target_user":{"uid":13425056,"user_name":"retappd-test-2","is_private":1,"contact":[]}}}
+        """.utf8))
+        XCTAssertFalse(r.isFollow)
+        XCTAssertEqual(r.requestType, "request")
+        XCTAssertEqual(r.confirmation, "Friend request sent")
+    }
+
+    func testRemoveAndAcceptRequestsArePostsToTheUserId() {
+        let remove = APIRequest.removeFriend(42)
+        XCTAssertEqual(remove.method, .post)
+        XCTAssertEqual(remove.path, "/v4/friend/remove/42")
+        let accept = APIRequest.acceptFriendRequest(7)
+        XCTAssertEqual(accept.method, .post)
+        XCTAssertEqual(accept.path, "/v4/friend/accept/7")
+        let req = UntappdAPI.shared.urlRequest(remove)
+        XCTAssertEqual(req.httpMethod, "POST")
+        XCTAssertNil(req.httpBody.flatMap { $0.isEmpty ? nil : $0 })
+    }
+
+    func testDecodesRemoveResponse() throws {
+        let r = try UntappdAPI.decode(FriendActionResult.self, from: Data("""
+        {"meta":{"code":200},"response":{"result":"success"}}
+        """.utf8))
+        XCTAssertEqual(r.result, "success")
+    }
+
+    @MainActor
+    func testRemoveFriendTakesThemOutOfEveryListAndClearsCaches() async throws {
+        let all = (1...3).map { makeFriend($0) }
+        var removed: [Int] = []
+        var cleared = 0
+        let store = CheckInOptions(
+            cachedPage: { _, _ in throw FriendPager.CacheMiss() },
+            networkPage: { offset, limit in FriendPage(friends: Array(all.dropFirst(offset).prefix(limit)), found: 3) },
+            sendRemoval: { removed.append($0) },
+            clearFriendCaches: { cleared += 1 }
+        )
+        await store.reloadFriends()
+
+        try await store.removeFriend(all[1])
+
+        XCTAssertEqual(removed, [2])
+        XCTAssertEqual(store.friendships.map(\.id), [1, 3])
+        XCTAssertEqual(store.friends.map(\.id), [1, 3])
+        XCTAssertFalse(store.allFriends.contains { $0.id == 2 })
+        XCTAssertEqual(store.friendRemovals, 1)
+        XCTAssertEqual(cleared, 1)
+    }
+
+    @MainActor
+    func testFailedRemovalPutsTheFriendBackInPlace() async {
+        let all = (1...3).map { makeFriend($0) }
+        var cleared = 0
+        let store = CheckInOptions(
+            cachedPage: { _, _ in throw FriendPager.CacheMiss() },
+            networkPage: { offset, limit in FriendPage(friends: Array(all.dropFirst(offset).prefix(limit)), found: 3) },
+            sendRemoval: { _ in throw APIError.http(500) },
+            clearFriendCaches: { cleared += 1 }
+        )
+        await store.reloadFriends()
+
+        do {
+            try await store.removeFriend(all[1])
+            XCTFail("expected the removal to fail")
+        } catch {}
+
+        XCTAssertEqual(store.friendships.map(\.id), [1, 2, 3])
+        XCTAssertEqual(store.friends.map(\.id), [1, 2, 3])
+        XCTAssertEqual(store.friendRemovals, 0)
+        XCTAssertEqual(cleared, 0)
+    }
+
+    func testPendingRelationshipsCannotBeRequestedAgain() throws {
+        func profile(_ rel: String) throws -> UserInfo.Profile {
+            try UntappdAPI.decode(UserInfo.self, from: Data("""
+            {"meta":{"code":200},"response":{"user":{"uid":9,"relationship":"\(rel)","user_name":"x"}}}
+            """.utf8)).user!
+        }
+        XCTAssertEqual(Friends.status(of: try profile("pending_them"), me: "me", friendIDs: []), .requestSent)
+        XCTAssertEqual(Friends.status(of: try profile("pending_you"), me: "me", friendIDs: []), .requestReceived)
+        XCTAssertFalse(Friends.Status.requestSent.message.isEmpty)
+        XCTAssertFalse(Friends.Status.requestReceived.message.isEmpty)
     }
 
     func testUsernameNormalizing() {
@@ -255,5 +343,173 @@ final class FriendsTests: XCTestCase {
         XCTAssertTrue(Friends.isNotFound(.http(404)))
         XCTAssertFalse(Friends.isNotFound(.http(500)))
         XCTAssertFalse(Friends.isNotFound(.unauthorized))
+    }
+
+    // MARK: - Removal races
+
+    /// Lets a test hold an async call until it says so, then release it or make it fail.
+    @MainActor
+    private final class Gate {
+        private var waiter: CheckedContinuation<Void, Error>?
+        var isWaiting: Bool { waiter != nil }
+
+        func wait() async throws {
+            try await withCheckedThrowingContinuation { waiter = $0 }
+        }
+        func release() { waiter?.resume(); waiter = nil }
+        func fail() { waiter?.resume(throwing: APIError.http(500)); waiter = nil }
+        func untilWaiting() async {
+            for _ in 0..<2000 where !isWaiting { await Task.yield() }
+        }
+    }
+
+    @MainActor
+    private func loadedStore(
+        _ friends: [Friend], recent: [User] = [],
+        network: FriendPager.Fetch? = nil,
+        sendRemoval: @escaping (Int) async throws -> Void = { _ in },
+        cleared: @escaping () -> Void = {}
+    ) async -> CheckInOptions {
+        let store = CheckInOptions(
+            recentlyTagged: recent,
+            cachedPage: { _, _ in throw FriendPager.CacheMiss() },
+            networkPage: network ?? { offset, limit in
+                FriendPage(friends: Array(friends.dropFirst(offset).prefix(limit)), found: friends.count)
+            },
+            sendRemoval: sendRemoval,
+            clearFriendCaches: { cleared() }
+        )
+        await store.reloadFriends()
+        return store
+    }
+
+    @MainActor
+    func testFailedRemovalDoesNotBringBackAnotherFriendToTagging() async throws {
+        let all = (1...3).map { makeFriend($0) }
+        let gate = Gate()
+        let store = await loadedStore(all, recent: [all[0].user, all[1].user], sendRemoval: { id in
+            if id == 1 { try await gate.wait() }
+        })
+
+        let a = Task { try await store.removeFriend(all[0]) }  // fails later
+        await gate.untilWaiting()
+        try await store.removeFriend(all[1])  // succeeds meanwhile
+        gate.fail()
+        _ = try? await a.value
+
+        XCTAssertEqual(store.friendships.map(\.id), [1, 3])
+        XCTAssertEqual(store.recentlyTagged.map(\.id), [1])
+        XCTAssertFalse(store.allFriends.contains { $0.id == 2 })
+        XCTAssertFalse(store.orderedFriends.contains { $0.id == 2 })
+        XCTAssertFalse(store.suggestedFriends().contains { $0.id == 2 })
+    }
+
+    @MainActor
+    func testLoadStartedBeforeARemovalCannotBringTheFriendBack() async throws {
+        let all = (1...3).map { makeFriend($0) }
+        let gate = Gate()
+        var gateNext = false
+        let store = await loadedStore(all, network: { offset, limit in
+            if gateNext { try await gate.wait() }
+            return FriendPage(friends: Array(all.dropFirst(offset).prefix(limit)), found: 3)  // stale: still lists 2
+        })
+
+        gateNext = true
+        let load = Task { await store.reloadFriends() }
+        await gate.untilWaiting()
+        try await store.removeFriend(all[1])
+        gate.release()
+        await load.value
+
+        XCTAssertEqual(store.friendships.map(\.id), [1, 3])
+        XCTAssertEqual(store.friends.map(\.id), [1, 3])
+    }
+
+    @MainActor
+    func testLoadThatStartedAfterARemovalClearsTheTombstone() async throws {
+        var server = (1...3).map { makeFriend($0) }
+        let store = await loadedStore(server, network: { offset, limit in
+            FriendPage(friends: Array(server.dropFirst(offset).prefix(limit)), found: server.count)
+        })
+        try await store.removeFriend(server[1])
+        server.remove(at: 1)
+        await store.reloadFriends()
+        XCTAssertEqual(store.friendships.map(\.id), [1, 3])
+
+        // They can be friends again (a new request accepted); nothing keeps hiding them.
+        server.insert(makeFriend(2), at: 0)
+        await store.reloadFriends()
+        XCTAssertEqual(store.friendships.map(\.id), [2, 1, 3])
+    }
+
+    @MainActor
+    func testLoadStraddlingARemovalClearsCachesAgain() async throws {
+        let all = (1...3).map { makeFriend($0) }
+        let gate = Gate()
+        var gateNext = false
+        var cleared = 0
+        let store = await loadedStore(all, network: { offset, limit in
+            if gateNext { try await gate.wait() }
+            return FriendPage(friends: Array(all.dropFirst(offset).prefix(limit)), found: 3)
+        }, cleared: { cleared += 1 })
+
+        gateNext = true
+        let load = Task { await store.reloadFriends() }
+        await gate.untilWaiting()
+        try await store.removeFriend(all[1])
+        XCTAssertEqual(cleared, 1)
+        gate.release()
+        await load.value
+
+        XCTAssertEqual(cleared, 2)  // pages the load cached may predate the removal
+    }
+
+    @MainActor
+    func testFailedRemovalAfterTheListChangedRestoresThemNextToTheirNeighbour() async throws {
+        let all = (1...3).map { makeFriend($0) }
+        var server = all
+        let gate = Gate()
+        let store = await loadedStore(all, network: { offset, limit in
+            FriendPage(friends: Array(server.dropFirst(offset).prefix(limit)), found: server.count)
+        }, sendRemoval: { _ in try await gate.wait() })
+
+        let removal = Task { try await store.removeFriend(all[1]) }
+        await gate.untilWaiting()
+        server.insert(makeFriend(99), at: 0)  // a new friend arrives while the call is out
+        await store.reloadFriends()
+        XCTAssertEqual(store.friendships.map(\.id), [99, 1, 3])
+        gate.fail()
+        _ = try? await removal.value
+
+        XCTAssertEqual(store.friendships.map(\.id), [99, 1, 2, 3])
+        XCTAssertEqual(store.friends.map(\.id), [99, 1, 2, 3])
+    }
+
+    func testProfileCountIsNotOverwrittenByAStaleFetch() {
+        // A fetch began with 0 removals and answers 5 after one friend was removed.
+        XCTAssertEqual(ProfileFriendCount.adjusted(5, removalsAtStart: 0, removalsNow: 1), 4)
+        // One that began after the removal already reflects it.
+        XCTAssertEqual(ProfileFriendCount.adjusted(4, removalsAtStart: 1, removalsNow: 1), 4)
+        XCTAssertEqual(ProfileFriendCount.adjusted(0, removalsAtStart: 0, removalsNow: 2), 0)
+        XCTAssertNil(ProfileFriendCount.adjusted(nil, removalsAtStart: 0, removalsNow: 1))
+    }
+
+    func testClearCachesWalksTheCachedPagesAndDropsRecentlyTagged() async throws {
+        func page(_ ids: [Int]) -> Data {
+            let items = ids.map { #"{"created_at":"Sat, 04 Jul 2026 05:10:03 +0000","user":{"uid":\#($0),"user_name":"u\#($0)"}}"# }
+            return Data(#"{"meta":{"code":200},"response":{"found":3,"items":[\#(items.joined(separator: ","))]}}"#.utf8)
+        }
+        let cache = ResponseCache.shared
+        let keys = [APIRequest.friends(offset: 0), .friends(offset: 2), .recentlyTagged].map(\.cacheKey)
+        await cache.store(page([1, 2]), for: keys[0])
+        await cache.store(page([3]), for: keys[1])  // offsets advance by what each page held
+        await cache.store(Data(#"{"meta":{"code":200},"response":{"items":[]}}"#.utf8), for: keys[2])
+
+        await FriendPager.clearCaches()
+
+        for key in keys {
+            let data = await cache.data(for: key)
+            XCTAssertNil(data, key)
+        }
     }
 }
