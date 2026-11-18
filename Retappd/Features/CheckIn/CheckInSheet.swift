@@ -537,6 +537,10 @@ struct CheckInSheet: View {
         }
         // Imperative rather than `.sensoryFeedback`: the sheet dismisses right away, which could tear the view down first.
         UINotificationFeedbackGenerator().notificationOccurred(.success)
+        // Searches will show the tick from now on, whichever list the beer turns up in.
+        var had = beer
+        had.hasHad = true
+        await LocalIndex.shared.add(beers: [had])
         let uploaded = await upload(jpeg, r, checkinId: r.checkinId)
         NotificationCenter.default.post(name: .didCheckIn, object: nil)
         if uploaded { dismiss() }

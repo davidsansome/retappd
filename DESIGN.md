@@ -41,6 +41,8 @@ All colours come from `Taproom` and have light and dark values. Never use raw `.
 | `muted` | `#6F6252` | `#B0A38F` | Secondary text, hints, captions |
 | `amber` | `#E9A23B` | same | The one accent: selection, beer, tint |
 | `onAmber` | `#2B2118` | same | Text and icons on amber |
+| `had` | `#3B8449` | `#5CAE6B` | The "you've had this beer" corner; nothing else is green |
+| `onHad` | `#FFFFFF` | `#0F2414` | The tick on `had` |
 | `glassRim`, `glassInside`, `foam` | | | Drawing the glass; also placeholder numerals (`glassRim`) |
 
 Use `.taproomScreen()` (or the same three modifiers) on a screen's root to set the
@@ -90,7 +92,7 @@ System font throughout (SF Pro), so Dynamic Type works.
 | `TaproomSearchField` | Card-style search field with Cancel; `focusRequests` focuses it from elsewhere | Searching or filtering on a page (Discover, a venue's menu) instead of `.searchable` |
 | `TaproomRowStyle` + `.taproomRowDivider()` | Full-width tappable row with a pressed highlight, and a 1pt warm line under it | Lists laid out on the page: venues, beers, search results |
 | `CardLinkStyle` | Dims a whole card a little while pressed | A card that opens something (feed cards, the "You're probably at" card) |
-| `HadCorner` | An amber triangle with a tick in a card's top-right corner | A card about a beer the signed-in user has had (feed cards for other people's checkins) |
+| `HadCorner(size:)` | A green triangle with a tick in a corner (28pt default, top-right). Clip it to the owner's rounded corner | A beer the signed-in user has had: the top-right of a feed card (other people's checkins), and of the 44pt label in a `BeerRow` (18pt) |
 
 Existing shared views that already fit: `ServingIcon` (pass `color:` — amber normally,
 `Taproom.onAmber` on an amber chip), `Avatar`, `FlowLayout`, `VenueRow`, and

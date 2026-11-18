@@ -270,18 +270,12 @@ struct BeerRow: View {
                     .accessibilityLabel("Number \(number)")
             }
             BeerLabel(beer: beer.label, brewery: beer.breweryLabel, size: 44, cornerRadius: 8)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(beer.name).font(.body.weight(.semibold)).lineLimit(1)
-                    if beer.hasHad == true {
-                        Text("Had")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(Taproom.onAmber)
-                            .padding(.horizontal, 7).frame(minHeight: 18)
-                            .background(Taproom.amber, in: Capsule())
-                            .accessibilityLabel("Had before")
-                    }
+                .overlay(alignment: .topTrailing) {
+                    if beer.hasHad == true { HadCorner(size: 18) }
                 }
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(beer.name).font(.body.weight(.semibold)).lineLimit(1)
                 let meta = [beer.brewery, beer.style, beer.abv.map { "\($0.formatted(.number.precision(.fractionLength(0...1))))%" }, detail]
                     .compactMap { $0 }.joined(separator: " · ")
                 Text(meta).font(.footnote).foregroundStyle(Taproom.muted).lineLimit(2)

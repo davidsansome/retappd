@@ -235,7 +235,14 @@ final class DiscoverModel {
     private func searchBeersRemote(_ q: String, local: [BeerLite]) async {
         // Algolia also matches aliases and collaborators, so results that literally contain every
         // query word in their name or brewery go first (stable, so Algolia's order breaks ties).
+        // Algolia is a public index with no per-user data, so its hits never carry `has_had`.
+        let had = await LocalIndex.shared.hadBeerIds()
         let merge = { (remote: [BeerLite]) -> [BeerLite] in
+            let remote = remote.map { b -> BeerLite in
+                var b = b
+                if b.hasHad == nil, had.contains(b.bid) { b.hasHad = true }
+                return b
+            }
             let ids = Set(remote.map(\.bid))
             let all = remote + local.filter { !ids.contains($0.bid) }
             let direct = all.filter { LocalIndex.matches(query: q, text: "\($0.name) \($0.brewery)") }

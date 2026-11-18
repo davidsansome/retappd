@@ -14,6 +14,10 @@ enum Taproom {
     static let amber = rgb(0xE9A23B)
     /// Text and icons drawn on amber.
     static let onAmber = rgb(0x2B2118)
+    /// "You've had this beer": a leaf green that sits with the warm palette, lighter in dark mode.
+    static let had = dynamic(0x3B8449, 0x5CAE6B)
+    /// The tick drawn on `had`.
+    static let onHad = dynamic(0xFFFFFF, 0x0F2414)
     static let glassRim = dynamic(0xCDBFA8, 0x5A4C3C)
     static let glassInside = dynamic(0xF1EADF, 0x211B14)
     static let foam = dynamic(0xFFFDF7, 0xF6EBD3)
@@ -457,7 +461,8 @@ struct BeerLabel: View {
 
 }
 
-/// An amber corner with a tick, on a card for a beer the signed-in user has had.
+/// A green corner with a tick, on a card or beer label for a beer the signed-in user has had.
+/// Square, so the owner clips it to its own rounded corner.
 struct HadCorner: View {
     var size: CGFloat = 28
 
@@ -469,10 +474,10 @@ struct HadCorner: View {
                 p.addLine(to: CGPoint(x: size, y: size))
                 p.closeSubpath()
             }
-            .fill(Taproom.amber)
+            .fill(Taproom.had)
             Image(systemName: "checkmark")
                 .font(.system(size: size * 0.3, weight: .heavy))
-                .foregroundStyle(Taproom.onAmber)
+                .foregroundStyle(Taproom.onHad)
                 .padding(.top, size * 0.12).padding(.trailing, size * 0.12)
         }
         .frame(width: size, height: size)
