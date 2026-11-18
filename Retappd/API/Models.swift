@@ -62,6 +62,26 @@ struct User: Decodable, Hashable, Identifiable {
         avatar = c.text("user_avatar").flatMap(URL.init(string:))
         relationship = c.text("relationship")
     }
+
+    /// Keeps users whose username, first name, last name or full name contains every word of
+    /// `query` (ignoring case, accents and a leading "@"). An empty query keeps everyone.
+    static func filter(_ users: [User], matching query: String) -> [User] {
+        let words = queryWords(query)
+        guard !words.isEmpty else { return users }
+        return users.filter { $0.matches(words: words) }
+    }
+
+    static func queryWords(_ query: String) -> [String] {
+        query.split(whereSeparator: \.isWhitespace).map { w in
+            w.hasPrefix("@") && w.count > 1 ? String(w.dropFirst()) : String(w)
+        }
+    }
+
+    func matches(words: [String]) -> Bool {
+        let haystack = [userName, firstName, lastName, displayName]
+            .compactMap { $0 }.joined(separator: " ")
+        return words.allSatisfy { haystack.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+    }
 }
 
 // MARK: - Beers & breweries
@@ -604,15 +624,11 @@ struct Friend: Decodable, Hashable, Identifiable {
     }
 
     /// Keeps friends whose username, first name, last name or full name contains every word of
-    /// `query` (ignoring case and accents). An empty query keeps everyone.
+    /// `query` (ignoring case, accents and a leading "@"). An empty query keeps everyone.
     static func filter(_ friends: [Friend], matching query: String) -> [Friend] {
-        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        let words = User.queryWords(query)
         guard !words.isEmpty else { return friends }
-        return friends.filter { f in
-            let haystack = [f.user.userName, f.user.firstName, f.user.lastName, f.user.displayName]
-                .compactMap { $0 }.joined(separator: " ")
-            return words.allSatisfy { haystack.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
-        }
+        return friends.filter { $0.user.matches(words: words) }
     }
 }
 

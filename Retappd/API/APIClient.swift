@@ -413,7 +413,7 @@ extension APIRequest {
     static let flavorTags = APIRequest(method: .post, path: "/v4/checkin/flavor_profiles", form: [:])
 
 
-    static func friends(offset: Int = 0, limit: Int = 50) -> APIRequest {
+    static func friends(offset: Int = 0, limit: Int = FriendPager.pageSize) -> APIRequest {
         APIRequest(path: "/v4/user/friends", query: ["limit": "\(limit)", "offset": "\(offset)"])
     }
 

@@ -51,7 +51,155 @@ final class FriendsTests: XCTestCase {
         XCTAssertEqual(Friend.filter(friends, matching: "dup").map(\.user.userName), ["Jackdup_"])
         XCTAssertEqual(Friend.filter(friends, matching: "adam sh").map(\.user.userName), ["adam_shaw_1519"])
         XCTAssertEqual(Friend.filter(friends, matching: "zoe").map(\.user.userName), ["zed"])  // accents ignored
+        XCTAssertEqual(Friend.filter(friends, matching: "@jackdup").map(\.user.userName), ["Jackdup_"])
         XCTAssertTrue(Friend.filter(friends, matching: "nobody").isEmpty)
+        XCTAssertEqual(User.filter(friends.map(\.user), matching: "dup").map(\.userName), ["Jackdup_"])
+    }
+
+    // MARK: - FriendPager & CheckInOptions
+
+    private func makeFriend(_ id: Int, name: String? = nil) -> Friend {
+        let n = name ?? "user\(id)"
+        return Friend(user: User(id: id, userName: n, firstName: "First\(id)", lastName: "Last\(id)", avatar: nil))
+    }
+
+    @MainActor
+    func testPagerFetchesMultiplePagesAndStopsAtFound() async {
+        // Server caps each page at 25 items even if asked for 50, with found = 60 across 3 pages.
+        let all = (1...60).map { makeFriend($0) }
+        var offsets: [Int] = []
+        var progressCounts: [Int] = []
+
+        let result = await FriendPager.fetchAll(pageSize: 50, fetch: { offset, _ in
+            offsets.append(offset)
+            let slice = Array(all.dropFirst(offset).prefix(25))
+            return FriendPage(friends: slice, found: 60)
+        }, onProgress: { partial in
+            progressCounts.append(partial.count)
+        })
+
+        XCTAssertTrue(result.isComplete)
+        XCTAssertNil(result.error)
+        XCTAssertEqual(result.found, 60)
+        XCTAssertEqual(result.friends.map(\.id), Array(1...60))
+        XCTAssertEqual(offsets, [0, 25, 50])
+        XCTAssertEqual(progressCounts, [25, 50, 60])
+    }
+
+    @MainActor
+    func testPagerStopsOnEmptyPageWhenFoundIsMissingOrHigh() async {
+        let all = (1...30).map { makeFriend($0) }
+        var offsets: [Int] = []
+
+        let result = await FriendPager.fetchAll(pageSize: 25, fetch: { offset, limit in
+            offsets.append(offset)
+            let slice = Array(all.dropFirst(offset).prefix(limit))
+            return FriendPage(friends: slice, found: nil)
+        })
+
+        XCTAssertTrue(result.isComplete)
+        XCTAssertEqual(result.friends.map(\.id), Array(1...30))
+        XCTAssertEqual(offsets, [0, 25, 30])
+    }
+
+    @MainActor
+    func testPagerStopsWhenPageContainsOnlyDuplicates() async {
+        let stuck = (1...5).map { makeFriend($0) }
+        var calls = 0
+
+        let result = await FriendPager.fetchAll(pageSize: 25, fetch: { _, _ in
+            calls += 1
+            return FriendPage(friends: stuck, found: 100)
+        })
+
+        XCTAssertTrue(result.isComplete)
+        XCTAssertEqual(calls, 2)
+        XCTAssertEqual(result.friends.map(\.id), Array(1...5))
+    }
+
+    @MainActor
+    func testPagerReturnsPartialFriendsOnMidFlightError() async {
+        let all = (1...50).map { makeFriend($0) }
+
+        let result = await FriendPager.fetchAll(pageSize: 25, fetch: { offset, limit in
+            if offset > 0 { throw APIError.http(503) }
+            return FriendPage(friends: Array(all.prefix(limit)), found: 50)
+        })
+
+        XCTAssertFalse(result.isComplete)
+        XCTAssertNotNil(result.error)
+        XCTAssertEqual(result.friends.map(\.id), Array(1...25))
+    }
+
+    @MainActor
+    func testStorePreservesCachedFriendsWhenLaterNetworkPageFails() async {
+        let cachedAll = (1...40).map { makeFriend($0) }
+        // Page 1 on the network has a brand-new friend (id 99) plus 1..24; page 2 fails.
+        let networkPage1 = [makeFriend(99)] + (1...24).map { makeFriend($0) }
+
+        let store = CheckInOptions(
+            cachedPage: { offset, limit in
+                let slice = Array(cachedAll.dropFirst(offset).prefix(limit))
+                if slice.isEmpty { throw FriendPager.CacheMiss() }
+                return FriendPage(friends: slice, found: 40)
+            },
+            networkPage: { offset, _ in
+                if offset == 0 { return FriendPage(friends: networkPage1, found: 41) }
+                throw APIError.http(500)
+            }
+        )
+
+        await store.reloadFriends()
+
+        // Must keep all 40 cached friends AND include the new friend from page 1 (41 total).
+        XCTAssertEqual(store.friends.count, 41)
+        XCTAssertTrue(store.friends.contains { $0.id == 99 })
+        XCTAssertTrue(store.friends.contains { $0.id == 40 })
+        XCTAssertNil(store.friendsError)
+    }
+
+    @MainActor
+    func testStorePreservesCachedFriendsWhenFirstNetworkPageFails() async {
+        let cachedAll = (1...30).map { makeFriend($0) }
+
+        let store = CheckInOptions(
+            cachedPage: { offset, limit in
+                let slice = Array(cachedAll.dropFirst(offset).prefix(limit))
+                if slice.isEmpty { throw FriendPager.CacheMiss() }
+                return FriendPage(friends: slice, found: 30)
+            },
+            networkPage: { _, _ in
+                throw APIError.http(500)
+            }
+        )
+
+        await store.reloadFriends()
+
+        XCTAssertEqual(store.friends.map(\.id), Array(1...30))
+        XCTAssertNil(store.friendsError)
+    }
+
+    @MainActor
+    func testStoreReplacesCachedListWhenFullMultiPageFetchCompletes() async {
+        let cachedAll = (1...30).map { makeFriend($0) }
+        // Friend 30 was unfriended; network now has 1...29 across two pages.
+        let freshAll = (1...29).map { makeFriend($0) }
+
+        let store = CheckInOptions(
+            cachedPage: { offset, limit in
+                let slice = Array(cachedAll.dropFirst(offset).prefix(limit))
+                if slice.isEmpty { throw FriendPager.CacheMiss() }
+                return FriendPage(friends: slice, found: 30)
+            },
+            networkPage: { offset, limit in
+                let slice = Array(freshAll.dropFirst(offset).prefix(limit))
+                return FriendPage(friends: slice, found: 29)
+            }
+        )
+
+        await store.reloadFriends()
+
+        XCTAssertEqual(store.friends.map(\.id), Array(1...29))
     }
 
     // Sample from docs/API.md for POST /v4/friend/request/{id}.

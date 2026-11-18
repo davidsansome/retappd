@@ -681,18 +681,16 @@ struct FriendPicker: View {
 
     var body: some View {
         let recentIds = Set(options.recentlyTagged.map(\.id))
-        let all = options.orderedFriends.filter {
-            filter.isEmpty || LocalIndex.matches(query: filter, text: "\($0.displayName) \($0.userName)")
-        }
-        let recent = all.filter { recentIds.contains($0.id) }
-        let rest = all.filter { !recentIds.contains($0.id) }
+        let recent = User.filter(options.recentlyTagged, matching: filter)
+        let all = User.filter(options.allFriends, matching: filter)
+        let rest = filter.isEmpty ? all : all.filter { !recentIds.contains($0.id) }
         List {
             if !recent.isEmpty {
                 Section("Recently tagged") { ForEach(recent) { row($0) } }
             }
             Section(recent.isEmpty ? "Friends" : "All friends") {
                 ForEach(rest) { row($0) }
-                if options.loadingFriends && options.friends.isEmpty {
+                if options.loadingFriends {
                     ProgressView().frame(maxWidth: .infinity)
                 }
             }

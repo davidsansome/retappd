@@ -33,8 +33,19 @@ final class CheckInOptions {
     private(set) var flavorTags: [FlavorTag] = []
     private(set) var loadingFriends = false
     private var loadedFriends = false
+    private var loadedRecent = false
     private var loadedServing = false
     private var loadedFlavors = false
+    @ObservationIgnored private let cachedPage: FriendPager.Fetch
+    @ObservationIgnored private let networkPage: FriendPager.Fetch
+
+    init(
+        cachedPage: @escaping FriendPager.Fetch = FriendPager.cachedPage,
+        networkPage: @escaping FriendPager.Fetch = FriendPager.networkPage
+    ) {
+        self.cachedPage = cachedPage
+        self.networkPage = networkPage
+    }
 
     /// Friends to offer as one-tap chips: recently tagged ones, else the first of the rest.
     func suggestedFriends(limit: Int = 5) -> [User] {
@@ -58,6 +69,12 @@ final class CheckInOptions {
     var orderedFriends: [User] {
         let recentIds = Set(recentlyTagged.map(\.id))
         return recentlyTagged + friends.filter { !recentIds.contains($0.id) }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    /// Every known friend (from the friends list and recently tagged), alphabetically.
+    var allFriends: [User] {
+        dedupe(friends + recentlyTagged)
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
@@ -100,21 +117,29 @@ final class CheckInOptions {
     }
 
     func loadFriends() async {
-        guard !loadedFriends else { return }
-        loadedFriends = true
+        guard !loadedFriends || !loadedRecent || loadTask != nil else { return }
         loadingFriends = true
-        defer { loadingFriends = false }
+        defer { loadingFriends = loadTask != nil }
 
-        async let recent: Void = loadRecent()
-        async let all: Void = loadAll()
+        async let recent: Void = loadRecentIfNeeded()
+        async let all: Void = loadAllIfNeeded()
         _ = await (recent, all)
     }
 
-    private func loadRecent() async {
+    private func loadRecentIfNeeded() async {
+        guard !loadedRecent else { return }
+        loadedRecent = true
         if let r = try? await cacheThenNetwork(.recentlyTagged, as: UserList.self,
                                                onCached: { recentlyTagged = dedupe($0.users) }) {
             recentlyTagged = dedupe(r.users)
+        } else if recentlyTagged.isEmpty {
+            loadedRecent = false
         }
+    }
+
+    private func loadAllIfNeeded() async {
+        guard !loadedFriends || loadTask != nil else { return }
+        await loadAll()
     }
 
     /// Pages through the whole friends list; each page is cached so the list is instant next time.
@@ -131,27 +156,27 @@ final class CheckInOptions {
 
     private func fetchAllPages() async {
         friendsError = nil
-        let pageSize = 50
-        var offset = 0
-        var collected: [Friend] = []
-        while offset < 2000 {
-            let req = APIRequest.friends(offset: offset, limit: pageSize)
-            let isFirst = offset == 0
-            let page: FriendPage
-            do {
-                page = try await cacheThenNetwork(req, as: FriendPage.self, onCached: { cached in
-                    if isFirst && friendships.isEmpty { setFriendships(cached.friends) }
-                })
-            } catch {
-                if collected.isEmpty { friendsError = error.localizedDescription; loadedFriends = false }
-                break
+        if friendships.isEmpty {
+            let cached = await FriendPager.fetchAll(fetch: cachedPage)
+            if !cached.friends.isEmpty {
+                setFriendships(cached.friends)
             }
-            collected += page.friends
-            setFriendships(collected + friendships)
-            if page.friends.count < pageSize || (page.found.map { collected.count >= $0 } ?? false) { break }
-            offset += pageSize
         }
-        if !collected.isEmpty { setFriendships(collected) }
+        let baseline = friendships
+        let result = await FriendPager.fetchAll(fetch: networkPage) { partial in
+            self.setFriendships(partial + baseline)
+        }
+        let complete = result.isComplete
+            && (result.found.map { result.friends.count >= $0 } ?? (!result.friends.isEmpty || baseline.isEmpty))
+        if complete {
+            setFriendships(result.friends)
+            loadedFriends = true
+        } else {
+            loadedFriends = false
+            if friendships.isEmpty {
+                friendsError = result.error?.localizedDescription
+            }
+        }
     }
 
     private func setFriendships(_ list: [Friend]) {
@@ -164,7 +189,7 @@ final class CheckInOptions {
     /// time it opens), showing the cached list meanwhile.
     func reloadFriends() async {
         loadingFriends = true
-        defer { loadingFriends = false }
+        defer { loadingFriends = loadTask != nil }
         await loadAll()
     }
 

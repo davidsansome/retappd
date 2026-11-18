@@ -99,6 +99,7 @@ struct RootTabs: View {
         .task { await HadBeers.shared.refresh() }
         .task { await CheckInOptions.shared.loadAccountSettings() }
         .task { await CheckInOptions.shared.loadRecentVenues(username: username) }
+        .task { await CheckInOptions.shared.loadFriends() }
         .task(id: location.location.map { "\($0.coordinate.latitude),\($0.coordinate.longitude)" }) {
             await discover.update(location: location.location)
         }
