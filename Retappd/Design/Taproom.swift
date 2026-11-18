@@ -513,6 +513,56 @@ struct TaproomTabBar<Value: Hashable, Action: View>: View {
     }
 }
 
+/// A segmented control for choosing one value from a short row (a statistics range: 1W / 1M /
+/// 1Y / All). A bordered card with the selected segment filled amber. Each segment is 44pt tall.
+struct TaproomSegmented<Value: Hashable>: View {
+    let options: [(value: Value, title: String)]
+    @Binding var selection: Value
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options.indices, id: \.self) { i in
+                let on = options[i].value == selection
+                Button {
+                    withAnimation(.interactiveSpring(response: 0.25, dampingFraction: 0.85)) { selection = options[i].value }
+                } label: {
+                    Text(options[i].title)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(on ? Taproom.onAmber : Taproom.ink)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(on ? Taproom.amber : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(Taproom.card, in: RoundedRectangle(cornerRadius: 12))
+        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Taproom.border, lineWidth: 1) }
+        .sensoryFeedback(.selection, trigger: selection)
+    }
+}
+
+/// A label on the left and a value on the right, for a table of figures inside a `.taproomCard()`.
+/// Put a 1pt `Taproom.border` line between rows.
+struct TaproomStatRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label).foregroundStyle(Taproom.muted)
+            Spacer(minLength: 8)
+            Text(value).font(.body.weight(.heavy).monospacedDigit())
+        }
+        .font(.body)
+        .padding(.horizontal, 14)
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// Tabs splitting one page into views of different things (a venue's Menu and Check-ins): equal
 /// full-width tabs with an icon and a heavy label, the selected one in ink over a 3pt ink
 /// underline, all on a hairline that runs edge to edge. Chips go under it to narrow the

@@ -872,6 +872,60 @@ struct UserInfo: Decodable {
     }
 }
 
+/// `/v4/user/stats?v2=true`: totals for one date range. There is no per-day series in it.
+/// Field names are from `docs/openapi.yaml`; the schema types the averages as integers, so
+/// they're read as numbers here in case a fraction turns up. `average_beer_distinct` is not
+/// documented beyond its name, so it isn't used.
+struct UserStatsResponse: Decodable {
+    var stats: UserStats
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        guard let s = c.obj("stats", UserStats.self) else { throw APIError.decoding }
+        stats = s
+    }
+}
+
+struct UserStats: Decodable {
+    var distinctBeers: Int
+    var totalCheckins: Int
+    var averageCheckinsPerDay: Double
+    var totalVenues: Int
+    var newVenues: Int
+    var newVenuesPercent: Int
+    var newBeers: Int
+    var newBeersPercent: Int
+    var firstCheckinDate: Date?
+    var topBeers: [TopBeer]
+
+    struct TopBeer: Decodable, Identifiable {
+        var beer: BeerLite
+        var count: Int
+        var id: Int { beer.bid }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            guard let b = c.obj("beer", BeerRef.self) else { throw APIError.decoding }
+            beer = BeerLite(beer: b, brewery: c.obj("brewery", BreweryRef.self))
+            count = c.int("total_count") ?? 0
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        distinctBeers = c.int("distinct_beers") ?? 0
+        totalCheckins = c.int("total_checkins") ?? 0
+        averageCheckinsPerDay = c.double("average_checkins_per_day") ?? 0
+        totalVenues = c.int("total_venues") ?? 0
+        newVenues = c.int("new_venues") ?? 0
+        newVenuesPercent = c.int("new_venues_perc") ?? 0
+        newBeers = c.int("new_beers") ?? 0
+        newBeersPercent = c.int("new_beers_perc") ?? 0
+        firstCheckinDate = UntappdDate.parse(c.string("first_checkin_date"))
+        topBeers = c.nested("top_beers")?.nested("beers")?.list("items") ?? []
+    }
+}
+
 extension UserInfo.Profile {
     var asUser: User {
         User(id: id, userName: userName, firstName: firstName, lastName: lastName, avatar: avatar)

@@ -164,6 +164,15 @@ extension APIRequest {
         return APIRequest(path: "/v4/user/checkins/\(username)", query: q)
     }
 
+    /// Totals for `start`...`end` (YYYY-MM-DD, both inclusive, in the time zone `gmtOffset` hours
+    /// from GMT). Always for the signed-in user. The official app sends `v2=true`.
+    static func userStats(start: String, end: String, gmtOffset: Double) -> APIRequest {
+        APIRequest(path: "/v4/user/stats", query: [
+            "start_date": start, "end_date": end, "v2": "true",
+            "gmt_offset": gmtOffset == gmtOffset.rounded() ? String(Int(gmtOffset)) : String(gmtOffset),
+        ])
+    }
+
     static func userInfo(_ username: String) -> APIRequest {
         APIRequest(path: "/v4/user/info/\(username)", query: ["compact": "true"])
     }

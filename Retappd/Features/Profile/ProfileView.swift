@@ -74,11 +74,31 @@ struct ProfileView: View {
             .taproomRowDivider()
             .padding(.top, Taproom.sectionSpacing)
 
+            if isAccountTab { statisticsEntry.padding(.top, Taproom.sectionSpacing) }
+
             Text("Checkins").font(Taproom.sectionLabel)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, Taproom.sectionSpacing)
         }
         .padding(.top, isAccountTab ? 8 : 0)
+    }
+
+    /// Opens the Statistics screen; only on your own profile.
+    private var statisticsEntry: some View {
+        NavigationLink(value: ProfileRoute.statistics) {
+            HStack(spacing: 12) {
+                Image(systemName: "chart.xyaxis.line").font(.title3).foregroundStyle(Taproom.amber).frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Statistics").font(.body.weight(.heavy))
+                    Text("Unique beers, check-ins and top beers").font(.footnote).foregroundStyle(Taproom.muted)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(Taproom.muted)
+            }
+            .padding(.horizontal, 14).frame(minHeight: 60)
+            .taproomCard()
+        }
+        .buttonStyle(CardLinkStyle())
     }
 
     private var emptyText: String {
@@ -141,6 +161,7 @@ private struct SettingsDestination: ViewModifier {
                 switch route {
                 case .settings: SettingsView()
                 case .friends: FriendsListView(username: username)
+                case .statistics: StatsView(username: username)
                 }
             }
         } else {

@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum ProfileRoute: Hashable { case settings, friends }
+enum ProfileRoute: Hashable { case settings, friends, statistics }
 
 struct SettingsView: View {
     @AppStorage(Appearance.storageKey) private var appearance = Appearance.system
