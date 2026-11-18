@@ -381,14 +381,28 @@ struct Checkin: Decodable, Hashable, Identifiable {
     }
 
     struct Badge: Decodable, Hashable, Identifiable {
+        /// `user_badge_id` (this user's copy of the badge) when there is one, else `badge_id`.
         var id: Int
+        /// The badge itself, which `/v5/badges/status` takes. `user_badge_id` is the user's award.
+        var badgeId: Int?
+        var userBadgeId: Int?
         var name: String
+        /// `badge_description`; the docs show it on `local_badges` entries, and not every check-in
+        /// carries it.
+        var description: String?
         var image: URL?
+        /// The `lg` size of `badge_image`, when there is one.
+        var largeImage: URL?
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: AnyKey.self)
-            id = c.int("user_badge_id") ?? c.int("badge_id") ?? 0
+            badgeId = c.int("badge_id")
+            userBadgeId = c.int("user_badge_id")
+            id = userBadgeId ?? badgeId ?? 0
             name = c.string("badge_name") ?? ""
-            image = (c.nested("badge_image")?.text("md") ?? c.nested("badge_image")?.text("sm")).flatMap(URL.init(string:))
+            description = c.text("badge_description").flatMap { $0.isEmpty ? nil : $0 }
+            let img = c.nested("badge_image")
+            image = (img?.text("md") ?? img?.text("sm")).flatMap(URL.init(string:))
+            largeImage = img?.text("lg").flatMap(URL.init(string:))
         }
     }
 

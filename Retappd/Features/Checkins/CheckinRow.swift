@@ -191,13 +191,29 @@ struct CheckinRow<MenuItems: View>: View {
     }
 
     /// "Earned the Pale as the Moon (Level 98) badge", with the badge's picture.
-    private func earned(_ b: Checkin.Badge) -> some View {
-        HStack(spacing: 8) {
+    @ViewBuilder private func earned(_ b: Checkin.Badge) -> some View {
+        let line = HStack(spacing: 8) {
             CachedImage(url: b.image, maxPixel: 72).frame(width: 22, height: 22).clipShape(Circle())
                 .accessibilityHidden(true)
             (Text("Earned the ").foregroundStyle(Taproom.muted) + Text(b.name).fontWeight(.semibold)
              + Text(" badge").foregroundStyle(Taproom.muted))
                 .font(.caption).lineLimit(2)
+        }
+        if let route = BeerBreweryRoute.badge(of: b) {
+            // A link of its own inside the card's link, like the venue: it wins the tap, and the
+            // rest of the card still opens the check-in.
+            NavigationLink(value: route) {
+                HStack(spacing: 4) {
+                    line
+                    Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(Taproom.muted)
+                }
+                .frame(minHeight: 28, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the badge")
+        } else {
+            line
         }
     }
 

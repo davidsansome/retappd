@@ -479,9 +479,25 @@ struct CheckinDetailView: View {
     private var badges: some View {
         TaproomSection("Badges earned") {
             ForEach(checkin.badges) { b in
-                HStack(spacing: 10) {
+                let row = HStack(spacing: 10) {
                     CachedImage(url: b.image, maxPixel: 120).frame(width: 40, height: 40).clipShape(Circle())
                     Text(b.name).font(.subheadline.weight(.medium))
+                }
+                if let route = BeerBreweryRoute.badge(of: b) {
+                    NavigationLink(value: route) {
+                        HStack(spacing: 6) {
+                            row
+                            Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
+                                .foregroundStyle(Taproom.muted)
+                            Spacer(minLength: 0)
+                        }
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens the badge")
+                } else {
+                    row
                 }
             }
         }

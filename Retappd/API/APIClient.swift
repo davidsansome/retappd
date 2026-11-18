@@ -385,6 +385,14 @@ extension APIRequest {
         return APIRequest(path: "/v4/brewery/checkins/\(id)", query: q)
     }
 
+    /// The signed-in user's level on each of these badges (`badge_ids[n]`: the `badge_id`, not the
+    /// `user_badge_id`).
+    static func badgeStatus(_ badgeIds: [Int]) -> APIRequest {
+        var q: [String: String] = [:]
+        for (i, id) in badgeIds.enumerated() { q["badge_ids[\(i)]"] = "\(id)" }
+        return APIRequest(path: "/v5/badges/status", query: q)
+    }
+
     static let servingTypes = APIRequest(path: "/v4/checkin/serving_types")
 
     /// The flavour tags people have given a beer most, most used first, with their counts.

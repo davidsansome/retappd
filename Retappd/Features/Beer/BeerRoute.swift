@@ -13,6 +13,12 @@ struct BreweryPreview: Hashable {
 enum BeerBreweryRoute: Hashable {
     case beer(BeerLite)
     case brewery(BreweryPreview)
+    case badge(Checkin.Badge)
+
+    /// The route to a badge's page; nil when its `badge_id` isn't known (the status request needs it).
+    static func badge(of badge: Checkin.Badge) -> BeerBreweryRoute? {
+        badge.badgeId == nil ? nil : .badge(badge)
+    }
 
     static func brewery(id: Int, name: String, label: URL? = nil) -> BeerBreweryRoute {
         .brewery(BreweryPreview(id: id, name: name, label: label))
@@ -32,6 +38,7 @@ extension View {
             switch route {
             case .beer(let beer): BeerView(beer: beer)
             case .brewery(let brewery): BreweryView(brewery: brewery)
+            case .badge(let badge): BadgeView(badge: badge)
             }
         }
     }

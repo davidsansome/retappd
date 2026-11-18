@@ -469,4 +469,38 @@ final class DecodingTests: XCTestCase {
                        .brewery(id: 4, name: "B"))
         XCTAssertNil(BeerBreweryRoute.brewery(of: BeerLite(bid: 1, name: "A", brewery: "B")))
     }
+
+    func testBadgeStatus() throws {
+        let json = """
+        {"meta":{"code":200},"response":{"badge_statuses":{
+          "48578": {"level": 495, "total": 495, "user_badge_id": 1286972644},
+          "751844": null,
+          "544915": {"level": 152, "total": 155, "user_badge_id": 1402818945}
+        }}}
+        """
+        let list = try UntappdAPI.decode(BadgeStatusList.self, from: Data(json.utf8))
+        XCTAssertEqual(list.statuses.count, 2)
+        XCTAssertEqual(list.statuses[544915]?.level, 152)
+        XCTAssertEqual(list.statuses[544915]?.total, 155)
+        XCTAssertEqual(list.statuses[48578]?.userBadgeId, 1286972644)
+        XCTAssertNil(list.statuses[751844])
+        let q = APIRequest.badgeStatus([48578, 751844]).query
+        XCTAssertEqual(q, ["badge_ids[0]": "48578", "badge_ids[1]": "751844"])
+    }
+
+    func testCheckinBadgeKeepsBothIds() throws {
+        let json = """
+        {"badge_id": 48578, "user_badge_id": 250328177, "badge_name": "Sweeney's Rooftop",
+         "badge_description": "Thanks for enjoying a beer.",
+         "badge_image": {"sm": "https://x/a_sm.jpeg", "md": "https://x/a_md.jpeg", "lg": "https://x/a_lg.jpeg"}}
+        """
+        let b = try JSONDecoder().decode(Checkin.Badge.self, from: Data(json.utf8))
+        XCTAssertEqual(b.id, 250328177)
+        XCTAssertEqual(b.badgeId, 48578)
+        XCTAssertEqual(b.userBadgeId, 250328177)
+        XCTAssertEqual(b.description, "Thanks for enjoying a beer.")
+        XCTAssertEqual(b.image?.lastPathComponent, "a_md.jpeg")
+        XCTAssertEqual(b.largeImage?.lastPathComponent, "a_lg.jpeg")
+        XCTAssertNotNil(BeerBreweryRoute.badge(of: b))
+    }
 }
