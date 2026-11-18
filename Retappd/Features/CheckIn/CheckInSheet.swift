@@ -523,6 +523,8 @@ struct CheckInSheet: View {
             self.error = error.localizedDescription
             return
         }
+        // Imperative rather than `.sensoryFeedback`: the sheet dismisses right away, which could tear the view down first.
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
         let uploaded = await upload(jpeg, r, checkinId: r.checkinId)
         NotificationCenter.default.post(name: .didCheckIn, object: nil)
         if uploaded { dismiss() }
