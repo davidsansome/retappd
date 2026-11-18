@@ -369,10 +369,41 @@ struct CheckinDetailView: View {
         }
     }
 
-    /// The beer, with the rating beside it as the hero.
-    private var beerHero: some View {
+    /// The beer, with the rating (and the serving under it) beside it as the hero. The whole beer
+    /// area opens the Beer page; the brewery's name is a link of its own inside it and wins the tap.
+    @ViewBuilder private var beerHero: some View {
         HStack(alignment: .top, spacing: 12) {
+            if let beer = checkin.beerLite, beer.bid > 0 {
+                NavigationLink(value: BeerBreweryRoute.beer(beer)) { beerArea(linked: true) }
+                    .buttonStyle(TaproomLinkStyle(extend: 0))
+                    .accessibilityElement(children: .contain)
+            } else {
+                beerArea(linked: false)
+            }
+            if checkin.rating != nil || checkin.servingType != nil {
+                VStack(alignment: .trailing, spacing: 4) {
+                    if let r = checkin.rating { TaproomRating(rating: r, size: 44) }
+                    if let s = checkin.servingType {
+                        HStack(spacing: 4) {
+                            ServingIcon(name: s, size: 17)
+                            Text(s).font(.footnote).foregroundStyle(Taproom.muted).lineLimit(1)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .fixedSize()
+                .padding(.top, 6)
+            }
+        }
+    }
+
+    private func beerArea(linked: Bool) -> some View {
+        let abv = checkin.beer?.abv.map { "\($0.formatted(.number.precision(.fractionLength(0...1))))%" }
+        let meta = [checkin.beer?.style, abv].compactMap { $0 }.joined(separator: " · ")
+        let name = checkin.beer?.name ?? ""
+        return HStack(alignment: .top, spacing: 12) {
             BeerLabel(beer: checkin.beer?.labelHD ?? checkin.beer?.label, brewery: checkin.brewery?.label, size: 64)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 if let brewery = checkin.brewery, !brewery.name.isEmpty {
                     if brewery.id > 0 {
@@ -387,31 +418,20 @@ struct CheckinDetailView: View {
                         Text(brewery.name).font(.subheadline).foregroundStyle(Taproom.muted).lineLimit(1)
                     }
                 }
-                if let beer = checkin.beerLite, beer.bid > 0 {
-                    NavigationLink(value: BeerBreweryRoute.beer(beer)) {
-                        TaproomLinkLabel(beer.name, font: .system(size: 26, weight: .heavy), chevronSize: 15, tracking: -0.4,
-                                         lineLimit: 3, minimumScaleFactor: 0.7)
-                    }
-                    .buttonStyle(TaproomLinkStyle())
-                    .accessibilityHint("Opens the beer's page")
-                    .accessibilityAddTraits(.isLink)
-                } else {
-                    Text(checkin.beer?.name ?? "")
+                Group {
+                    Text(name)
                         .font(.system(size: 26, weight: .heavy))
                         .tracking(-0.4)
                         .lineLimit(3)
                         .minimumScaleFactor(0.7)
-                        .textSelection(.enabled)
+                        .multilineTextAlignment(.leading)
+                    if !meta.isEmpty {
+                        Text(meta).font(.footnote).foregroundStyle(Taproom.muted).padding(.top, 2)
+                    }
                 }
-                let meta = [checkin.beer?.style,
-                            checkin.beer?.abv.map { "\($0.formatted(.number.precision(.fractionLength(0...1))))%" },
-                            checkin.servingType].compactMap { $0 }.joined(separator: " · ")
-                if !meta.isEmpty {
-                    Text(meta).font(.footnote).foregroundStyle(Taproom.muted).padding(.top, 2)
-                }
+                .modifier(BeerLinkAccessibility(linked: linked, label: [name, meta].filter { !$0.isEmpty }.joined(separator: ", ")))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            if let r = checkin.rating { TaproomRating(rating: r, size: 44).padding(.top, 6) }
         }
     }
 
@@ -622,3 +642,22 @@ struct UserChipLink: View {
             .disabled(user.userName.isEmpty)
     }
 }
+
+/// Reads the beer's name and style line as one element, a link to the Beer page when it has one.
+private struct BeerLinkAccessibility: ViewModifier {
+    let linked: Bool
+    let label: String
+
+    func body(content: Content) -> some View {
+        if linked {
+            content
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(label)
+                .accessibilityHint("Opens the beer's page")
+                .accessibilityAddTraits(.isLink)
+        } else {
+            content.textSelection(.enabled)
+        }
+    }
+}
+
