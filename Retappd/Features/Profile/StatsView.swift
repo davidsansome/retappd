@@ -8,6 +8,13 @@ struct StatsView: View {
     @State private var model: StatsModel
     @State private var selected: Date?
     @State private var didLoad = false
+    @State private var picking = false
+    @State private var chartWidth: CGFloat = 320
+    /// Whether the bars carry their unique-beer count. Kept across launches.
+    @AppStorage("statsShowBarValues") private var showValues = false
+    /// A press-and-drag on the chart is in progress, or just ended: its release isn't a tap.
+    @GestureState private var scrubbing = false
+    @State private var lastScrubEnd = Date.distantPast
 
     init(username: String) {
         _model = State(initialValue: StatsModel(username: username))
@@ -45,6 +52,13 @@ struct StatsView: View {
             model.load(force: true)
         }
         .refreshable { await model.refresh() }
+        .sheet(isPresented: $picking) {
+            StatsRangeSheet(start: model.period.start, end: model.period.end,
+                            earliest: model.firstCheckin ?? StatsPeriod.allTimeStart, latest: Date()) { s, e in
+                selected = nil
+                model.setCustom(start: s, end: e)
+            }
+        }
     }
 
     // MARK: Header
@@ -61,11 +75,22 @@ struct StatsView: View {
             HStack {
                 stepButton("chevron.left", label: "Previous period", enabled: model.canStepBack) { model.step(1); selected = nil }
                 Spacer()
-                Text(model.period.caption())
-                    .font(.footnote.weight(.bold)).tracking(0.6)
-                    .foregroundStyle(Taproom.muted)
-                    .contentTransition(.numericText())
-                    .accessibilityAddTraits(.isHeader)
+                Button { picking = true } label: {
+                    HStack(spacing: 6) {
+                        Text(model.period.caption())
+                            .font(.footnote.weight(.bold)).tracking(0.6)
+                            .contentTransition(.numericText())
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                        Image(systemName: "calendar").font(.footnote.weight(.semibold))
+                    }
+                    .foregroundStyle(Taproom.ink)
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(model.period.caption())
+                .accessibilityHint("Choose a date range")
+                .accessibilityAddTraits([.isHeader, .isButton])
                 Spacer()
                 stepButton("chevron.right", label: "Next period", enabled: model.canStepForward) { model.step(-1); selected = nil }
             }
@@ -127,19 +152,44 @@ struct StatsView: View {
         let lo = buckets.first?.anchor ?? Date()
         let hi = buckets.last.flatMap { cal.date(byAdding: unit, value: 1, to: $0.anchor) } ?? lo.addingTimeInterval(86_400)
         let chosen = selectedPoint
+        // With values on, the plot runs a little above the top gridline so the highest bar's
+        // label has room; the axis still stops at `yTop`.
+        let yMax = showValues ? Double(yTop) * 1.14 + 0.2 : Double(yTop)
+        let labelEvery = valueLabelSpacing(count: buckets.count, maxValue: top)
+        // Labels go from the newest bar back on every non-empty bar that is at least `labelEvery`
+        // bars before the last labelled one, so crowded stretches thin out and lone bars always show.
+        var labelled = Set<Date>()
+        var lastLabelled = buckets.count + labelEvery
+        for (i, b) in buckets.enumerated().reversed() {
+            guard let v = points.first(where: { $0.bucket.anchor == b.anchor })?.beers, v > 0,
+                  lastLabelled - i >= labelEvery else { continue }
+            labelled.insert(b.anchor)
+            lastLabelled = i
+        }
 
         return Chart {
             ForEach(points) { p in
                 BarMark(x: .value("Date", p.bucket.anchor, unit: unit), y: .value("Unique beers", p.beers))
                     .foregroundStyle(Taproom.amber.opacity(chosen == nil || chosen?.id == p.id ? 1 : 0.35))
                     .cornerRadius(3)
+                    .annotation(position: .top, spacing: 2) {
+                        // Zero bars get no label: a row of "0"s only adds noise. Dense charts
+                        // label bars at least n apart, and always the touched one.
+                        if showValues, p.beers > 0,
+                           chosen?.id == p.id || labelled.contains(p.bucket.anchor) {
+                            Text("\(p.beers)")
+                                .font(.caption2.weight(chosen?.id == p.id ? .bold : .medium).monospacedDigit())
+                                .foregroundStyle(chosen?.id == p.id ? Taproom.ink : Taproom.muted)
+                                .fixedSize()
+                        }
+                    }
                     .accessibilityLabel(label(for: p.bucket))
                     .accessibilityValue("\(p.beers) unique beers, \(p.checkins) check-ins")
             }
         }
-        .chartXSelection(value: $selected)
         .chartXScale(domain: lo...hi)
-        .chartYScale(domain: 0...yTop)
+        .chartYScale(domain: 0...yMax)
+        .chartOverlay { proxy in chartGestures(proxy) }
         .chartYAxis {
             AxisMarks(position: .leading, values: Array(stride(from: 0, through: yTop, by: step))) { _ in
                 AxisGridLine().foregroundStyle(Taproom.border)
@@ -167,6 +217,10 @@ struct StatsView: View {
             }
         }
         .frame(height: 220)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { chartWidth = $0 }
+        .accessibilityAction(named: showValues ? "Hide values on bars" : "Show values on bars") {
+            withAnimation(.easeOut(duration: 0.2)) { showValues.toggle() }
+        }
         .overlay {
             if model.isLoading && points.isEmpty { ProgressView().tint(Taproom.muted) }
         }
@@ -179,6 +233,49 @@ struct StatsView: View {
         .taproomCard()
         .animation(.easeOut(duration: 0.25), value: points)
         .sensoryFeedback(.selection, trigger: chosen?.id)
+    }
+
+    /// Show every nth label so neighbouring ones never touch: a label is about as wide as its
+    /// digits plus a small gap, and each bar gets the plot's width divided by the bar count
+    /// (the axis labels take about 30pt).
+    private func valueLabelSpacing(count: Int, maxValue: Int) -> Int {
+        let digits = CGFloat(String(maxValue).count)
+        let needed = digits * 7 + 5
+        let slot = max(chartWidth - 30, 1) / CGFloat(max(count, 1))
+        return max(1, Int((needed / slot).rounded(.up)))
+    }
+
+    /// A tap toggles the bar values; pressing and dragging scrubs, selecting the bar under the
+    /// finger until release. `chartXSelection` isn't used because it selects on a plain tap too.
+    /// The press has to hold for a moment before it scrubs, so a vertical swipe still scrolls.
+    private func chartGestures(_ proxy: ChartProxy) -> some View {
+        GeometryReader { geo in
+            let plotX = proxy.plotFrame.map { geo[$0].minX } ?? 0
+            Rectangle().fill(Color.clear).contentShape(Rectangle())
+                .gesture(
+                    SpatialTapGesture().onEnded { _ in
+                        guard !scrubbing, Date().timeIntervalSince(lastScrubEnd) > 0.3 else { return }
+                        withAnimation(.easeOut(duration: 0.2)) { showValues.toggle() }
+                    }
+                )
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.2)
+                        .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+                        // `updating` resets on cancel too (the page scrolling away, an interruption,
+                        // a hold that never moved), which `onEnded` doesn't see.
+                        .updating($scrubbing) { value, state, _ in
+                            if case .second(true, _) = value { state = true }
+                        }
+                        .onChanged { value in
+                            guard case .second(true, let drag) = value, let x = drag?.location.x else { return }
+                            selected = proxy.value(atX: x - plotX, as: Date.self)
+                        }
+                )
+                .onChange(of: scrubbing) { _, now in
+                    if !now { selected = nil; lastScrubEnd = Date() }
+                }
+        }
+        .accessibilityHidden(true)
     }
 
     // MARK: Breakdown and top beers

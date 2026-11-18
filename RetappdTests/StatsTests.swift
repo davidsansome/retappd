@@ -112,4 +112,81 @@ final class StatsTests: XCTestCase {
         XCTAssertEqual(s.topBeers.first?.beer.brewery, "Brew Co")
         XCTAssertEqual(s.topBeers.first?.count, 3)
     }
+
+    // MARK: Custom periods
+
+    func testCustomGranularityByLength() {
+        let today = day(2026, 11, 18)
+        func g(_ s: Date, _ e: Date) -> StatsPeriod.Granularity {
+            StatsPeriod.custom(start: s, end: e, today: today, calendar: cal).granularity
+        }
+        XCTAssertEqual(g(day(2026, 11, 18), day(2026, 11, 18)), .day)  // one day
+        XCTAssertEqual(g(day(2026, 9, 18), day(2026, 11, 18)), .day)   // exactly 62 days
+        XCTAssertEqual(g(day(2026, 9, 17), day(2026, 11, 18)), .month) // 63 days
+        XCTAssertEqual(g(day(2023, 11, 19), day(2026, 11, 18)), .month) // 1096 days
+        XCTAssertEqual(g(day(2023, 11, 18), day(2026, 11, 18)), .year)  // 1097 days
+    }
+
+    func testCustomClampsToTodayAndFirstCheckin() {
+        let today = day(2026, 11, 18)
+        let future = StatsPeriod.custom(start: day(2026, 11, 10), end: day(2026, 12, 25), today: today, calendar: cal)
+        XCTAssertEqual(future.end, today)
+        let allInFuture = StatsPeriod.custom(start: day(2026, 12, 1), end: day(2026, 12, 25), today: today, calendar: cal)
+        XCTAssertEqual(allInFuture.start, today)
+        XCTAssertEqual(allInFuture.end, today)
+        let early = StatsPeriod.custom(start: day(2012, 1, 1), end: day(2014, 1, 1), today: today,
+                                       firstCheckin: day(2013, 6, 23), calendar: cal)
+        XCTAssertEqual(early.start, day(2013, 6, 23))
+        let reversed = StatsPeriod.custom(start: day(2026, 11, 10), end: day(2026, 11, 2), today: today, calendar: cal)
+        XCTAssertEqual(reversed.start, reversed.end)  // end is never before start
+    }
+
+    /// A range starting mid-month at month granularity clips its first and last bucket to the
+    /// range, so days outside it are never counted and no day falls in two buckets.
+    func testCustomMonthBucketsAreClippedToTheRange() {
+        let p = StatsPeriod.custom(start: day(2026, 3, 10), end: day(2026, 6, 20), today: day(2026, 11, 18), calendar: cal)
+        XCTAssertEqual(p.granularity, .month)
+        let b = p.buckets(calendar: cal)
+        XCTAssertEqual(b.count, 4)
+        XCTAssertEqual(b.first?.start, day(2026, 3, 10))
+        XCTAssertEqual(b.first?.end, day(2026, 3, 31))
+        XCTAssertEqual(b.first?.anchor, day(2026, 3, 1))  // drawn at its month, requested clipped
+        XCTAssertEqual(b.last?.start, day(2026, 6, 1))
+        XCTAssertEqual(b.last?.end, day(2026, 6, 20))
+        XCTAssertEqual(b.map { $0.start }.count, Set(b.map { $0.start }).count)
+        for (a, n) in zip(b, b.dropFirst()) { XCTAssertEqual(cal.date(byAdding: .day, value: 1, to: a.end), n.start) }
+    }
+
+    func testCustomYearBucketsAreClipped() {
+        let p = StatsPeriod.custom(start: day(2019, 8, 5), end: day(2026, 2, 3), today: day(2026, 11, 18), calendar: cal)
+        XCTAssertEqual(p.granularity, .year)
+        let b = p.buckets(calendar: cal)
+        XCTAssertEqual(b.count, 8)
+        XCTAssertEqual(b.first?.start, day(2019, 8, 5))
+        XCTAssertEqual(b.first?.end, day(2019, 12, 31))
+        XCTAssertEqual(b.last?.end, day(2026, 2, 3))
+    }
+
+    func testCacheKeys() {
+        let today = day(2026, 11, 18)
+        let a = StatsPeriod.custom(start: day(2026, 11, 1), end: day(2026, 11, 10), today: today, calendar: cal)
+        let same = StatsPeriod.custom(start: day(2026, 11, 1), end: day(2026, 11, 10), today: today, calendar: cal)
+        let other = StatsPeriod.custom(start: day(2026, 11, 1), end: day(2026, 11, 11), today: today, calendar: cal)
+        XCTAssertEqual(a.cacheKey(calendar: cal), "custom/2026-11-01/2026-11-10")
+        XCTAssertEqual(a.cacheKey(calendar: cal), same.cacheKey(calendar: cal))
+        XCTAssertNotEqual(a.cacheKey(calendar: cal), other.cacheKey(calendar: cal))
+        XCTAssertEqual(StatsPeriod.make(.week, offset: 2, today: today, calendar: cal).cacheKey(calendar: cal), "1W/2")
+        XCTAssertEqual(StatsPeriod.make(.all, today: today, calendar: cal).cacheKey(calendar: cal), "All/0")
+    }
+
+    func testDayCaptionsShowTheYearOutsideThisYear() {
+        let today = day(2026, 11, 18)
+        let thisYear = StatsPeriod.custom(start: day(2026, 11, 1), end: day(2026, 11, 10), today: today, calendar: cal)
+        XCTAssertFalse(thisYear.caption(today: today, calendar: cal).contains("2026"))
+        let across = StatsPeriod.custom(start: day(2025, 12, 20), end: day(2026, 1, 10), today: today, calendar: cal)
+        let c = across.caption(today: today, calendar: cal)
+        XCTAssertTrue(c.contains("2025") && c.contains("2026"), c)
+        let old = StatsPeriod.custom(start: day(2024, 11, 12), end: day(2024, 11, 18), today: today, calendar: cal)
+        XCTAssertTrue(old.caption(today: today, calendar: cal).contains("2024"))
+    }
 }

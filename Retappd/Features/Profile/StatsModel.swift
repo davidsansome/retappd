@@ -20,14 +20,26 @@ import Observation
 //   year since (about 14 for a 2013 account).
 //
 // Plus one `/user/stats` call for the whole period, which feeds the totals and breakdown table.
-// Everything is cached in memory by range and offset for the life of the screen (the current
-// period is refetched when the screen is reopened). `/v4/user/beers` was not used: it lists
+// - Custom (a start and end the user picked): the same loaders, by the length of the range:
+//   up to 62 days is day buckets, up to about 3 years month buckets, longer year buckets. Day
+//   buckets of a range ending today page the checkins (like the current week); older days, and
+//   every month or year, are one `/user/stats` call per bucket. The first and last bucket are
+//   clipped to the range (a range starting on 10 Mar at month granularity gets a "10-31 Mar"
+//   bucket, not the whole month), so buckets never overlap or count days outside the range.
+//   Requests: 1 (totals) + the bucket count (at most 62 days, 37 months or about 15 years), or
+//   1 + at most 8 checkin pages for days ending today.
+//
+// Everything is cached in memory by range and offset (a custom range by its start and end
+// dates) for the life of the screen (the current period is refetched when the screen is reopened). `/v4/user/beers` was not used: it lists
 // distinct beers over a range with first/recent dates, but a beer had on two days appears
 // once, so it can't give per-day distinct counts.
 
 enum StatsRange: String, CaseIterable, Identifiable {
     case week = "1W", month = "1M", year = "1Y", all = "All"
+    /// A start and end the user picked. Not one of the range buttons, so it isn't in `allCases`.
+    case custom = "Custom"
     var id: String { rawValue }
+    static let allCases: [StatsRange] = [.week, .month, .year, .all]
 }
 
 /// One bar of the chart: a day, month or year. `start`...`end` are inclusive days (clamped to
@@ -85,10 +97,34 @@ struct StatsPeriod: Equatable {
             let end = offset == 0 ? todayStart : add(.day, -1, add(.month, 1, monthStart(anchor)))
             let start = monthStart(add(.month, -11, anchor))
             return StatsPeriod(range: range, offset: offset, start: start, end: end, granularity: .month)
+        case .custom:
+            // Real custom periods come from `custom(start:end:…)`; this is a month ending today.
+            return custom(start: add(.day, 1, add(.month, -1, todayStart)), end: todayStart, today: today,
+                          firstCheckin: firstCheckin, calendar: cal)
         case .all:
             let start = cal.startOfDay(for: firstCheckin ?? allTimeStart)
             return StatsPeriod(range: range, offset: 0, start: start, end: todayStart, granularity: .year)
         }
+    }
+
+    /// A period the user picked. Both ends are clamped to `firstCheckin`...today (the latter
+    /// first, so a start in the future becomes today), and the end is never before the start.
+    /// Buckets: up to 62 days is days, up to 3 years (1096 days) months, longer years.
+    static func custom(start: Date, end: Date, today: Date, firstCheckin: Date? = nil, calendar cal: Calendar) -> StatsPeriod {
+        let todayStart = cal.startOfDay(for: today)
+        let floor = cal.startOfDay(for: firstCheckin ?? allTimeStart)
+        let e = min(max(cal.startOfDay(for: end), floor), todayStart)
+        let s = min(max(cal.startOfDay(for: start), floor), e)
+        let days = (cal.dateComponents([.day], from: s, to: e).day ?? 0) + 1
+        let g: Granularity = days <= 62 ? .day : days <= 1096 ? .month : .year
+        return StatsPeriod(range: .custom, offset: 0, start: s, end: e, granularity: g)
+    }
+
+    /// What the cache files this period under: the range and offset, or a custom period's dates.
+    func cacheKey(calendar cal: Calendar) -> String {
+        range == .custom
+            ? "custom/\(Self.apiDate(start, calendar: cal))/\(Self.apiDate(end, calendar: cal))"
+            : "\(range.rawValue)/\(offset)"
     }
 
     /// Days in the period, both ends included.
@@ -118,13 +154,17 @@ struct StatsPeriod: Equatable {
         return result
     }
 
-    /// "NOV 12 – NOV 18", "NOV 2025 – NOV 2026", "2013 – 2026", or just "2026" for a single year.
-    func caption(calendar cal: Calendar = .current) -> String {
+    /// "NOV 12 – NOV 18" (with years unless both days are this year), "NOV 2025 – NOV 2026", "2013 – 2026", or just "2026" for a single year.
+    func caption(today: Date = Date(), calendar cal: Calendar = .current) -> String {
         let f = DateFormatter()
         f.calendar = cal
         f.timeZone = cal.timeZone
         switch granularity {
-        case .day: f.setLocalizedDateFormatFromTemplate("MMM d")
+        case .day:
+            // Add the year when the days aren't both in this year.
+            let year = cal.component(.year, from: today)
+            let inYear = cal.component(.year, from: start) == year && cal.component(.year, from: end) == year
+            f.setLocalizedDateFormatFromTemplate(inYear ? "MMM d" : "MMM d yyyy")
         case .month: f.setLocalizedDateFormatFromTemplate("MMM yyyy")
         case .year: f.setLocalizedDateFormatFromTemplate("yyyy")
         }
@@ -193,6 +233,11 @@ final class StatsModel {
     private(set) var range = StatsRange.week
     private(set) var offset = 0
     private(set) var period: StatsPeriod
+    /// The picked start and end while `range` is `.custom`.
+    private var customPeriod: StatsPeriod?
+    /// The length in days the user asked for. Stepping uses it rather than `period`'s, which
+    /// is shorter when the first check-in clipped it, so stepping forward again restores it.
+    private var customLength: Int?
     private(set) var stats: UserStats?
     private(set) var points: [StatsPoint] = []
     private(set) var isLoading = false
@@ -200,7 +245,7 @@ final class StatsModel {
     /// How many of the series' requests have finished, and how many there'll be (0 when unknown).
     private(set) var progress = 0
     private(set) var expected = 0
-    private var firstCheckin: Date?
+    private(set) var firstCheckin: Date?
 
     private struct Loaded { var period: StatsPeriod; var stats: UserStats?; var points: [StatsPoint] }
     private var cache: [String: Loaded] = [:]
@@ -214,34 +259,73 @@ final class StatsModel {
     /// The range and offset the numbers on screen belong to.
     private var shownKey: String?
     private let source: StatsSource
+    private let now: @Sendable () -> Date
     private var calendar: Calendar { .current }
     private let maxCheckinPages = 8
     private let concurrency = 6
 
-    init(source: StatsSource) {
+    init(source: StatsSource, now: @escaping @Sendable () -> Date = { Date() }) {
         self.source = source
-        period = StatsPeriod.make(.week, today: Date(), calendar: .current)
+        self.now = now
+        period = StatsPeriod.make(.week, today: now(), calendar: .current)
     }
 
     convenience init(username: String) { self.init(source: .live(username: username)) }
 
-    var canStepForward: Bool { offset > 0 }
+    var canStepForward: Bool {
+        range == .custom ? period.end < calendar.startOfDay(for: now()) : offset > 0
+    }
     var canStepBack: Bool {
         guard range != .all else { return false }
         if let firstCheckin { return period.start > calendar.startOfDay(for: firstCheckin) }
         return true
     }
 
+    /// Picks a range button. `.custom` can only come from `setCustom`.
     func select(_ r: StatsRange) {
-        guard r != range else { return }
+        guard r != range, r != .custom else { return }
         range = r
         offset = 0
+        customPeriod = nil
+        customLength = nil
         load()
     }
 
+    /// Shows `start`...`end` (inclusive days), clamped to the first check-in and today.
+    func setCustom(start: Date, end: Date, length: Int? = nil) {
+        let p = StatsPeriod.custom(start: start, end: end, today: now(), firstCheckin: firstCheckin, calendar: calendar)
+        guard range != .custom || p != customPeriod else { return }
+        range = .custom
+        offset = 0
+        customPeriod = p
+        customLength = length ?? p.dayCount(calendar: calendar)
+        load()
+    }
+
+    /// Steps back (`delta` 1) or forward (-1) a period. A custom range moves by its own length:
+    /// back ends the day before it starts (clipped at the first check-in, which shortens it),
+    /// forward starts the day after it ends and keeps its length, ending no later than today
+    /// (so the last step may overlap days already seen).
     func step(_ delta: Int) {
+        guard range != .all else { return }
+        if range == .custom {
+            let cal = calendar
+            let today = cal.startOfDay(for: now())
+            let days = customLength ?? period.dayCount(calendar: cal)
+            func add(_ n: Int, _ d: Date) -> Date { cal.date(byAdding: .day, value: n, to: d)! }
+            if delta > 0 {
+                guard canStepBack else { return }
+                let end = add(-1, period.start)
+                setCustom(start: add(-(days - 1), end), end: end, length: days)
+            } else if delta < 0 {
+                guard canStepForward else { return }
+                let end = min(add(days, period.end), today)
+                setCustom(start: add(-(days - 1), end), end: end, length: days)
+            }
+            return
+        }
         let n = offset + delta
-        guard n >= 0, range != .all else { return }
+        guard n >= 0 else { return }
         offset = n
         load()
     }
@@ -253,7 +337,6 @@ final class StatsModel {
         Double(calendar.timeZone.secondsFromGMT(for: date)) / 3600
     }
 
-    private var key: String { "\(range.rawValue)/\(offset)" }
 
     /// Shows the selection from the cache if it's there, else fetches it. `force` refetches
     /// either way, leaving what's on screen until the new numbers arrive.
@@ -261,10 +344,12 @@ final class StatsModel {
     func load(force: Bool = false) -> Task<Void, Never>? {
         task?.cancel()
         generation += 1
-        let gen = generation, key = key
-        let today = calendar.startOfDay(for: Date())
+        let gen = generation
+        let today = calendar.startOfDay(for: now())
         if today != cacheDay { cache = [:]; cacheDay = today }
-        let start = StatsPeriod.make(range, offset: offset, today: Date(), firstCheckin: firstCheckin, calendar: calendar)
+        let start = (range == .custom ? customPeriod : nil)
+            ?? StatsPeriod.make(range, offset: offset, today: now(), firstCheckin: firstCheckin, calendar: calendar)
+        let key = start.cacheKey(calendar: calendar)
         if !force, let c = cache[key] {
             period = c.period; stats = c.stats; points = c.points
             isLoading = false; error = nil; shownKey = key
@@ -275,8 +360,8 @@ final class StatsModel {
             period = start; stats = nil; points = []; shownKey = key
         }
         error = nil; isLoading = true; progress = 0; expected = 0
-        let (r, o) = (range, offset)
-        let t = Task { await run(range: r, offset: o, start: start, key: key, gen: gen) }
+        let r = range
+        let t = Task { await run(range: r, start: start, key: key, gen: gen) }
         task = t
         return t
     }
@@ -289,7 +374,7 @@ final class StatsModel {
 
     private func isCurrent(_ gen: Int) -> Bool { gen == generation && !Task.isCancelled }
 
-    private func run(range: StatsRange, offset: Int, start: StatsPeriod, key: String, gen: Int) async {
+    private func run(range: StatsRange, start: StatsPeriod, key: String, gen: Int) async {
         do {
             guard isCurrent(gen) else { throw CancellationError() }
             // Structured, so it's cancelled and awaited if this load is.
@@ -301,7 +386,7 @@ final class StatsModel {
                 try Task.checkCancellation()
                 guard isCurrent(gen) else { return }
                 firstCheckin = t.firstCheckinDate
-                p = StatsPeriod.make(.all, today: Date(), firstCheckin: t.firstCheckinDate, calendar: calendar)
+                p = StatsPeriod.make(.all, today: now(), firstCheckin: t.firstCheckinDate, calendar: calendar)
                 period = p
                 stats = t
                 newStats = t
@@ -311,7 +396,7 @@ final class StatsModel {
             let buckets = p.buckets(calendar: calendar)
             var done = false
             var complete = true
-            if p.granularity == .day && offset == 0 { done = try await seriesFromCheckins(p, buckets, gen: gen) }
+            if p.granularity == .day && p.end >= calendar.startOfDay(for: now()) { done = try await seriesFromCheckins(p, buckets, gen: gen) }
             if !done { complete = try await seriesFromStats(buckets, gen: gen) }
             if range != .all { newStats = try await totals }
             try Task.checkCancellation()

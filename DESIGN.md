@@ -93,7 +93,7 @@ System font throughout (SF Pro), so Dynamic Type works.
 | `TaproomLinkLabel` + `TaproomLinkStyle` | Text that opens another page: it keeps the surrounding text's look, with a small muted `chevron.right` (about 60% of the text size, growing with Dynamic Type) after the last line. The style adds no chrome, dims while pressed and stretches the touch target 10pt above and below the text without moving anything, so neighbouring links meet halfway | A beer's or brewery's name in a header (check-in screen, check-in page), as a `NavigationLink(value: BeerBreweryRoute…)`. On the check-in page the beer name has no chevron: the whole beer area (label, name, style line) is one link to the Beer page that just dims on press, and the brewery's `TaproomLinkLabel` is a link of its own inside it that wins the tap. The serving sits under the rating on the right, as on the feed card. Add `.accessibilityHint("Opens the beer's page")` and the `.isLink` trait. Drop the chevron (`showsChevron: false`) for a secondary line that shares its destination with the title |
 | `TaproomStatsCard` | A card of up to four counts side by side, each a heavy number over a caption; nil counts are left out | The top of a detail page (a venue's, beer's or brewery's check-ins, people, this month, yours) |
 | `TaproomLinkRow` | A row in a card that opens a web page or Maps: amber icon, content, and a muted "Website ↗" hint | Where, Find them: website, social accounts, map |
-| `TaproomSegmented` | Bordered card of equal segments, the selected one amber; 44pt tall | Picking one value from a short row where the options are alike and switch the same content (a statistics range: 1W / 1M / 1Y / All). Not for splitting a page (`TaproomPageTabs`) or filtering (chips). |
+| `TaproomSegmented` | Bordered card of equal segments, the selected one amber; 44pt tall | Picking one value from a short row where the options are alike and switch the same content (a statistics range: 1W / 1M / 1Y / All). A value that matches no option shows no selection, which is how Statistics shows a custom date range. Not for splitting a page (`TaproomPageTabs`) or filtering (chips). |
 | `TaproomStatRow` | Muted label left, heavy monospaced value right, 44pt | A table of figures inside a `.taproomCard()`, with a 1pt `border` line between rows (the statistics breakdown) |
 | `TaproomSearchField` | Card-style search field with Cancel; `focusRequests` focuses it from elsewhere; `systemImage` swaps the magnifier (`location` for a "near…" field) and `capitalization` suits names of places | Searching or filtering on a page (Discover, a venue's menu) instead of `.searchable`. The shop picker stacks a second one, "Near… (city or country)", under the shop-name search |
 | `TaproomRowStyle` + `.taproomRowDivider()` | Full-width tappable row with a pressed highlight, and a 1pt warm line under it | Lists laid out on the page: venues, beers, search results |
@@ -135,6 +135,16 @@ row) for lists of many checkins at one place, grouped under recency labels
 - **Beer and brewery links.** Anywhere a beer or brewery is named in a header it links to its
   page with `NavigationLink(value: BeerBreweryRoute…)` and a `TaproomLinkLabel`; each
   `NavigationStack` has `.beerAndBreweryDestinations()` once on its root.
+- **Statistics** (pushed from the Me tab) is the range buttons, a `‹ DATES ›` stepper, the totals, a bar
+  chart in a card, the breakdown and top beers. The dates between the arrows are a button (ink text with
+  a small `calendar` glyph) that opens a sheet: "From" and "To" cards (amber when being edited) over one
+  graphical `DatePicker`, bounded by the first check-in and today, with Cancel (`TaproomOutlineButton`) and
+  Done (`TaproomPrimaryButton(compact: true)`) pinned in a bottom bar. Done makes a custom range: no range
+  button is selected, and the arrows step it by its own length. **Tap the chart** to show or hide each
+  bar's unique-beer count (muted caption2 above the bar, ink and bold on the touched one; the choice is
+  kept across launches; zero bars get none; crowded charts label every other bar or sparser so labels
+  never touch, newest bar first). **Press and hold, then drag** to scrub: the totals switch to the
+  touched bar and a haptic ticks per bar. VoiceOver gets a "Show/Hide values on bars" action.
 - **Friends** (pushed from the Friends stat on Me, which carries a small chevron) is a heavy
   title, then, only while incoming requests are waiting, a "Requests" `TaproomSection` above the
   search field: each row is the person (avatar, name, "@username · asked 2 hours ago", opening
