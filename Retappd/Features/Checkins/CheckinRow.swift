@@ -23,7 +23,9 @@ struct CheckinRow<MenuItems: View>: View {
                 header
                 beer
                 if let comment = checkin.comment {
-                    Text(comment).font(.body).lineLimit(4)
+                    // fixedSize: without it the list reserves room for lines this text doesn't show,
+                    // leaving a bigger gap under the card.
+                    Text(comment).font(.body).lineLimit(4).fixedSize(horizontal: false, vertical: true)
                 }
                 ForEach(checkin.badges) { earned($0) }
             }
