@@ -63,6 +63,7 @@ final class AuthStore {
         Task {
             await ResponseCache.shared.removeAll()
             await LocalIndex.shared.removeAll()
+            await HadBeers.shared.clear()
         }
     }
 }

@@ -17,7 +17,7 @@ final class BeerModel {
         checkins = CheckinListModel(source: .beer(beer.bid))
     }
 
-    var hadIt: Bool { info?.hasHad ?? (beer.hasHad == true) }
+    var hadIt: Bool { HadBeers.shared.has(beer.bid, fallback: info?.hasHad ?? beer.hasHad) }
     var breweryId: Int? { info?.brewery.flatMap { $0.id > 0 ? $0.id : nil } ?? beer.breweryId }
     var breweryName: String { info?.brewery?.name ?? beer.brewery }
 

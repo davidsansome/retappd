@@ -74,7 +74,7 @@ struct CheckinRow<MenuItems: View>: View {
         }
     }
 
-    private var hadCorner: Bool { showHad && checkin.beer?.hasHad == true }
+    private var hadCorner: Bool { showHad && checkin.beer.map({ HadBeers.shared.has($0.bid, fallback: $0.hasHad) }) == true }
 
     /// Rounded, except for a square top-right corner under the "had it" corner.
     private var cardShape: UnevenRoundedRectangle {

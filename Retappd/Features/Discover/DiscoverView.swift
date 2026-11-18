@@ -271,7 +271,7 @@ struct BeerRow: View {
             }
             BeerLabel(beer: beer.label, brewery: beer.breweryLabel, size: 44, cornerRadius: 8)
                 .overlay(alignment: .topTrailing) {
-                    if beer.hasHad == true { HadCorner(size: 18) }
+                    if HadBeers.shared.has(beer) { HadCorner(size: 18) }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 2) {

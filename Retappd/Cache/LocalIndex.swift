@@ -76,7 +76,8 @@ actor LocalIndex {
                                   rating: b.rating ?? e.beer.rating, ratingCount: b.ratingCount ?? e.beer.ratingCount,
                                   popularity: b.popularity ?? e.beer.popularity,
                                   // Once had, always had; Algolia hits say nothing (nil), and an older
-                                  // "false" mustn't outlive a later check-in.
+                                  // "false" mustn't outlive a later check-in. Only a fallback now: once
+                                  // `HadBeers` has synced the full list it decides what shows a tick.
                                   hasHad: (b.hasHad == true || e.beer.hasHad == true) ? true : (b.hasHad ?? e.beer.hasHad),
                                   breweryLabel: b.breweryLabel ?? e.beer.breweryLabel,
                                   breweryId: b.breweryId ?? e.beer.breweryId)

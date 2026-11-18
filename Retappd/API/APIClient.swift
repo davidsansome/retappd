@@ -168,6 +168,9 @@ extension APIRequest {
         APIRequest(path: "/v4/user/info/\(username)", query: ["compact": "true"])
     }
 
+    /// Every beer id the signed-in user has had, in one response (no per-beer details). Behind `HadBeers`.
+    static let userBeerList = APIRequest(path: "/v4/user/user_beer_list", query: ["mode": "v3"])
+
     static func venuesAround(lat: Double, lng: Double, query: String = "", limit: Int = 25) -> APIRequest {
         APIRequest(path: "/v4/venue/around", query: [
             "lat": String(format: "%.6f", lat), "lng": String(format: "%.6f", lng),

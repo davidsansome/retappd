@@ -96,6 +96,7 @@ struct RootTabs: View {
         // you're at, even before the Discover tab is opened.
         .task { location.start() }
         .task { await loadMe() }
+        .task { await HadBeers.shared.refresh() }
         .task { await CheckInOptions.shared.loadAccountSettings() }
         .task { await CheckInOptions.shared.loadRecentVenues(username: username) }
         .task(id: location.location.map { "\($0.coordinate.latitude),\($0.coordinate.longitude)" }) {
@@ -112,6 +113,8 @@ struct RootTabs: View {
             guard let id = n.object as? Int else { return }
             feed.remove(id: id)
             profile.remove(id: id)
+            // The beer may no longer be one you've had.
+            Task { await HadBeers.shared.refresh(force: true) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .checkinEdited)) { n in
             guard let c = n.object as? Checkin else { return }
@@ -123,6 +126,7 @@ struct RootTabs: View {
             case .background:
                 backgroundedAt = .now
             case .active:
+                Task { await HadBeers.shared.refresh() }
                 if let at = backgroundedAt, Date.now.timeIntervalSince(at) >= Self.staleAfter {
                     reopenedAfterAWhile()
                 }

@@ -25,7 +25,8 @@ struct ProfileView: View {
         .refreshable {
             async let a: () = model.refresh()
             async let b: () = loadInfo()
-            _ = await (a, b)
+            async let c: () = isAccountTab ? HadBeers.shared.refresh(force: true) : ()
+            _ = await (a, b, c)
         }
     }
 

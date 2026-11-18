@@ -989,3 +989,54 @@ struct ParentStyleOptOut: Decodable, Identifiable {
         isLocked = c.bool("is_locked") ?? false
     }
 }
+
+
+// MARK: - Had beers
+
+/// `GET /v4/user/user_beer_list?mode=v3`. docs/API.md shows `base64: true` with `bids` as plain
+/// comma-separated ids but `lists` as base64, so `bids` is read either way: plain first, then base64.
+/// (`lists`, a base64 list of list ids, is ignored.) Observed live (test account): `bids` was plain text
+/// despite `base64: true`, with a leading comma (",6755412") and `bids_count` one higher than the ids
+/// present, so empty fields are skipped and the count is not trusted.
+struct UserBeerList: Decodable {
+    var bids: [Int]
+    var count: Int?
+    /// Whether `bids` arrived base64-encoded rather than as plain text.
+    var wasBase64 = false
+
+    enum CodingKeys: String, CodingKey { case bids, bidsCount = "bids_count" }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        count = try? c.decode(Int.self, forKey: .bidsCount)
+        let raw = ((try? c.decode(String.self, forKey: .bids)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if let ids = Self.parse(raw) {
+            bids = ids
+        } else if let d = Data(base64Encoded: Self.padded(raw)),
+                  let text = String(data: d, encoding: .utf8),
+                  let ids = Self.parse(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            bids = ids
+            wasBase64 = true
+        } else {
+            throw APIError.decoding
+        }
+    }
+
+    init(bids: [Int], count: Int? = nil) { self.bids = bids; self.count = count }
+
+    /// Comma-separated integers (an empty string is an empty list), or nil if it isn't that.
+    static func parse(_ s: String) -> [Int]? {
+        if s.isEmpty { return [] }
+        var out: [Int] = []
+        out.reserveCapacity(s.count / 6)
+        for part in s.split(separator: ",", omittingEmptySubsequences: true) {
+            guard let n = Int(part.trimmingCharacters(in: .whitespaces)) else { return nil }
+            out.append(n)
+        }
+        return out
+    }
+
+    private static func padded(_ s: String) -> String {
+        s + String(repeating: "=", count: (4 - s.count % 4) % 4)
+    }
+}
