@@ -393,6 +393,14 @@ extension APIRequest {
         return APIRequest(path: "/v5/badges/status", query: q)
     }
 
+    /// A page of the signed-in user's friends who have a badge (`badge_id`), highest level first.
+    /// The docs show the app paging 15 at a time and always sending `q` empty.
+    static func friendsBadges(_ badgeId: Int, offset: Int = 0, limit: Int = 15) -> APIRequest {
+        var q = ["limit": "\(limit)", "q": "", "sort": "level"]
+        if offset > 0 { q["offset"] = "\(offset)" }
+        return APIRequest(path: "/v4/badges/friends_badges/\(badgeId)", query: q)
+    }
+
     static let servingTypes = APIRequest(path: "/v4/checkin/serving_types")
 
     /// The flavour tags people have given a beer most, most used first, with their counts.

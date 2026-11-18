@@ -126,6 +126,11 @@ row) for lists of many checkins at one place, grouped under recency labels
   pinned at the bottom (hidden when the page was opened from inside the check-in screen). A
   brewery leads with its type, name and location beside its logo, then ratings, stats, About,
   "Find them" link rows, and `TaproomPageTabs` for Beers (`BeerRow`s, "Show N more") and Check-ins.
+- **Badges.** Every badge in the app (the "Earned the … badge" line on a feed card, the rows under
+  "Badges earned" on a check-in) opens its page with `NavigationLink(value: BeerBreweryRoute.badge…)`.
+  The page leads with the badge's picture, name (without the earner's "(Level N)") and description,
+  then the user's own level as the hero in a card with their avatar, then Friends: plain rows with
+  dividers, each friend's level in heavy type on the right, "Show more" for the next 15.
 - **Beer and brewery links.** Anywhere a beer or brewery is named in a header it links to its
   page with `NavigationLink(value: BeerBreweryRoute…)` and a `TaproomLinkLabel`; each
   `NavigationStack` has `.beerAndBreweryDestinations()` once on its root.

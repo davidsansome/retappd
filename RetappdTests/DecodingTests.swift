@@ -503,4 +503,43 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(b.largeImage?.lastPathComponent, "a_lg.jpeg")
         XCTAssertNotNil(BeerBreweryRoute.badge(of: b))
     }
+
+    func testFriendBadges() throws {
+        // Shape of a live response (the test accounts' Newbie badge), plus a level entry as the
+        // docs describe for level badges.
+        let json = """
+        {"meta":{"code":200},"response":{"count":2,"items":[
+          {"created_at":"Wed, 18 Nov 2026 09:47:02 +0000","user_badge_id":1438263300,"is_levelable":false,
+           "current_level":0,"user":{"first_name":"Test 2","last_name":"T","user_name":"retappd-test-2",
+           "is_supporter":0,"user_avatar":"https://x/a.jpg","flair":null}},
+          {"created_at":"Sat, 14 Nov 2026 14:17:57 +0000","user_badge_id":0,"is_levelable":true,
+           "current_level":12,"user":{"first_name":"","last_name":"","user_name":"lev","user_avatar":""}},
+          {"created_at":"Sat, 14 Nov 2026 14:17:57 +0000","user_badge_id":1,"current_level":3,"user":null}
+        ],"is_parent":false}}
+        """
+        let list = try UntappdAPI.decode(FriendBadgeList.self, from: Data(json.utf8))
+        XCTAssertEqual(list.count, 2)
+        XCTAssertFalse(list.isParent)
+        XCTAssertEqual(list.items.map(\.user.userName), ["retappd-test-2", "lev"])
+        XCTAssertNil(list.items[0].level)
+        XCTAssertEqual(list.items[0].userBadgeId, 1438263300)
+        XCTAssertNotNil(list.items[0].earnedAt)
+        XCTAssertEqual(list.items[0].user.displayName, "Test 2 T")
+        XCTAssertEqual(list.items[1].level, 12)
+        XCTAssertNil(list.items[1].userBadgeId)
+        XCTAssertEqual(list.items[1].user.displayName, "lev")
+
+        XCTAssertEqual(APIRequest.friendsBadges(1).path, "/v4/badges/friends_badges/1")
+        XCTAssertEqual(APIRequest.friendsBadges(1).query, ["limit": "15", "q": "", "sort": "level"])
+        XCTAssertEqual(APIRequest.friendsBadges(1, offset: 15).query["offset"], "15")
+    }
+
+    func testBadgeNameLevel() {
+        XCTAssertEqual(BadgeName.level(of: "The Backpacker (Level 28)"), 28)
+        XCTAssertEqual(BadgeName.base(of: "The Backpacker (Level 28)"), "The Backpacker")
+        XCTAssertNil(BadgeName.level(of: "Newbie"))
+        XCTAssertEqual(BadgeName.base(of: "Newbie"), "Newbie")
+        XCTAssertEqual(BadgeName.base(of: "(Level 3)"), "(Level 3)")
+        XCTAssertNil(BadgeName.level(of: "Level (Level 3) Up"))
+    }
 }
