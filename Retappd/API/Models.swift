@@ -997,7 +997,7 @@ struct ParentStyleOptOut: Decodable, Identifiable {
 /// comma-separated ids but `lists` as base64, so `bids` is read either way: plain first, then base64.
 /// (`lists`, a base64 list of list ids, is ignored.) Observed live (test account): `bids` was plain text
 /// despite `base64: true`, with a leading comma (",6755412") and `bids_count` one higher than the ids
-/// present, so empty fields are skipped and the count is not trusted.
+/// present, so empty fields are skipped and the count is only used, with slack, to spot a short list.
 struct UserBeerList: Decodable {
     var bids: [Int]
     var count: Int?
@@ -1009,7 +1009,8 @@ struct UserBeerList: Decodable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         count = try? c.decode(Int.self, forKey: .bidsCount)
-        let raw = ((try? c.decode(String.self, forKey: .bids)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        // A missing or non-string `bids` must fail, not read as "no beers".
+        let raw = try c.decode(String.self, forKey: .bids).trimmingCharacters(in: .whitespacesAndNewlines)
         if let ids = Self.parse(raw) {
             bids = ids
         } else if let d = Data(base64Encoded: Self.padded(raw)),

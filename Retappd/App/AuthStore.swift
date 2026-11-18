@@ -55,6 +55,9 @@ final class AuthStore {
     #endif
 
     func signOut() {
+        // First and synchronously: the ticks go at once, an in-flight sync is abandoned, and a
+        // sign-in straight afterwards can't pick up this account's list.
+        HadBeers.shared.clear()
         Keychain.delete("access_token")
         UserDefaults.standard.removeObject(forKey: "username")
         UntappdAPI.shared.token = nil
@@ -63,7 +66,6 @@ final class AuthStore {
         Task {
             await ResponseCache.shared.removeAll()
             await LocalIndex.shared.removeAll()
-            await HadBeers.shared.clear()
         }
     }
 }
