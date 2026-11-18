@@ -87,4 +87,27 @@ final class ShopPlaceTests: XCTestCase {
         XCTAssertNil(r.placeFound)
         XCTAssertNil(r.placeName)
     }
+
+    func testSortedByDistanceOrdersNearestFirstWithUnknownLast() {
+        let venues = [
+            Venue(foursquareId: "a", name: "Bottle Shop", category: "Liquor Store", reportedDistance: 21),
+            Venue(foursquareId: "b", name: "No Distance"),
+            Venue(foursquareId: "c", name: "Supermarket", category: "Supermarket", reportedDistance: 56),
+            Venue(foursquareId: "d", name: "Corner Cafe", category: "Café", reportedDistance: 8),
+            Venue(foursquareId: "e", name: "Bookshop", category: "Bookstore", reportedDistance: 18),
+            Venue(foursquareId: "f", name: "Arcade", category: "Shopping", reportedDistance: 25),
+            Venue(foursquareId: "g", name: "Second Unknown"),
+        ]
+        let sorted = ShopPlace.sortedByDistance(venues)
+        XCTAssertEqual(sorted.map(\.foursquareId), ["d", "e", "a", "f", "c", "b", "g"])
+    }
+
+    func testSortedByDistanceUsesOriginWhenGiven() {
+        let origin = CLLocation(latitude: -37.8136, longitude: 144.9631)
+        let farByCoord = Venue(foursquareId: "far", name: "Far", lat: -37.8236, lng: 144.9631, reportedDistance: 5)
+        let nearByCoord = Venue(foursquareId: "near", name: "Near", lat: -37.8137, lng: 144.9631, reportedDistance: 900)
+        let serverOnly = Venue(foursquareId: "server", name: "Server", reportedDistance: 50)
+        let sorted = ShopPlace.sortedByDistance([farByCoord, serverOnly, nearByCoord], from: origin)
+        XCTAssertEqual(sorted.map(\.foursquareId), ["near", "server", "far"])
+    }
 }

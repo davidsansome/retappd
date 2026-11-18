@@ -95,7 +95,8 @@ struct VenuePicker: View {
                         TaproomSection("Recent") { rows(recent) }
                     }
                     placeSection(activePlace == nil ? "Nearby" : "Near \(placeLabel)") {
-                        let others = nearby.filter { !recentIds.contains($0.id) }
+                        let others = ShopPlace.sortedByDistance(nearby.filter { !recentIds.contains($0.id) },
+                                                                from: distanceOrigin)
                         if placeNotFound {
                             unknownPlace
                         } else {
@@ -128,20 +129,21 @@ struct VenuePicker: View {
         .scrollDismissesKeyboard(.immediately)
         .foregroundStyle(Taproom.ink)
         .background(Taproom.background)
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: kind == .shop ? "Search shops" : "Search venues")
         .navigationTitle(kind == .shop ? "Where did you buy it?" : "Where are you?")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Taproom.background, for: .navigationBar)
         .safeAreaInset(edge: .top, spacing: 0) {
-            if kind == .shop {
-                TaproomSearchField(text: $place, prompt: "Near… (city or country)", systemImage: "location",
-                                   capitalization: .words)
-                    .padding(.horizontal, Taproom.margin)
-                    .padding(.top, 6)
-                    .padding(.bottom, 8)
-                    .background(Taproom.background)
+            VStack(spacing: 8) {
+                TaproomSearchField(text: $query, prompt: kind == .shop ? "Search shops" : "Search venues")
+                if kind == .shop {
+                    TaproomSearchField(text: $place, prompt: "Near… (city or country)", systemImage: "location",
+                                       capitalization: .words)
+                }
             }
+            .padding(.horizontal, Taproom.margin)
+            .padding(.top, 6)
+            .padding(.bottom, 8)
+            .background(Taproom.background)
         }
         .task(id: ShopQuery(text: q, place: activePlace, hasLocation: location.location != nil)) { await search(q) }
         .task(id: ShopQuery(text: "", place: activePlace, hasLocation: location.location != nil)) {
@@ -183,9 +185,7 @@ struct VenuePicker: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Fills the shop picker's lists, near the device or near the typed place. Untappd's nearby
-    /// list is every kind of place, often with no shops at all in a city centre, so shop-like
-    /// places go first rather than being the only ones.
+    /// Fills the shop picker's lists, near the device or near the typed place, nearest first.
     private func loadShops() async {
         let place = activePlace
         nearbyShops = []
@@ -209,7 +209,7 @@ struct VenuePicker: View {
         // The account's recent shops don't depend on where you look, and aren't in a place search.
         if place == nil { recentShops = r.recent.filter { $0.foursquareId != nil } }
         let places = r.nearby.filter { $0.foursquareId != nil && !$0.isCustom }
-        nearbyShops = places.filter(\.looksLikeShop) + places.filter { !$0.looksLikeShop }
+        nearbyShops = ShopPlace.sortedByDistance(places, from: place == nil ? location.location : nil)
         noteResolved(r, place: place)
     }
 
@@ -258,7 +258,8 @@ struct VenuePicker: View {
         let remote = (r.recent.filter { LocalIndex.matches(query: q, text: $0.name) } + r.nearby)
             .filter { $0.foursquareId != nil && !$0.isCustom }
         let keys = Set(remote.map { $0.foursquareId ?? $0.id })
-        results = remote + local.filter { !keys.contains($0.foursquareId ?? $0.id) }
+        results = ShopPlace.sortedByDistance(remote + local.filter { !keys.contains($0.foursquareId ?? $0.id) },
+                                             from: loc)
         await LocalIndex.shared.add(venues: remote)
     }
 
@@ -266,9 +267,10 @@ struct VenuePicker: View {
     /// already says what the user is after.
     private func searchShops(_ q: String) async {
         let place = activePlace
+        let origin = place == nil ? location.location : nil
         // Your own recent shops only match when searching where you are.
         let mine = place == nil ? recent.filter { LocalIndex.matches(query: q, text: $0.name) } : []
-        results = mine
+        results = ShopPlace.sortedByDistance(mine, from: origin)
         guard let c = searchCoordinate else { return }
         try? await Task.sleep(for: .milliseconds(place == nil ? 250 : 400))  // debounce while typing
         guard !Task.isCancelled else { return }
@@ -279,7 +281,8 @@ struct VenuePicker: View {
         noteResolved(r, place: place)
         let remote = r.nearby.filter { $0.foursquareId != nil && !$0.isCustom }
         let keys = Set(mine.map { $0.foursquareId ?? $0.id })
-        results = mine + remote.filter { !keys.contains($0.foursquareId ?? $0.id) }
+        results = ShopPlace.sortedByDistance(mine + remote.filter { !keys.contains($0.foursquareId ?? $0.id) },
+                                             from: origin)
     }
 }
 
@@ -301,5 +304,12 @@ enum ShopPlace {
     static func coordinate(device: CLLocationCoordinate2D?, place: String?) -> (lat: Double, lng: Double)? {
         if let device { return (device.latitude, device.longitude) }
         return place == nil ? nil : placeholderCoordinate
+    }
+
+    /// Sorts venues nearest first, measuring from `origin` when given or falling back to the
+    /// distance the server reported. Venues with a known distance come before ones without.
+    static func sortedByDistance(_ venues: [Venue], from origin: CLLocation? = nil) -> [Venue] {
+        func dist(_ v: Venue) -> Double { v.distance(from: origin) ?? v.reportedDistance ?? .infinity }
+        return venues.sorted { dist($0) < dist($1) }
     }
 }
