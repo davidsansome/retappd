@@ -40,7 +40,8 @@ struct CheckinRow<MenuItems: View>: View {
                     .accessibilityLabel("Photo")
             }
 
-            if let shop = checkin.retailVenue {
+            // With nothing else to share a row with, the shop goes in the footer, beside Toast.
+            if let shop = checkin.retailVenue, toastPartner != .purchase {
                 purchasedAt(shop)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
@@ -52,7 +53,7 @@ struct CheckinRow<MenuItems: View>: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .overlay(alignment: .top) {
-                        if checkin.photo == nil || checkin.retailVenue != nil { divider }
+                        if checkin.photo == nil || (checkin.retailVenue != nil && toastPartner != .purchase) { divider }
                     }
             }
 
@@ -209,20 +210,38 @@ struct CheckinRow<MenuItems: View>: View {
         checkin.toastCount > 0 || checkin.commentCount > 0 || !checkin.taggedFriends.isEmpty || toast != nil
     }
 
-    /// Who they were with, then the toasts with the Toast button. With no toasts yet, the Toast
-    /// button sits beside the friends instead of on a row of its own.
+    /// What shares a row with the Toast button; see `ToastPartner`.
+    private var toastPartner: ToastPartner {
+        ToastPartner.choose(toasts: checkin.toastCount, friends: !checkin.taggedFriends.isEmpty,
+                            purchase: checkin.retailVenue != nil, hasToastButton: toast != nil)
+    }
+
+    /// The Toast button shares its row with the toasts, else the friends, else the shop (see
+    /// `ToastPartner`). Friends go on their own row above the toasts.
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if checkin.toastCount > 0 {
+            switch toastPartner {
+            case .toasts:
                 if !checkin.taggedFriends.isEmpty { withFriends }
                 HStack(alignment: .center, spacing: 10) {
                     ToastChips(checkin: checkin)
                     Spacer(minLength: 0)
                     actions
                 }
-            } else {
+            case .friends:
                 HStack(alignment: .center, spacing: 10) {
-                    if !checkin.taggedFriends.isEmpty { withFriends }
+                    withFriends
+                    Spacer(minLength: 0)
+                    actions
+                }
+            case .purchase:
+                HStack(alignment: .center, spacing: 10) {
+                    if let shop = checkin.retailVenue { purchasedAt(shop) }
+                    Spacer(minLength: 0)
+                    actions
+                }
+            case .none:
+                HStack(alignment: .center, spacing: 10) {
                     Spacer(minLength: 0)
                     actions
                 }
@@ -245,6 +264,20 @@ struct CheckinRow<MenuItems: View>: View {
                 .accessibilityLabel("\(checkin.commentCount) comments")
         }
         if let toast { ToastButton(checkin: checkin, toast: toast) }
+    }
+}
+
+/// What the card's Toast button shares a row with, in order of preference: the toasts, the tagged
+/// friends, the shop it was bought at. It sits alone only when the card has none of those.
+enum ToastPartner: Equatable {
+    case toasts, friends, purchase, none
+
+    static func choose(toasts: Int, friends: Bool, purchase: Bool, hasToastButton: Bool) -> ToastPartner {
+        if toasts > 0 { return .toasts }
+        if friends { return .friends }
+        // Without a Toast button (a profile) the shop keeps its own row above the footer.
+        if purchase && hasToastButton { return .purchase }
+        return .none
     }
 }
 
