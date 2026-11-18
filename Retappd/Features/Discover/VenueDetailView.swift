@@ -397,16 +397,15 @@ struct GroupedCheckinList: View {
     let emptyText: String
 
     var body: some View {
-        let groups = Dictionary(grouping: model.items) { c in
-            c.createdAt.map { RelativeTime.Bucket($0) } ?? .earlier
-        }
-        VStack(alignment: .leading, spacing: 0) {
-            let first = groups.keys.min()
-            ForEach(RelativeTime.Bucket.allCases.filter { groups[$0] != nil }, id: \.self) { bucket in
-                Text(bucket.title).font(Taproom.sectionLabel)
-                    .padding(.top, bucket == first ? 0 : 16)
-                    .accessibilityAddTraits(.isHeader)
-                ForEach(groups[bucket] ?? []) { c in
+        // Lazy, so a row's onAppear fires as it scrolls into view and pages load one at a time.
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(model.timeline) { entry in
+                switch entry {
+                case .header(let bucket, let isFirst):
+                    Text(bucket.title).font(Taproom.sectionLabel)
+                        .padding(.top, isFirst ? 0 : 16)
+                        .accessibilityAddTraits(.isHeader)
+                case .row(let c):
                     NavigationLink(value: CheckinRoute(checkin: c, listID: listID)) {
                         CompactCheckinRow(checkin: c)
                     }

@@ -243,7 +243,8 @@ struct BeerView: View {
     @ViewBuilder private var recentCheckins: some View {
         let list = model.checkins
         TaproomSection("Recent check-ins") {
-            VStack(alignment: .leading, spacing: 12) {
+            // Lazy, so a row's onAppear fires as it scrolls into view and pages load one at a time.
+            LazyVStack(alignment: .leading, spacing: 12) {
                 ForEach(list.items) { c in
                     NavigationLink(value: CheckinRoute(checkin: c, listID: listID)) {
                         CheckinRow(checkin: c)

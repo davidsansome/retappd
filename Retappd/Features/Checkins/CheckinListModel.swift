@@ -22,10 +22,26 @@ final class CheckinListModel {
         }
     }
 
+    /// One line of a grouped list: a time-bucket header, or a checkin under it.
+    enum TimelineEntry: Identifiable {
+        case header(RelativeTime.Bucket, isFirst: Bool)
+        case row(Checkin)
+
+        var id: Int {
+            switch self {
+            case .header(let b, _): -1 - b.rawValue
+            case .row(let c): c.id
+            }
+        }
+    }
+
     let source: Source
     /// The signed-in user, so their avatar can appear among toasters as soon as they toast.
     var me: User?
-    private(set) var items: [Checkin] = []
+    private(set) var items: [Checkin] = [] { didSet { timeline = Self.timeline(of: items) } }
+    /// `items` as time-bucket headers ("Today", "This week", …) followed by their rows, built when
+    /// the items change rather than on every render of a long list.
+    private(set) var timeline: [TimelineEntry] = []
     private(set) var isRefreshing = false
     private(set) var isLoadingMore = false
     private(set) var reachedEnd = false
@@ -92,6 +108,19 @@ final class CheckinListModel {
     /// list stays empty for good: let the next `loadIfNeeded()` try again.
     private func retryIfEmpty() {
         if items.isEmpty { hasLoaded = false }
+    }
+
+    static func timeline(of items: [Checkin], now: Date = .now) -> [TimelineEntry] {
+        var groups: [RelativeTime.Bucket: [Checkin]] = [:]
+        for c in items { groups[c.createdAt.map { RelativeTime.Bucket($0, now: now) } ?? .earlier, default: []].append(c) }
+        var out: [TimelineEntry] = []
+        out.reserveCapacity(items.count + groups.count)
+        for bucket in RelativeTime.Bucket.allCases {
+            guard let rows = groups[bucket] else { continue }
+            out.append(.header(bucket, isFirst: out.isEmpty))
+            out += rows.map { .row($0) }
+        }
+        return out
     }
 
     /// Call when a row appears; fetches the next page as the user nears the bottom.
