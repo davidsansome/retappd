@@ -78,6 +78,7 @@ System font throughout (SF Pro), so Dynamic Type works.
 | `TaproomChip(on: false, dashed: true)` | Dashed outline, no fill | An "add" action within a row of chips ("+ Tag friends") when there's nothing to suggest |
 | Suggestion chips | `TaproomChip` reading "+ Name" off, turning amber (with an avatar for people) when tapped; they stay in place | One-tap picks from a likely few (recently tagged friends, a beer's common flavours), ending in a "…" chip for the full list |
 | `TaproomOutlineButton()` | Rounded rectangle (12pt), card fill, 1pt border, 44pt tall | Secondary actions, usually two side by side ("Camera" / "Photos") |
+| `TaproomButtonRow` | A `Layout` for a row of outline buttons of different label lengths: fills the width, each button is its label's width plus the same extra, so padding is equal everywhere. Give labels `.padding(.horizontal, 12)`; mark icon-only buttons `.fixedInButtonRow()` | Photo row ("Camera" / "Last" / Photos); at large Dynamic Type the buttons shrink, so give labels an icon-only fallback with `ViewThatFits`, as the photo row does |
 | `TaproomPrimaryButton()` | Full width, 54pt, ink fill, background-coloured text, 16pt corners | The screen's one main action, pinned at the bottom |
 | `.taproomCard()` | Card fill, 1pt border, 16pt corners | Text fields, photos, tappable rows that need a boundary |
 | `TaproomSection` | Bold label above content | Every titled block |

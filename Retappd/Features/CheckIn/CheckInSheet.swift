@@ -186,20 +186,32 @@ struct CheckInSheet: View {
                 .accessibilityLabel("Remove photo")
             }
         } else {
-            HStack(spacing: 8) {
-                Button { showingCamera = true } label: { Label("Camera", systemImage: "camera").lineLimit(1) }
+            TaproomButtonRow(spacing: 8) {
+                Button { showingCamera = true } label: { photoButtonLabel("Camera", systemImage: "camera") }
                     .buttonStyle(TaproomOutlineButton())
                     .disabled(!CameraPicker.isAvailable)
-                Button { useLastPhoto() } label: { Label("Last", systemImage: "clock.arrow.circlepath").lineLimit(1) }
+                Button { useLastPhoto() } label: { photoButtonLabel("Last", systemImage: "clock.arrow.circlepath") }
                     .buttonStyle(TaproomOutlineButton())
                 PhotosPicker(selection: $libraryItem, matching: .images) {
                     Image(systemName: "photo.on.rectangle")
                 }
                 .buttonStyle(TaproomOutlineButton())
                 .frame(width: 44)
+                .fixedInButtonRow()
                 .accessibilityLabel("Photos")
             }
         }
+    }
+
+    /// A photo button's label: icon and title, or just the icon when the row is too narrow for the
+    /// title (large Dynamic Type), rather than a truncated "Ca…".
+    private func photoButtonLabel(_ title: LocalizedStringKey, systemImage: String) -> some View {
+        ViewThatFits(in: .horizontal) {
+            Label(title, systemImage: systemImage).lineLimit(1)
+            Image(systemName: systemImage)
+        }
+        .padding(.horizontal, 12)
+        .accessibilityLabel(Text(title))
     }
 
     private var comment: some View {

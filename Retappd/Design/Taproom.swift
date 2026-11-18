@@ -96,6 +96,65 @@ struct TaproomOutlineButton: ButtonStyle {
     }
 }
 
+/// Marks a subview of a `TaproomButtonRow` as fixed at its own width (e.g. an icon-only button)
+/// instead of taking a share of the row's spare width.
+private struct FixedInButtonRowKey: LayoutValueKey {
+    static let defaultValue = false
+}
+
+extension View {
+    /// In a `TaproomButtonRow`, keeps this view at its own width.
+    func fixedInButtonRow() -> some View { layoutValue(key: FixedInButtonRowKey.self, value: true) }
+}
+
+/// A row of `TaproomOutlineButton`s that fills the available width, sharing the spare width
+/// equally between the flexible buttons: each is its label's natural width plus the same extra
+/// amount, so every button has equal padding either side of its label whatever the label's
+/// length. Give labels a small horizontal padding for the minimum. Buttons marked
+/// `.fixedInButtonRow()` keep their own width. If the labels don't fit (large Dynamic Type),
+/// the flexible buttons shrink in proportion to their natural widths; callers should give each
+/// label an icon-only fallback (e.g. with `ViewThatFits`, as the check-in photo row does).
+struct TaproomButtonRow: Layout {
+    var spacing: CGFloat = 8
+
+    private func widths(_ subviews: Subviews, in total: CGFloat) -> [CGFloat] {
+        let ideals = subviews.map { $0.sizeThatFits(.unspecified).width }
+        let fixed = subviews.map { $0[FixedInButtonRowKey.self] }
+        let gaps = spacing * CGFloat(max(subviews.count - 1, 0))
+        let fixedTotal = zip(ideals, fixed).reduce(0) { $0 + ($1.1 ? $1.0 : 0) }
+        let flexIdeal = zip(ideals, fixed).reduce(0) { $0 + ($1.1 ? 0 : $1.0) }
+        let flexCount = fixed.filter { !$0 }.count
+        let room = total - gaps - fixedTotal
+        guard flexCount > 0 else { return ideals }
+        let extra = (room - flexIdeal) / CGFloat(flexCount)
+        return zip(ideals, fixed).map { ideal, isFixed in
+            if isFixed { return ideal }
+            if extra >= 0 { return ideal + extra }
+            return max(0, room) * ideal / max(flexIdeal, 1)
+        }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let natural = subviews.reduce(0) { $0 + $1.sizeThatFits(.unspecified).width }
+            + spacing * CGFloat(max(subviews.count - 1, 0))
+        // No proposal, or an infinite one: use the natural width rather than an infinite one.
+        let total = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? natural
+        let ws = widths(subviews, in: total)
+        let height = zip(subviews, ws).map { $0.sizeThatFits(.init(width: $1, height: nil)).height }.max() ?? 0
+        return CGSize(width: total, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let ws = widths(subviews, in: bounds.width)
+        var x = bounds.minX
+        for (view, w) in zip(subviews, ws) {
+            view.place(at: CGPoint(x: x, y: bounds.minY), anchor: .topLeading,
+                       proposal: .init(width: w, height: bounds.height))
+            x += w + spacing
+        }
+    }
+}
+
 /// The screen's one main action: full width, dark ink with light text. `fullWidth: false` sizes
 /// it to its label, for the tab bar's action.
 struct TaproomPrimaryButton: ButtonStyle {
