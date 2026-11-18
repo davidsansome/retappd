@@ -122,15 +122,13 @@ struct CheckinRow<MenuItems: View>: View {
         }
     }
 
-    /// The name, then the time. A long name is shortened rather than the time.
+    /// The name, then the time: on one line when they fit, otherwise the time drops under the
+    /// name so the name is never squeezed out.
     private var whoWhen: some View {
-        HStack(spacing: 0) {
-            let when = checkin.createdAt.map { RelativeTime.string($0) }
+        let when = checkin.createdAt.map { RelativeTime.string($0) }
+        return Group {
             if showUser, let u = checkin.user {
-                Text(u.shortName).fontWeight(.semibold).lineLimit(1)
-                if let when {
-                    Text(" · " + when).foregroundStyle(Taproom.muted).lineLimit(1).fixedSize()
-                }
+                NameWhenLine(name: u.shortName, when: when)
             } else if let when {
                 Text(when).foregroundStyle(Taproom.muted).lineLimit(1)
             }
@@ -369,6 +367,30 @@ struct ToastChips: View {
     }
 }
 
+/// "Name · time" in one line when it fits, otherwise the name with the time on a second line.
+/// The name only truncates (after two lines) when it alone is too long; the time never pushes
+/// it out. Fonts come from the environment.
+struct NameWhenLine: View {
+    let name: String
+    let when: String?
+
+    var body: some View {
+        if let when {
+            ViewThatFits(in: .horizontal) {
+                (Text(name).fontWeight(.semibold) + Text(" · " + when).foregroundStyle(Taproom.muted))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(name).fontWeight(.semibold).lineLimit(2)
+                    Text(when).foregroundStyle(Taproom.muted)
+                }
+            }
+        } else {
+            Text(name).fontWeight(.semibold).lineLimit(2)
+        }
+    }
+}
+
 /// A checkin as one row, for lists of many checkins at one place (a venue's): who and how long
 /// ago, the beer, a thumbnail of the photo, and the rating.
 struct CompactCheckinRow: View {
@@ -378,12 +400,8 @@ struct CompactCheckinRow: View {
         HStack(spacing: 12) {
             Avatar(url: checkin.user?.avatar, size: 36)
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 0) {
-                    Text(checkin.user?.shortName ?? "Someone").fontWeight(.semibold).lineLimit(1)
-                    if let d = checkin.createdAt {
-                        Text(" · " + RelativeTime.short(d)).foregroundStyle(Taproom.muted).lineLimit(1).fixedSize()
-                    }
-                }
+                NameWhenLine(name: checkin.user?.shortName ?? "Someone",
+                             when: checkin.createdAt.map { RelativeTime.short($0) })
                 .font(.footnote)
                 Text(checkin.beer?.name ?? "Unknown beer")
                     .font(.body.weight(.heavy)).tracking(-0.2).lineLimit(1)
