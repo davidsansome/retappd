@@ -405,18 +405,21 @@ struct TaproomSearchField: View {
     @Binding var text: String
     let prompt: String
     var focusRequests = 0
+    /// The leading icon, e.g. `location` for a "where" field.
+    var systemImage = "magnifyingglass"
+    var capitalization: TextInputAutocapitalization = .never
     @FocusState private var focused: Bool
     @State private var handledRequests = 0
 
     var body: some View {
         HStack(spacing: 10) {
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Taproom.muted)
+                Image(systemName: systemImage).foregroundStyle(Taproom.muted)
                 TextField(prompt, text: $text, prompt: Text(prompt).foregroundStyle(Taproom.muted))
                     .focused($focused)
                     .submitLabel(.search)
                     .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
+                    .textInputAutocapitalization(capitalization)
                 if !text.isEmpty {
                     Button("Clear", systemImage: "xmark.circle.fill") { text = "" }
                         .labelStyle(.iconOnly).foregroundStyle(Taproom.muted)

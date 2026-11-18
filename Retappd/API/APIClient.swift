@@ -190,11 +190,34 @@ extension APIRequest {
     /// Places to have bought a beer, in `foursquare`: everything nearby, not just shops, unless
     /// `query` narrows it. Same shape as `/venue/around`; what the official app's "Purchased at"
     /// picker calls. Not sent with `recent=true`, which empties the `foursquare` list.
-    static func retailVenuesAround(lat: Double, lng: Double, query: String = "", limit: Int = 25) -> APIRequest {
-        APIRequest(path: "/v4/venue/aroundretail", query: [
+    ///
+    /// `location` is a place name ("Melbourne", "Tokyo", "Belgium") for the official app's second,
+    /// "search near…" field. The API docs list `location` with no description, only ever captured
+    /// empty. Tried live on 2026-11-18, it is geocoded on the server (by Google, echoed in
+    /// `response.location.geocode`) and the search moves there:
+    /// - `lat`/`lng` are still required (HTTP 500, `invalid_param`, "Your missing the 'lat' and/or
+    ///   'lng' parameter." without them, and for 0,0) but are ignored when `location` geocodes, so
+    ///   any non-zero pair will do when there's no device fix. Omitting `location` equals "".
+    /// - Results come from around the geocoded point: `algolia.aroundLatLng` is the point and
+    ///   `aroundRadius` 250 (m) with no `q`, 100000 with one; `distance` is from that point (km).
+    ///   `Melbourne` gave Melbourne VIC places, `Tokyo` Tokyo ones, `Belgium` places near Belgium's
+    ///   centroid, and with `q=bottle` Melbourne bottle shops.
+    /// - `response.location.geocode[0]` echoes the place: `metadata.formatted_address` ("Melbourne
+    ///   VIC, Australia"), `lat`/`lng`, `provider`, `metadata.geometry`. (`response.location.lat/lng`
+    ///   stay the device values.) `/venue/around` instead echoes `location_query` and the point in
+    ///   `location`, and adds `is_too_far_away`.
+    /// - An unknown place ("qzxqzx") is still HTTP 200, with `geocode: []`, an empty `foursquare`
+    ///   and `algolia.aroundLatLngViaIP`: no error code. (`/venue/around` silently searches near
+    ///   the device instead.)
+    /// - Case, spacing and extra words ("Melbourne, Victoria") don't matter.
+    static func retailVenuesAround(lat: Double, lng: Double, query: String = "", location: String? = nil,
+                                   limit: Int = 25) -> APIRequest {
+        var q = [
             "lat": String(format: "%.6f", lat), "lng": String(format: "%.6f", lng),
-            "limit": "\(limit)", "dist_pref": "m", "q": query, "location": "",
-        ])
+            "limit": "\(limit)", "dist_pref": "m", "q": query,
+        ]
+        if let place = ShopPlace.normalized(location) { q["location"] = place }
+        return APIRequest(path: "/v4/venue/aroundretail", query: q)
     }
 
     /// Untappd's own venues (with ids and verified flags) inside a box of ±`span` degrees.

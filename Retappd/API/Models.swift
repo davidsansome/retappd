@@ -650,11 +650,28 @@ struct VenueAround: Decodable {
     var lng: Double?
     var recent: [Venue]
     var nearby: [Venue]
+    /// For a search with `location`: what the server made of it. `placeFound` is false when
+    /// `geocode` came back empty; both are nil when the response has no `geocode` (no `location`).
+    var placeName: String?
+    var placeFound: Bool?
+
+    private struct Geocode: Decodable {
+        var name: String?
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            name = c.nested("metadata")?.text("formatted_address")
+        }
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
         lat = c.nested("location")?.double("lat")
         lng = c.nested("location")?.double("lng")
+        if let geocode = c.nested("location")?.obj("geocode", [Failable<Geocode>].self) {
+            let places = geocode.compactMap(\.value)
+            placeFound = !places.isEmpty
+            placeName = places.first?.name
+        }
         recent = c.items("recent")
         nearby = c.items("foursquare")
     }
