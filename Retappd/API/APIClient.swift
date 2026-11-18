@@ -310,6 +310,46 @@ extension APIRequest {
         APIRequest(path: "/v4/beer/userrating/\(bid)")
     }
 
+    /// A beer in full. The docs mark `compact`, `dist_pref`, `lat`, `lng` and `radius` as sent by
+    /// the app (the location is for "available near you", which this app doesn't show), so the
+    /// location is optional here and the rest is sent as captured.
+    static func beerInfo(_ bid: Int, lat: Double? = nil, lng: Double? = nil) -> APIRequest {
+        var q = ["compact": "enhanced", "dist_pref": "m", "radius": "10"]
+        if let lat, let lng { q["lat"] = String(format: "%.5f", lat); q["lng"] = String(format: "%.5f", lng) }
+        return APIRequest(path: "/v4/beer/info/\(bid)", query: q)
+    }
+
+    /// Recent checkins of a beer by everyone, newest first, paged with `max_id`. The docs only
+    /// show `type=friends` (marked required, though it's the filter); leaving it off is assumed to
+    /// mean everyone, as for the venue feed.
+    static func beerCheckins(_ bid: Int, friendsOnly: Bool = false, maxId: Int? = nil, limit: Int = 25) -> APIRequest {
+        var q = ["limit": "\(limit)"]
+        if friendsOnly { q["type"] = "friends" }
+        if let maxId { q["max_id"] = "\(maxId)" }
+        return APIRequest(path: "/v4/beer/checkins/\(bid)", query: q)
+    }
+
+    /// A brewery in full; `collaborations` and the location are as the docs show the app sending.
+    static func breweryInfo(_ id: Int) -> APIRequest {
+        APIRequest(path: "/v4/brewery/info/\(id)", query: ["collaborations": "true", "dist_pref": "m", "radius": "10"])
+    }
+
+    /// A brewery's beers, most popular first. The docs capture the filters but no paging; `offset`
+    /// is the public API's parameter for it and is assumed to work here.
+    static func breweryBeers(_ id: Int, offset: Int = 0) -> APIRequest {
+        var q = ["hasNotHadBefore": "false", "q": "", "showAllBeers": "false", "sort": "most_popular",
+                 "styles": "true", "type_id": ""]
+        if offset > 0 { q["offset"] = "\(offset)" }
+        return APIRequest(path: "/v4/brewery/beer_list/\(id)", query: q)
+    }
+
+    /// A brewery's recent checkins by everyone, newest first.
+    static func breweryCheckins(_ id: Int, maxId: Int? = nil, limit: Int = 25) -> APIRequest {
+        var q = ["limit": "\(limit)"]
+        if let maxId { q["max_id"] = "\(maxId)" }
+        return APIRequest(path: "/v4/brewery/checkins/\(id)", query: q)
+    }
+
     static let servingTypes = APIRequest(path: "/v4/checkin/serving_types")
 
     /// The flavour tags people have given a beer most, most used first, with their counts.

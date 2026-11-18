@@ -70,6 +70,7 @@ struct RootTabs: View {
             Tab("Activity", systemImage: "list.bullet.rectangle", value: .feed) {
                 NavigationStack(path: $feedPath) {
                     FeedView(model: feed).safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
+                        .beerAndBreweryDestinations()
                 }
                 .toolbarVisibility(.hidden, for: .tabBar)
             }
@@ -77,6 +78,7 @@ struct RootTabs: View {
                 NavigationStack {
                     DiscoverView(model: discover, searchRequests: searchRequests, scanRequests: scanRequests)
                         .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
+                        .beerAndBreweryDestinations()
                 }
                 .toolbarVisibility(.hidden, for: .tabBar)
             }
@@ -84,6 +86,7 @@ struct RootTabs: View {
                 NavigationStack(path: $profilePath) {
                     ProfileView(username: username, model: profile) { profilePath.append(ProfileRoute.settings) }
                         .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
+                        .beerAndBreweryDestinations()
                 }
                 .toolbarVisibility(.hidden, for: .tabBar)
             }

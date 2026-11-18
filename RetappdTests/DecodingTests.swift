@@ -347,4 +347,126 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(r.query["type"], "friends")
         XCTAssertEqual(r.query["max_id"], "99")
     }
+
+    // MARK: Beer and brewery pages. Fields the docs truncate are filled in from the OpenAPI schema.
+
+    func testBeerInfo() throws {
+        let json = """
+        {"meta":{"code":200},"response":{"beer":{
+          "bid": 5826548, "beer_name": "American Amber",
+          "beer_label": "https://assets.untappd.com/site/beer_logos/beer-5826548_a3664_sm.jpeg",
+          "beer_label_hd": "https://assets.untappd.com/site/beer_logos_hd/beer-5826548_a8a56_hd.jpeg",
+          "beer_abv": 5, "beer_ibu": 37, "beer_description": "An easy red.",
+          "beer_style": "Amber Ale - American", "is_in_production": 1,
+          "rating_count": 4021, "rating_score": 3.62,
+          "stats": {"total_count": 9000, "monthly_count": 120, "total_user_count": 3100, "user_count": 3},
+          "auth_rating": 3.75, "wish_list": false,
+          "brewery": {"brewery_id": 5130, "brewery_name": "Chuck and Son's Brewing Co",
+            "brewery_label": "https://assets.untappd.com/site/brewery_logos/brewery-5130_x.jpeg",
+            "country_name": "Australia", "brewery_type": "Micro Brewery",
+            "location": {"brewery_city": "Sydney", "brewery_state": "NSW"}}
+        }}}
+        """
+        let info = try UntappdAPI.decode(BeerInfo.self, from: Data(json.utf8))
+        XCTAssertEqual(info.bid, 5826548)
+        XCTAssertEqual(info.name, "American Amber")
+        XCTAssertEqual(info.abv, 5)
+        XCTAssertEqual(info.ibu, 37)
+        XCTAssertEqual(info.description, "An easy red.")
+        XCTAssertEqual(info.rating, 3.62)
+        XCTAssertEqual(info.ratingCount, 4021)
+        XCTAssertEqual(info.stats?.yours, 3)
+        XCTAssertEqual(info.stats?.people, 3100)
+        XCTAssertEqual(info.yourRating, 3.75)
+        XCTAssertTrue(info.hasHad)
+        XCTAssertEqual(info.isInWishlist, false)
+        XCTAssertEqual(info.brewery?.id, 5130)
+        XCTAssertEqual(info.city, "Sydney")
+        XCTAssertEqual(info.lite.breweryId, 5130)
+        XCTAssertEqual(info.lite.brewery, "Chuck and Son's Brewing Co")
+    }
+
+    func testBeerInfoNotHad() throws {
+        let json = """
+        {"response":{"beer":{"bid": 1, "beer_name": "New", "beer_abv": 4.5, "beer_ibu": 0,
+          "rating_score": 0, "rating_count": 0, "stats": {"user_count": 0}, "auth_rating": 0,
+          "brewery": []}}}
+        """
+        let info = try UntappdAPI.decode(BeerInfo.self, from: Data(json.utf8))
+        XCTAssertFalse(info.hasHad)
+        XCTAssertNil(info.yourRating)
+        XCTAssertNil(info.brewery)
+        XCTAssertNil(info.lite.rating)
+    }
+
+    func testBreweryInfo() throws {
+        let json = """
+        {"meta":{"code":200},"response":{"brewery":{
+          "brewery_id": 198631, "brewery_name": "Bathtub Brewing", "brewery_slug": "bathtub-brewing",
+          "brewery_page_url": "/BathtubBrewingAU",
+          "brewery_label": "https://assets.untappd.com/site/brewery_logos/brewery-198631_4bf10.jpeg",
+          "brewery_label_hd": "", "country_name": "Australia", "beer_count": 46,
+          "contact": {"twitter": "BathtubBrewing", "facebook": "https://facebook.com/bathtub", "instagram": "@bathtub", "url": "bathtub.example.com"},
+          "brewery_type": "Home / Non-Commercial Brewery",
+          "location": {"brewery_address": "1 Tub St", "brewery_city": "Sydney", "brewery_state": "NSW", "brewery_lat": -33.8, "brewery_lng": 151.2},
+          "rating": {"count": 321, "rating_score": 3.9},
+          "brewery_description": "Mead and more.",
+          "stats": {"total_count": 500, "unique_count": 200, "monthly_count": 9, "weekly_count": 2, "user_count": 8},
+          "user_average_rating": 4.1
+        }}}
+        """
+        let b = try UntappdAPI.decode(BreweryInfo.self, from: Data(json.utf8))
+        XCTAssertEqual(b.id, 198631)
+        XCTAssertEqual(b.name, "Bathtub Brewing")
+        XCTAssertNil(b.labelHD)
+        XCTAssertEqual(b.type, "Home / Non-Commercial Brewery")
+        XCTAssertEqual(b.locality, "Sydney, NSW, Australia")
+        XCTAssertEqual(b.rating, 3.9)
+        XCTAssertEqual(b.ratingCount, 321)
+        XCTAssertEqual(b.beerCount, 46)
+        XCTAssertEqual(b.stats?.total, 500)
+        XCTAssertEqual(b.stats?.yours, 8)
+        XCTAssertEqual(b.yourAverage, 4.1)
+        XCTAssertEqual(b.website?.absoluteString, "https://bathtub.example.com")
+        XCTAssertEqual(b.twitter?.absoluteString, "https://x.com/BathtubBrewing")
+        XCTAssertEqual(b.facebook?.absoluteString, "https://facebook.com/bathtub")
+        XCTAssertEqual(b.instagram?.absoluteString, "https://instagram.com/bathtub")
+    }
+
+    func testBreweryBeerList() throws {
+        let json = """
+        {"meta":{"code":200},"response":{"total_count_filtered": 46, "total_count": 46, "beers": {"count": 2, "items": [
+          {"total_user_count": 8, "has_had": true, "total_count": 29,
+           "beer": {"bid": 1719356, "beer_name": "Let's Bee Friends",
+             "beer_label": "https://assets.untappd.com/site/beer_logos/beer-1719356_f0a2a_sm.jpeg",
+             "beer_style": "Mead - Other", "beer_abv": 11.03, "beer_ibu": 0, "rating_score": 3.8, "rating_count": 50},
+           "brewery": {"brewery_id": 198631, "brewery_name": "Bathtub Brewing",
+             "brewery_label": "https://assets.untappd.com/site/brewery_logos/brewery-198631_4bf10.jpeg"},
+           "friends": []},
+          {"has_had": false, "beer": {"bid": 3791206, "beer_name": "Cherry Stinger", "beer_abv": 15},
+           "brewery": {"brewery_id": 198631, "brewery_name": "Bathtub Brewing"}}
+        ]}}}
+        """
+        let list = try UntappdAPI.decode(BreweryBeerList.self, from: Data(json.utf8))
+        XCTAssertEqual(list.total, 46)
+        XCTAssertEqual(list.beers.map(\.bid), [1719356, 3791206])
+        XCTAssertEqual(list.beers[0].hasHad, true)
+        XCTAssertEqual(list.beers[0].rating, 3.8)
+        XCTAssertEqual(list.beers[0].breweryId, 198631)
+        XCTAssertEqual(list.beers[0].brewery, "Bathtub Brewing")
+        XCTAssertEqual(list.beers[1].hasHad, false)
+        XCTAssertNil(list.beers[1].rating)
+    }
+
+    func testBeerAndBreweryRequests() {
+        let beer = APIRequest.beerInfo(7)
+        XCTAssertEqual(beer.path, "/v4/beer/info/7")
+        XCTAssertEqual(beer.query["compact"], "enhanced")
+        XCTAssertEqual(APIRequest.breweryBeers(3, offset: 25).query["offset"], "25")
+        XCTAssertNil(APIRequest.breweryBeers(3).query["offset"])
+        XCTAssertEqual(APIRequest.beerCheckins(7, maxId: 9).query["max_id"], "9")
+        XCTAssertEqual(BeerBreweryRoute.brewery(of: BeerLite(bid: 1, name: "A", brewery: "B", breweryId: 4)),
+                       .brewery(id: 4, name: "B"))
+        XCTAssertNil(BeerBreweryRoute.brewery(of: BeerLite(bid: 1, name: "A", brewery: "B")))
+    }
 }

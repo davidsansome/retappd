@@ -8,12 +8,16 @@ final class CheckinListModel {
         case friends
         case user(String)
         case venue(Int, friendsOnly: Bool)
+        case beer(Int)
+        case brewery(Int)
 
         func request(maxId: Int? = nil) -> APIRequest {
             switch self {
             case .friends: .friendFeed(maxId: maxId)
             case .user(let u): .userCheckins(u, maxId: maxId)
             case .venue(let id, let friendsOnly): .venueCheckins(id, friendsOnly: friendsOnly, maxId: maxId)
+            case .beer(let id): .beerCheckins(id, maxId: maxId)
+            case .brewery(let id): .breweryCheckins(id, maxId: maxId)
             }
         }
     }

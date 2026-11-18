@@ -116,6 +116,9 @@ struct BeerLite: Codable, Hashable, Identifiable {
     var hasHad: Bool?
     /// The brewery's logo, shown when the beer has no label of its own.
     var breweryLabel: URL? = nil
+    /// The brewery's Untappd id, when the source gave it (menus don't), so its name can link to
+    /// the brewery's page.
+    var breweryId: Int? = nil
 
     var id: Int { bid }
 }
@@ -123,7 +126,8 @@ struct BeerLite: Codable, Hashable, Identifiable {
 extension BeerLite {
     init(beer: BeerRef, brewery: BreweryRef?) {
         self.init(bid: beer.bid, name: beer.name, brewery: brewery?.name ?? "", style: beer.style,
-                  abv: beer.abv, label: beer.label, hasHad: beer.hasHad, breweryLabel: brewery?.label)
+                  abv: beer.abv, label: beer.label, hasHad: beer.hasHad, breweryLabel: brewery?.label,
+                  breweryId: brewery.flatMap { $0.id > 0 ? $0.id : nil })
     }
 }
 
@@ -918,7 +922,8 @@ struct AlgoliaBeerHits: Decodable {
                 label: c.text("beer_label").flatMap(URL.init(string:)),
                 rating: c.double("rating_score"), ratingCount: c.int("rating_count"),
                 popularity: c.int("popularity"),
-                breweryLabel: c.text("brewery_label").flatMap(URL.init(string:)))
+                breweryLabel: c.text("brewery_label").flatMap(URL.init(string:)),
+                breweryId: c.int("brewery_id"))
         }
     }
 

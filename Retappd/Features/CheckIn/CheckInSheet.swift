@@ -11,6 +11,7 @@ struct CheckInSheet: View {
     @State var venue: Venue?
     @Environment(\.dismiss) private var dismiss
     @Environment(LocationProvider.self) private var location
+    @Environment(DiscoverModel.self) private var discover
     @State private var options = CheckInOptions.shared
     @State private var rating: Double = 0
     @State private var shout = ""
@@ -99,6 +100,8 @@ struct CheckInSheet: View {
                         .disabled(busy)
                 }
             }
+            .beerAndBreweryDestinations()
+            .modifier(CheckinDestinations(enabled: true, me: discover.me))
             .navigationDestination(isPresented: $showingVenuePicker) { VenuePicker(selection: pickedVenue) }
             .navigationDestination(isPresented: $showingShopPicker) { VenuePicker(selection: pickedShop, kind: .shop) }
             .fullScreenCover(isPresented: $showingCamera) {
@@ -116,6 +119,7 @@ struct CheckInSheet: View {
             .task { await loadBeerFlavors() }
             .onChange(of: options.servingTypes, initial: true) { preselectServing() }
         }
+        .environment(\.beerPageCanCheckIn, false)
         .tint(Taproom.amber)
     }
 
@@ -124,20 +128,7 @@ struct CheckInSheet: View {
     private var hero: some View {
         HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 0) {
-                if let beer {
-                    Text(beer.brewery).font(.subheadline).foregroundStyle(Taproom.muted).lineLimit(1)
-                    Text(beer.name)
-                        .font(.system(size: 26, weight: .heavy))
-                        .tracking(-0.4)
-                        .lineLimit(3)
-                        .minimumScaleFactor(0.7)
-                        .padding(.top, 2)
-                    let meta = [beer.style, beer.abv.map { "\($0.formatted(.number.precision(.fractionLength(0...1))))%" }]
-                        .compactMap { $0 }.joined(separator: " · ")
-                    if !meta.isEmpty {
-                        Text(meta).font(.footnote).foregroundStyle(Taproom.muted).lineLimit(2).padding(.top, 4)
-                    }
-                }
+                if let beer { beerHeader(beer) }
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(GlassRating.format(rating, step: options.ratingStep))
                         .font(.system(size: 64, weight: .heavy).monospacedDigit())
@@ -162,6 +153,44 @@ struct CheckInSheet: View {
                 .frame(minHeight: 262)
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The brewery, beer name and style, each opening its page in this sheet's own navigation
+    /// stack, so the rating, comment and photo are still here when you come back.
+    private func beerHeader(_ beer: BeerLite) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let route = BeerBreweryRoute.brewery(of: beer), !beer.brewery.isEmpty {
+                NavigationLink(value: route) {
+                    TaproomLinkLabel(beer.brewery, font: .subheadline, chevronSize: 10)
+                        .foregroundStyle(Taproom.muted)
+                }
+                .buttonStyle(TaproomLinkStyle())
+                .accessibilityHint("Opens the brewery's page")
+                .accessibilityAddTraits(.isLink)
+            } else {
+                Text(beer.brewery).font(.subheadline).foregroundStyle(Taproom.muted).lineLimit(1)
+            }
+            NavigationLink(value: BeerBreweryRoute.beer(beer)) {
+                TaproomLinkLabel(beer.name, font: .system(size: 26, weight: .heavy), chevronSize: 15, tracking: -0.4,
+                                 lineLimit: 3, minimumScaleFactor: 0.7)
+            }
+            .buttonStyle(TaproomLinkStyle())
+            .padding(.top, 2)
+            .accessibilityHint("Opens the beer's page")
+            .accessibilityAddTraits(.isLink)
+            let meta = [beer.style, beer.abv.map { "\($0.formatted(.number.precision(.fractionLength(0...1))))%" }]
+                .compactMap { $0 }.joined(separator: " · ")
+            if !meta.isEmpty {
+                NavigationLink(value: BeerBreweryRoute.beer(beer)) {
+                    TaproomLinkLabel(meta, font: .footnote, lineLimit: 2, showsChevron: false)
+                        .foregroundStyle(Taproom.muted)
+                }
+                .buttonStyle(TaproomLinkStyle(extend: 6))
+                .padding(.top, 4)
+                .accessibilityHint("Opens the beer's page")
+                .accessibilityAddTraits(.isLink)
+            }
+        }
     }
 
     @ViewBuilder private var photoControls: some View {

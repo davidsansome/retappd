@@ -374,15 +374,35 @@ struct CheckinDetailView: View {
         HStack(alignment: .top, spacing: 12) {
             BeerLabel(beer: checkin.beer?.labelHD ?? checkin.beer?.label, brewery: checkin.brewery?.label, size: 64)
             VStack(alignment: .leading, spacing: 2) {
-                if let b = checkin.brewery?.name {
-                    Text(b).font(.subheadline).foregroundStyle(Taproom.muted).lineLimit(1)
+                if let brewery = checkin.brewery, !brewery.name.isEmpty {
+                    if brewery.id > 0 {
+                        NavigationLink(value: BeerBreweryRoute.brewery(id: brewery.id, name: brewery.name, label: brewery.label)) {
+                            TaproomLinkLabel(brewery.name, font: .subheadline, chevronSize: 10)
+                                .foregroundStyle(Taproom.muted)
+                        }
+                        .buttonStyle(TaproomLinkStyle())
+                        .accessibilityHint("Opens the brewery's page")
+                        .accessibilityAddTraits(.isLink)
+                    } else {
+                        Text(brewery.name).font(.subheadline).foregroundStyle(Taproom.muted).lineLimit(1)
+                    }
                 }
-                Text(checkin.beer?.name ?? "")
-                    .font(.system(size: 26, weight: .heavy))
-                    .tracking(-0.4)
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.7)
-                    .textSelection(.enabled)
+                if let beer = checkin.beerLite, beer.bid > 0 {
+                    NavigationLink(value: BeerBreweryRoute.beer(beer)) {
+                        TaproomLinkLabel(beer.name, font: .system(size: 26, weight: .heavy), chevronSize: 15, tracking: -0.4,
+                                         lineLimit: 3, minimumScaleFactor: 0.7)
+                    }
+                    .buttonStyle(TaproomLinkStyle())
+                    .accessibilityHint("Opens the beer's page")
+                    .accessibilityAddTraits(.isLink)
+                } else {
+                    Text(checkin.beer?.name ?? "")
+                        .font(.system(size: 26, weight: .heavy))
+                        .tracking(-0.4)
+                        .lineLimit(3)
+                        .minimumScaleFactor(0.7)
+                        .textSelection(.enabled)
+                }
                 let meta = [checkin.beer?.style,
                             checkin.beer?.abv.map { "\($0.formatted(.number.precision(.fractionLength(0...1))))%" },
                             checkin.servingType].compactMap { $0 }.joined(separator: " · ")

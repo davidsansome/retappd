@@ -185,6 +185,66 @@ struct TaproomTrailingIconLabel: LabelStyle {
     }
 }
 
+/// Text that opens another page (a beer's name, its brewery): it keeps the look of the text
+/// around it, with a small muted chevron after the last line to say it's a link. Put it in a
+/// `NavigationLink` with `TaproomLinkStyle`. `chevronSize` is in points at the default text
+/// size and grows with Dynamic Type; match it to about 60% of the text's size.
+struct TaproomLinkLabel: View {
+    let title: String
+    var font: Font
+    var chevronSize: CGFloat
+    var tracking: CGFloat
+    var lineLimit: Int?
+    var minimumScaleFactor: CGFloat
+    var showsChevron: Bool
+    @ScaledMetric private var scaledChevron: CGFloat
+
+    init(_ title: String, font: Font = .subheadline, chevronSize: CGFloat = 10, tracking: CGFloat = 0,
+         lineLimit: Int? = 1, minimumScaleFactor: CGFloat = 1, showsChevron: Bool = true) {
+        self.title = title
+        self.font = font
+        self.chevronSize = chevronSize
+        self.tracking = tracking
+        self.lineLimit = lineLimit
+        self.minimumScaleFactor = minimumScaleFactor
+        self.showsChevron = showsChevron
+        _scaledChevron = ScaledMetric(wrappedValue: chevronSize)
+    }
+
+    var body: some View {
+        HStack(alignment: .lastTextBaseline, spacing: 4) {
+            Text(title)
+                .font(font)
+                .tracking(tracking)
+                .lineLimit(lineLimit)
+                .minimumScaleFactor(minimumScaleFactor)
+                .multilineTextAlignment(.leading)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: scaledChevron, weight: .bold))
+                    .foregroundStyle(Taproom.muted)
+                    .fixedSize()
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
+/// The button style for a `TaproomLinkLabel`: no chrome, dims while pressed, and the touch
+/// target reaches `extend` points above and below the text without moving anything, so a single
+/// line is easier to hit. Neighbouring links meet halfway.
+struct TaproomLinkStyle: ButtonStyle {
+    var extend: CGFloat = 10
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.55 : 1)
+            .padding(.vertical, extend)
+            .contentShape(Rectangle())
+            .padding(.vertical, -extend)
+    }
+}
+
 extension View {
     /// A white (dark: deep brown) card with a thin warm border.
     func taproomCard(cornerRadius: CGFloat = 16) -> some View {
@@ -270,6 +330,72 @@ extension View {
     /// A 1pt warm line under a row in a list laid out on the page.
     func taproomRowDivider() -> some View {
         overlay(alignment: .bottom) { Rectangle().fill(Taproom.border).frame(height: 1) }
+    }
+}
+
+/// A card of a few headline counts side by side ("Check-ins 1,204", "People 310"), for the top
+/// of a detail page. Counts that are nil are left out; draws nothing if none are left.
+struct TaproomStatsCard: View {
+    let stats: [(title: String, value: Int?)]
+
+    private var shown: [(title: String, value: Int)] { stats.compactMap { s in s.value.map { (s.title, $0) } } }
+
+    static func compact(_ n: Int) -> String {
+        n < 10_000 ? n.formatted() : n.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
+    }
+
+    var body: some View {
+        if !shown.isEmpty {
+            HStack(spacing: 0) {
+                ForEach(Array(shown.enumerated()), id: \.offset) { i, item in
+                    VStack(spacing: 2) {
+                        Text(Self.compact(item.value))
+                            .font(.system(size: 22, weight: .heavy).monospacedDigit())
+                            .tracking(-0.5)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                        Text(item.title).font(.caption).foregroundStyle(Taproom.muted).lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .overlay(alignment: .leading) {
+                        if i > 0 { Rectangle().fill(Taproom.border).frame(width: 1) }
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 4)
+            .taproomCard()
+        }
+    }
+}
+
+/// A row in a card that opens a web page or Maps: an amber icon, the content, and a muted hint
+/// with an outward arrow ("Website ↗"). Stack several in a `.taproomCard()` with a hairline
+/// between them.
+struct TaproomLinkRow<Label: View>: View {
+    let url: URL
+    let icon: String
+    let hint: String
+    @ViewBuilder var label: Label
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Button { openURL(url) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon).foregroundStyle(Taproom.amber).frame(width: 20)
+                label.frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 3) {
+                    Text(hint)
+                    Image(systemName: "arrow.up.right").imageScale(.small)
+                }
+                .font(.caption).foregroundStyle(Taproom.muted)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(minHeight: 48)
+        }
+        .buttonStyle(TaproomRowStyle())
     }
 }
 

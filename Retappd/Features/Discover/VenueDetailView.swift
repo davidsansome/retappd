@@ -132,7 +132,6 @@ struct VenueDetailView: View {
     @State private var listID = UUID()
     /// Whether the hero has scrolled away, so the venue's name goes in the navigation bar.
     @State private var heroHidden = false
-    @Environment(\.openURL) private var openURL
 
     enum VenueTab: Hashable { case menu, checkins }
     enum Who: Hashable { case everyone, friends }
@@ -224,35 +223,8 @@ struct VenueDetailView: View {
 
     @ViewBuilder private var stats: some View {
         if let s = model.info?.stats {
-            let items: [(String, Int?)] = [("Check-ins", s.total), ("People", s.people), ("This month", s.thisMonth), ("Yours", s.yours)]
-            let shown = items.filter { $0.1 != nil }
-            if !shown.isEmpty {
-                HStack(spacing: 0) {
-                    ForEach(Array(shown.enumerated()), id: \.offset) { i, item in
-                        VStack(spacing: 2) {
-                            Text(Self.compact(item.1 ?? 0))
-                                .font(.system(size: 22, weight: .heavy).monospacedDigit())
-                                .tracking(-0.5)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
-                            Text(item.0).font(.caption).foregroundStyle(Taproom.muted).lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .overlay(alignment: .leading) {
-                            if i > 0 { Rectangle().fill(Taproom.border).frame(width: 1) }
-                        }
-                        .accessibilityElement(children: .combine)
-                    }
-                }
-                .padding(.vertical, 12)
-                .padding(.horizontal, 4)
-                .taproomCard()
-            }
+            TaproomStatsCard(stats: [("Check-ins", s.total), ("People", s.people), ("This month", s.thisMonth), ("Yours", s.yours)])
         }
-    }
-
-    private static func compact(_ n: Int) -> String {
-        n < 10_000 ? n.formatted() : n.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
     }
 
     @ViewBuilder private var whereCard: some View {
@@ -265,7 +237,7 @@ struct VenueDetailView: View {
             TaproomSection("Where") {
                 VStack(spacing: 0) {
                     if let maps {
-                        linkRow(url: maps, icon: "mappin.and.ellipse", hint: "Google Maps") {
+                        TaproomLinkRow(url: maps, icon: "mappin.and.ellipse", hint: "Google Maps") {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(address ?? (locality.isEmpty ? "Show on the map" : locality))
                                 if address != nil, !locality.isEmpty {
@@ -279,7 +251,7 @@ struct VenueDetailView: View {
                         Rectangle().fill(Taproom.border).frame(height: 1).padding(.leading, 46)
                     }
                     if let website {
-                        linkRow(url: website, icon: "globe", hint: "Website") {
+                        TaproomLinkRow(url: website, icon: "globe", hint: "Website") {
                             Text(Self.displayHost(website)).lineLimit(1)
                         }
                         .accessibilityHint("Opens the venue's website")
@@ -288,24 +260,6 @@ struct VenueDetailView: View {
                 .taproomCard()
             }
         }
-    }
-
-    private func linkRow<Label: View>(url: URL, icon: String, hint: String, @ViewBuilder label: () -> Label) -> some View {
-        Button { openURL(url) } label: {
-            HStack(spacing: 12) {
-                Image(systemName: icon).foregroundStyle(Taproom.amber).frame(width: 20)
-                label().frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 3) {
-                    Text(hint)
-                    Image(systemName: "arrow.up.right").imageScale(.small)
-                }
-                .font(.caption).foregroundStyle(Taproom.muted)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(minHeight: 48)
-        }
-        .buttonStyle(TaproomRowStyle())
     }
 
     /// "coppertap.com.au/menu" for a website, without the scheme or a leading "www.".
@@ -427,7 +381,7 @@ struct VenueDetailView: View {
 
     @ViewBuilder private var checkinsContent: some View {
         if let list = who == .everyone ? model.everyone : model.friends {
-            VenueCheckinList(model: list, listID: listID,
+            GroupedCheckinList(model: list, listID: listID,
                              emptyText: who == .everyone ? "No one has checked in here yet."
                                  : "None of your friends have checked in here yet.")
                 .id(who)
@@ -435,9 +389,9 @@ struct VenueDetailView: View {
     }
 }
 
-/// A venue's checkins as compact rows grouped by how recent they are, loading more as the page
+/// A venue's (or brewery's) checkins as compact rows grouped by how recent they are, loading more as the page
 /// scrolls. Lives inside the venue page's own scroll view.
-private struct VenueCheckinList: View {
+struct GroupedCheckinList: View {
     let model: CheckinListModel
     let listID: UUID
     let emptyText: String

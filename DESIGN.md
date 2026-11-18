@@ -89,6 +89,9 @@ System font throughout (SF Pro), so Dynamic Type works.
 | `BeerLabel(beer:brewery:size:)` | A beer's label, else its brewery's logo, else the app icon; Untappd's stock "default" badges count as none | Every beer image in a row, card or hero |
 | `TaproomTabBar` | The app's bottom bar: tabs on the left, one dark context action on the right | Each tab's root screen, via `.safeAreaInset(edge: .bottom)`. Not on pushed screens, so it slides away on push; it hides itself while the keyboard is up. Its background is frosted glass (`.ultraThinMaterial` under a wash of `background`), so the page shows through as it scrolls under. |
 | `TaproomPageTabs` | Equal full-width tabs with an icon and heavy label; the selected one in ink over a 3pt ink underline, on a hairline that bleeds to the screen edges | Splitting one page into views of different kinds of thing (a venue's Menu and Check-ins). Chips go under it to narrow the selected tab; pin both under the navigation bar as a `LazyVStack` section header. Not for picking a value, which is what chips are for. |
+| `TaproomLinkLabel` + `TaproomLinkStyle` | Text that opens another page: it keeps the surrounding text's look, with a small muted `chevron.right` (about 60% of the text size, growing with Dynamic Type) after the last line. The style adds no chrome, dims while pressed and stretches the touch target 10pt above and below the text without moving anything, so neighbouring links meet halfway | A beer's or brewery's name in a header (check-in screen, check-in page), as a `NavigationLink(value: BeerBreweryRoute…)`. Add `.accessibilityHint("Opens the beer's page")` and the `.isLink` trait. Drop the chevron (`showsChevron: false`) for a secondary line that shares its destination with the title |
+| `TaproomStatsCard` | A card of up to four counts side by side, each a heavy number over a caption; nil counts are left out | The top of a detail page (a venue's, beer's or brewery's check-ins, people, this month, yours) |
+| `TaproomLinkRow` | A row in a card that opens a web page or Maps: amber icon, content, and a muted "Website ↗" hint | Where, Find them: website, social accounts, map |
 | `TaproomSearchField` | Card-style search field with Cancel; `focusRequests` focuses it from elsewhere | Searching or filtering on a page (Discover, a venue's menu) instead of `.searchable` |
 | `TaproomRowStyle` + `.taproomRowDivider()` | Full-width tappable row with a pressed highlight, and a 1pt warm line under it | Lists laid out on the page: venues, beers, search results |
 | `CardLinkStyle` | Dims a whole card a little while pressed | A card that opens something (feed cards, the "You're probably at" card) |
@@ -115,6 +118,15 @@ row) for lists of many checkins at one place, grouped under recency labels
   photo, the label and a plain bar. A venue leads with its name in heavy type and when it was last
   checked in at, then a stats card (Check-ins, People, This month, Yours), a "Where" card (address to Google Maps, website), and
   `TaproomPageTabs` for Menu (sections as chips) and Check-ins (Everyone / Friends chips).
+  A beer leads with its brewery (a link), name, style / ABV / IBU and a 96pt label carrying the
+  `HadCorner` if you've had it, then a card with everyone's rating beside yours, a stats card,
+  About (expandable), Flavours (passive chips) and recent check-ins as cards, with "Check in"
+  pinned at the bottom (hidden when the page was opened from inside the check-in screen). A
+  brewery leads with its type, name and location beside its logo, then ratings, stats, About,
+  "Find them" link rows, and `TaproomPageTabs` for Beers (`BeerRow`s, "Show N more") and Check-ins.
+- **Beer and brewery links.** Anywhere a beer or brewery is named in a header it links to its
+  page with `NavigationLink(value: BeerBreweryRoute…)` and a `TaproomLinkLabel`; each
+  `NavigationStack` has `.beerAndBreweryDestinations()` once on its root.
 - **Friends** (pushed from the Friends stat on Me, which carries a small chevron) is a heavy
   title, a `TaproomSearchField`, then plain rows with dividers; the add-friend action is an icon
   button in the navigation bar, opening a sheet with a username field and a result card.

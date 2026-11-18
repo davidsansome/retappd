@@ -78,7 +78,8 @@ actor LocalIndex {
                                   // Once had, always had; Algolia hits say nothing (nil), and an older
                                   // "false" mustn't outlive a later check-in.
                                   hasHad: (b.hasHad == true || e.beer.hasHad == true) ? true : (b.hasHad ?? e.beer.hasHad),
-                                  breweryLabel: b.breweryLabel ?? e.beer.breweryLabel)
+                                  breweryLabel: b.breweryLabel ?? e.beer.breweryLabel,
+                                  breweryId: b.breweryId ?? e.beer.breweryId)
                 e.seen += 1
                 beers[b.bid] = e
             } else {
