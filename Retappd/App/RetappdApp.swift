@@ -163,15 +163,13 @@ extension RootTabs {
     private var tabBar: some View {
         TaproomTabBar(tabs: Self.tabs, selection: page, select: select) {
             if page == .discover {
-                Button { scanRequests += 1 } label: { Label("Scan", systemImage: "barcode.viewfinder") }
-                    .buttonStyle(TaproomPrimaryButton(fullWidth: false))
+                TaproomBarAction(title: "Scan", systemImage: "barcode.viewfinder") { scanRequests += 1 }
                     .accessibilityHint("Finds a beer by its barcode")
             } else {
-                Button {
+                TaproomBarAction(title: "Search", systemImage: "magnifyingglass") {
                     page = .discover
                     searchRequests += 1
-                } label: { Label("Search", systemImage: "magnifyingglass") }
-                    .buttonStyle(TaproomPrimaryButton(fullWidth: false))
+                }
                     .accessibilityHint("Searches for beers and venues")
             }
         }

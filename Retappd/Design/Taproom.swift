@@ -460,9 +460,41 @@ struct TaproomTab<Value: Hashable>: Identifiable {
     var id: Value { value }
 }
 
+/// How much of `TaproomTabBar` is squeezed to fit: the action drops its title first, then the
+/// tabs drop theirs too. Read by `TaproomBarAction` and the tab buttons.
+private enum TabBarFit: Int { case full, iconAction, iconsOnly }
+
+private extension EnvironmentValues {
+    @Entry var tabBarFit: TabBarFit = .full
+}
+
+/// The dark context action for a `TaproomTabBar`: icon and title, or just the icon when the bar
+/// has no room for the title (large Dynamic Type). The title never wraps, and stays as the
+/// accessibility label. Always at least 54pt tall and wide.
+struct TaproomBarAction: View {
+    let title: LocalizedStringKey
+    let systemImage: String
+    let action: () -> Void
+    @Environment(\.tabBarFit) private var fit
+
+    var body: some View {
+        Button(action: action) {
+            if fit == .full {
+                Label(title, systemImage: systemImage).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+            } else {
+                Image(systemName: systemImage).frame(minWidth: 34)
+            }
+        }
+        .buttonStyle(TaproomPrimaryButton(fullWidth: false))
+        .accessibilityLabel(Text(title))
+    }
+}
+
 /// The app's bottom bar: the tabs on the left and one context action (Search, Scan…) as a dark
 /// button on the right, within thumb reach. It belongs at the bottom of each tab's root screen,
 /// so it slides away with the root when something is pushed, and it steps aside for the keyboard.
+/// Put a `TaproomBarAction` in `action`. When the text is too large for everything to fit on one
+/// line, the action drops to its icon alone, then the tabs do too; nothing wraps or clips.
 struct TaproomTabBar<Value: Hashable, Action: View>: View {
     let tabs: [TaproomTab<Value>]
     let selection: Value
@@ -473,26 +505,10 @@ struct TaproomTabBar<Value: Hashable, Action: View>: View {
     var body: some View {
         Group {
             if !keyboardShown {
-                HStack(spacing: 4) {
-                    ForEach(tabs) { tab in
-                        let on = tab.value == selection
-                        Button { select(tab.value) } label: {
-                            VStack(spacing: 2) {
-                                Image(systemName: tab.systemImage).font(.system(size: 20, weight: .medium))
-                                    .frame(height: 24)
-                                Text(tab.title).font(.caption2.weight(.semibold))
-                            }
-                            .frame(minWidth: 56, minHeight: 50)
-                            .padding(.horizontal, 2)
-                            .foregroundStyle(on ? Taproom.ink : Taproom.muted)
-                            .background(on ? Taproom.glassInside : .clear, in: RoundedRectangle(cornerRadius: 14))
-                            .contentShape(RoundedRectangle(cornerRadius: 14))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(on ? .isSelected : [])
-                    }
-                    Spacer(minLength: 8)
-                    action
+                ViewThatFits(in: .horizontal) {
+                    row(.full)
+                    row(.iconAction)
+                    row(.iconsOnly)
                 }
                 .padding(.horizontal, Taproom.margin)
                 .padding(.top, 8)
@@ -512,6 +528,34 @@ struct TaproomTabBar<Value: Hashable, Action: View>: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             keyboardShown = false
+        }
+    }
+
+    private func row(_ fit: TabBarFit) -> some View {
+        HStack(spacing: 4) {
+            ForEach(tabs) { tab in
+                let on = tab.value == selection
+                Button { select(tab.value) } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: tab.systemImage).font(.system(size: 20, weight: .medium))
+                            .frame(height: 24)
+                        if fit != .iconsOnly {
+                            Text(tab.title).font(.caption2.weight(.semibold))
+                                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                        }
+                    }
+                    .frame(minWidth: 56, minHeight: 50)
+                    .padding(.horizontal, 2)
+                    .foregroundStyle(on ? Taproom.ink : Taproom.muted)
+                    .background(on ? Taproom.glassInside : .clear, in: RoundedRectangle(cornerRadius: 14))
+                    .contentShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(tab.title))
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+            Spacer(minLength: 8)
+            action.environment(\.tabBarFit, fit)
         }
     }
 }
