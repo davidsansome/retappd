@@ -236,10 +236,9 @@ struct CheckInSheet: View {
     /// title (large Dynamic Type), rather than a truncated "Ca…".
     private func photoButtonLabel(_ title: LocalizedStringKey, systemImage: String) -> some View {
         ViewThatFits(in: .horizontal) {
-            Label(title, systemImage: systemImage).lineLimit(1)
+            Label(title, systemImage: systemImage).lineLimit(1).padding(.horizontal, 4)
             Image(systemName: systemImage)
         }
-        .padding(.horizontal, 12)
         .accessibilityLabel(Text(title))
     }
 
