@@ -487,11 +487,11 @@ final class FriendsTests: XCTestCase {
 
     func testProfileCountIsNotOverwrittenByAStaleFetch() {
         // A fetch began with 0 removals and answers 5 after one friend was removed.
-        XCTAssertEqual(ProfileFriendCount.adjusted(5, removalsAtStart: 0, removalsNow: 1), 4)
+        XCTAssertEqual(ProfileFriendCount.adjusted(5, changeAtStart: 0, changeNow: -1), 4)
         // One that began after the removal already reflects it.
-        XCTAssertEqual(ProfileFriendCount.adjusted(4, removalsAtStart: 1, removalsNow: 1), 4)
-        XCTAssertEqual(ProfileFriendCount.adjusted(0, removalsAtStart: 0, removalsNow: 2), 0)
-        XCTAssertNil(ProfileFriendCount.adjusted(nil, removalsAtStart: 0, removalsNow: 1))
+        XCTAssertEqual(ProfileFriendCount.adjusted(4, changeAtStart: -1, changeNow: -1), 4)
+        XCTAssertEqual(ProfileFriendCount.adjusted(0, changeAtStart: 0, changeNow: -2), 0)
+        XCTAssertNil(ProfileFriendCount.adjusted(nil, changeAtStart: 0, changeNow: -1))
     }
 
     func testClearCachesWalksTheCachedPagesAndDropsRecentlyTagged() async throws {

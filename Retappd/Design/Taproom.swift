@@ -60,6 +60,22 @@ struct TaproomSection<Content: View>: View {
     }
 }
 
+/// A small amber capsule with a count: something is waiting (friend requests on the Me tab's
+/// Friends stat). Amber with `onAmber` text, like a selected chip.
+struct TaproomCountBadge: View {
+    let count: Int
+
+    var body: some View {
+        Text(count.formatted())
+            .font(.system(size: 12, weight: .heavy).monospacedDigit())
+            .foregroundStyle(Taproom.onAmber)
+            .padding(.horizontal, 6)
+            .frame(minWidth: 20, minHeight: 20)
+            .background(Taproom.amber, in: Capsule())
+            .accessibilityHidden(true)  // the link's hint says how many are waiting
+    }
+}
+
 /// A capsule chip for picking from a few options; amber when selected. `dashed` is for an
 /// "add" chip (e.g. "+ Tag friends").
 struct TaproomChip: ButtonStyle {
@@ -160,21 +176,24 @@ struct TaproomButtonRow: Layout {
 }
 
 /// The screen's one main action: full width, dark ink with light text. `fullWidth: false` sizes
-/// it to its label, for the tab bar's action.
+/// it to its label, for the tab bar's action. `compact` is a 44pt, 12pt-cornered version that
+/// sits beside `TaproomOutlineButton`s (Accept beside Reject).
 struct TaproomPrimaryButton: ButtonStyle {
     var fullWidth = true
+    var compact = false
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
+        let radius: CGFloat = compact ? 12 : 16
         configuration.label
             .labelStyle(TightLabel())
-            .font(.headline)
+            .font(compact ? .subheadline.weight(.semibold) : .headline)
             .padding(.horizontal, fullWidth ? 0 : 20)
-            .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: 54)
+            .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: compact ? 44 : 54)
             .foregroundStyle(Taproom.background)
-            .background(Taproom.ink, in: RoundedRectangle(cornerRadius: 16))
+            .background(Taproom.ink, in: RoundedRectangle(cornerRadius: radius))
             .opacity(!isEnabled ? 0.4 : configuration.isPressed ? 0.8 : 1)
-            .contentShape(RoundedRectangle(cornerRadius: 16))
+            .contentShape(RoundedRectangle(cornerRadius: radius))
     }
 }
 

@@ -81,7 +81,8 @@ System font throughout (SF Pro), so Dynamic Type works.
 | Suggestion chips | `TaproomChip` reading "+ Name" off, turning amber (with an avatar for people) when tapped; they stay in place | One-tap picks from a likely few (recently tagged friends, a beer's common flavours), ending in a "…" chip for the full list |
 | `TaproomOutlineButton()` | Rounded rectangle (12pt), card fill, 1pt border, 44pt tall | Secondary actions, usually two side by side ("Camera" / "Photos") |
 | `TaproomButtonRow` | A `Layout` for a row of outline buttons of different label lengths: fills the width, each button is its label's width plus the same extra, so padding is equal everywhere. Give labels `.padding(.horizontal, 4)`; mark icon-only buttons `.fixedInButtonRow()` | Photo row ("Camera" / "Last" / Photos); at large Dynamic Type the buttons shrink, so give labels an icon-only fallback with `ViewThatFits`, as the photo row does |
-| `TaproomPrimaryButton()` | Full width, 54pt, ink fill, background-coloured text, 16pt corners | The screen's one main action, pinned at the bottom |
+| `TaproomPrimaryButton()` | Full width, 54pt, ink fill, background-coloured text, 16pt corners | The screen's one main action, pinned at the bottom. `compact: true` makes it 44pt with 12pt corners, to sit beside `TaproomOutlineButton`s (Accept / Reject on a friend request) |
+| `TaproomCountBadge(count:)` | Small amber capsule with a heavy count | Something waiting for you, beside a number (friend requests on the Me tab's Friends stat) |
 | `.taproomCard()` | Card fill, 1pt border, 16pt corners | Text fields, photos, tappable rows that need a boundary |
 | `TaproomSection` | Bold label above content | Every titled block |
 | `TaproomRating(rating:size:)` | The score in heavy type beside a small glass filled to match | Showing a checkin's rating (feed cards at 30, checkin screen at 44). Never stars. |
@@ -135,14 +136,23 @@ row) for lists of many checkins at one place, grouped under recency labels
   page with `NavigationLink(value: BeerBreweryRoute…)` and a `TaproomLinkLabel`; each
   `NavigationStack` has `.beerAndBreweryDestinations()` once on its root.
 - **Friends** (pushed from the Friends stat on Me, which carries a small chevron) is a heavy
-  title, a `TaproomSearchField`, then plain rows with dividers. Each row opens the profile and
+  title, then, only while incoming requests are waiting, a "Requests" `TaproomSection` above the
+  search field: each row is the person (avatar, name, "@username · asked 2 hours ago", opening
+  their profile) over an **Accept** (`TaproomPrimaryButton(compact: true)`) and **Reject**
+  (`TaproomOutlineButton`) pair. Both answer at once and the row leaves; a failure puts only
+  that request back with an alert. Reject has no confirmation because it is a silent decline the
+  person can still be accepted from later (the add-friend sheet shows "You rejected their friend
+  request." with Accept). When requests are waiting, the Friends stat on Me carries a
+  `TaproomCountBadge` (amber capsule, count) at the number's top-right, on your own tab only.
+  Below come a `TaproomSearchField`, then plain rows with dividers. Each row opens the profile and
   ends in a trailing "…" menu (a 44pt target, muted ellipsis, like the check-in cards') holding
   a destructive "Remove friend"; the row's chevron is dropped to make room. Destructive actions
   sit behind a `confirmationDialog` naming the person, and the row leaves the list at once,
   returning with an alert if the server refuses. The add-friend action is an icon button in the
   navigation bar, opening a sheet with a username field and a result card; the card shows
   "Add friend", or a muted line when they're already a friend, followed, or a request is pending
-  either way ("Friend request sent. Waiting for them to accept.").
+  either way ("Friend request sent. Waiting for them to accept."). When they asked you (waiting,
+  or rejected by you), the muted line is followed by an Accept button.
 - **Settings** use cards of switch rows (`Toggle` tinted amber), chips for multi-select options
   and tiles with previews for the theme.
 

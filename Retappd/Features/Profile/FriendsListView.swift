@@ -11,6 +11,7 @@ struct FriendsListView: View {
     @State private var showingAdd = false
     @State private var confirmingRemoval: Friend?
     @State private var removeError: String?
+    @State private var requestError: String?
 
     var body: some View {
         let sorted = Friend.sortedByRecent(options.friendships)
@@ -21,11 +22,28 @@ struct FriendsListView: View {
                     .font(.system(size: 34, weight: .heavy)).tracking(-0.6)
                     .accessibilityAddTraits(.isHeader)
 
+                if !options.requests.isEmpty {
+                    TaproomSection("Requests") {
+                        VStack(spacing: 0) {
+                            ForEach(Friend.sortedByRecent(options.requests)) { request in
+                                RequestRow(
+                                    request: request,
+                                    accept: { answer(request, accepting: true) },
+                                    reject: { answer(request, accepting: false) })
+                                .taproomRowDivider()
+                            }
+                        }
+                    }
+                }
+
                 if !sorted.isEmpty {
                     TaproomSearchField(text: $query, prompt: "Search friends")
                 }
 
-                if options.friendships.isEmpty {
+                if options.friendships.isEmpty && !options.requests.isEmpty {
+                    Text("Accept a request to add your first friend")
+                        .font(.subheadline).foregroundStyle(Taproom.muted)
+                } else if options.friendships.isEmpty {
                     placeholder
                 } else if shown.isEmpty {
                     ContentUnavailableView.search(text: query).padding(.top, 24)
@@ -81,8 +99,33 @@ struct FriendsListView: View {
                presenting: removeError) { _ in
             Button("OK") {}
         } message: { Text($0) }
-        .task { await options.reloadFriends() }
-        .refreshable { await options.reloadFriends() }
+        .alert("Couldn't answer request",
+               isPresented: Binding(get: { requestError != nil }, set: { if !$0 { requestError = nil } }),
+               presenting: requestError) { _ in
+            Button("OK") {}
+        } message: { Text($0) }
+        .task { await reload() }
+        .refreshable { await reload() }
+    }
+
+    private func reload() async {
+        async let friends: () = options.reloadFriends()
+        async let requests: () = options.loadRequests()
+        _ = await (friends, requests)
+    }
+
+    /// Accepting or rejecting takes the request off the list at once; it comes back with an alert
+    /// if the server refuses. Reject has no confirmation: it's a silent decline that can be undone
+    /// by accepting later (the person's profile and the add-friend sheet both offer Accept).
+    private func answer(_ request: Friend, accepting: Bool) {
+        Task {
+            do {
+                if accepting { try await options.acceptRequest(request) } else { try await options.rejectRequest(request) }
+            } catch {
+                let what = accepting ? "accept" : "reject"
+                requestError = "Couldn't \(what) \(request.user.displayName)'s request. \(error.localizedDescription)"
+            }
+        }
     }
 
     private func remove(_ friend: Friend) {
@@ -106,10 +149,44 @@ struct FriendsListView: View {
             } description: {
                 Text("Add someone by their username to see their checkins in your activity.")
             } actions: {
-                Button("Add friend") { showingAdd = true }
+                Button { showingAdd = true } label: { Text("Add friend").padding(.horizontal, 16) }
                     .buttonStyle(TaproomOutlineButton()).frame(maxWidth: 220)
             }
             .padding(.top, 24)
+        }
+    }
+}
+
+/// A pending request: the person (opens their profile), when they asked, and Accept / Reject.
+private struct RequestRow: View {
+    let request: Friend
+    let accept: () -> Void
+    let reject: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            NavigationLink(value: request.user) {
+                HStack(spacing: 12) {
+                    Avatar(url: request.user.avatar, size: 44)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(request.user.displayName).font(.body.weight(.semibold)).lineLimit(1)
+                        Text(["@" + request.user.userName, request.createdAt.map { "asked " + RelativeTime.string($0) }]
+                            .compactMap { $0 }.joined(separator: " · "))
+                            .font(.footnote).foregroundStyle(Taproom.muted).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 8)
+                .frame(minHeight: 60)
+            }
+            .buttonStyle(TaproomRowStyle())
+            HStack(spacing: 8) {
+                Button("Accept", action: accept).buttonStyle(TaproomPrimaryButton(compact: true))
+                    .accessibilityLabel("Accept \(request.user.displayName)'s request")
+                Button("Reject", action: reject).buttonStyle(TaproomOutlineButton())
+                    .accessibilityLabel("Reject \(request.user.displayName)'s request")
+            }
+            .padding(.bottom, 12)
         }
     }
 }
@@ -148,6 +225,7 @@ struct AddFriendView: View {
     @State private var sending = false
     @State private var sent: String?
     @State private var sendError: String?
+    @State private var accepting = false
 
     enum Phase: Equatable {
         case idle
@@ -233,6 +311,14 @@ struct AddFriendView: View {
                 Label(sent, systemImage: "checkmark.circle.fill")
                     .font(.headline).foregroundStyle(Taproom.ink)
                     .frame(maxWidth: .infinity, minHeight: 44)
+            } else if status.canAccept {
+                Text(status.message).font(.subheadline).foregroundStyle(Taproom.muted)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                Button { accept(p) } label: {
+                    if accepting { ProgressView().accessibilityLabel("Accepting") } else { Text("Accept") }
+                }
+                .buttonStyle(TaproomPrimaryButton())
+                .disabled(accepting)
             } else if status != .canAdd {
                 Text(status.message).font(.subheadline).foregroundStyle(Taproom.muted)
                     .frame(maxWidth: .infinity, minHeight: 44)
@@ -277,6 +363,21 @@ struct AddFriendView: View {
                 let r = try await UntappdAPI.shared.fetch(.sendFriendRequest(p.id), as: FriendRequestResult.self)
                 sent = r.confirmation
             } catch {
+                sendError = Friends.sendErrorMessage(error)
+            }
+        }
+    }
+
+    /// Accepts their request through the shared store, so they join the friends list at once
+    /// (and the card then reads "You're already friends.").
+    private func accept(_ p: UserInfo.Profile) {
+        accepting = true
+        sendError = nil
+        Task {
+            defer { accepting = false }
+            do {
+                try await options.acceptRequest(Friend(user: p.asUser, location: p.location))
+            } catch {
                 sendError = error.localizedDescription
             }
         }
@@ -290,6 +391,12 @@ enum Friends {
         case canAdd, you, friends, following
         /// You've asked and they haven't answered, or they've asked you.
         case requestSent, requestReceived
+        /// They asked and you rejected it (`relationship: "ignore"`). Rejecting is silent and
+        /// you can still accept.
+        case requestRejected
+
+        /// Whether the sheet offers an Accept button: they asked, whether or not you rejected it.
+        var canAccept: Bool { self == .requestReceived || self == .requestRejected }
 
         var message: String {
             switch self {
@@ -299,6 +406,7 @@ enum Friends {
             case .following: "You already follow this account."
             case .requestSent: "Friend request sent. Waiting for them to accept."
             case .requestReceived: "They've already sent you a friend request."
+            case .requestRejected: "You rejected their friend request."
             }
         }
     }
@@ -309,6 +417,7 @@ enum Friends {
         if p.relationship == "follow" { return .following }
         if p.relationship == "pending_them" { return .requestSent }
         if p.relationship == "pending_you" { return .requestReceived }
+        if p.relationship == "ignore" { return .requestRejected }
         return .canAdd
     }
 
@@ -320,6 +429,17 @@ enum Friends {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-."))
         guard !s.isEmpty, s.unicodeScalars.allSatisfy(allowed.contains) else { return nil }
         return s
+    }
+
+    /// What to tell someone whose `friend/request` failed. If they'd already asked, the server
+    /// answers HTTP 500 `invalid_param` "This request is pending the user's approval." (seen live
+    /// on 2026-11-19, after the other side rejected): say so in friendlier words. That also
+    /// covers a request you sent that was rejected, which stays pending from your side.
+    static func sendErrorMessage(_ error: Error) -> String {
+        if case let .server(_, detail?) = error as? APIError, detail.localizedCaseInsensitiveContains("pending") {
+            return "Your request is still waiting for them."
+        }
+        return error.localizedDescription
     }
 
     /// Whether an error from `user/info` means the user doesn't exist.

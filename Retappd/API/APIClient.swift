@@ -439,10 +439,28 @@ extension APIRequest {
     /// `GET /v4/user/pending`). Not in the API docs: found by probing on 2026-11-18. A POST with
     /// no fields (the first guess; GET was never tried) answers HTTP 200 with `result: "success"`,
     /// `request_type: "accept"`, `friendship_type: "friend"` and the `target_user`. Afterwards
-    /// both sides' `relationship` is `friends`. There is no UI for it yet.
+    /// both sides' `relationship` is `friends`. It also works after a reject (see
+    /// `rejectFriendRequest`), though the request is no longer in `/v4/user/pending`.
     static func acceptFriendRequest(_ uid: Int) -> APIRequest {
         APIRequest(method: .post, path: "/v4/friend/accept/\(uid)", form: [:])
     }
+
+    /// Rejects the incoming friend request from a user, by id. Tried live on 2026-11-19 (a POST
+    /// with no fields): HTTP 200 `{"result":"success","request_type":"reject",
+    /// "friendship_type":"friend","target_user":{…}}`. It is a silent decline: the request leaves
+    /// the receiver's `/v4/user/pending` and the receiver then sees the sender's `relationship`
+    /// as `ignore`; the sender still sees `pending_them` and can't send another request (HTTP
+    /// 500, `invalid_param`, "This request is pending the user's approval."). The receiver can
+    /// still `acceptFriendRequest` later.
+    static func rejectFriendRequest(_ uid: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/friend/reject/\(uid)", form: [:])
+    }
+
+    /// The signed-in user's incoming friend requests (not the ones they sent): `count` and
+    /// `items`, each `created_at` and a `user` (`uid` is what accept and reject take). Checked
+    /// live on 2026-11-19. Nothing in the docs about paging; the test accounts never had more
+    /// than one.
+    static let pendingFriendRequests = APIRequest(path: "/v4/user/pending")
 
     static let recentlyTagged = APIRequest(path: "/v4/user/recently_tagged", query: ["friendTaggingLimit": "20"])
 

@@ -47,10 +47,43 @@ final class CheckInOptions {
     private var removedIDs: [Int: Int] = [:]
     private var loadGeneration = 0
     private var hiddenIDs: Set<Int> { removingIDs.union(removedIDs.keys) }
+    /// Every change to who is on the friends list (removal or accepted request), so a load that
+    /// spans one knows the pages it cached may be out of date.
+    private var friendListChanges = 0
+    /// Net change to the friend count this session: one less per removal, one more per accepted
+    /// request. The Me tab adds the difference to the count it fetched.
+    private(set) var friendCountChange = 0
+
+    /// Friends made by accepting a request: the mirror of `removingIDs`/`removedIDs`. The
+    /// friends list shows them at once, and a load that started before the accept (so can't list
+    /// them yet) mustn't drop them. `settledAt` is how many friends loads had started when the
+    /// accept succeeded; nil while it is in flight.
+    private struct AddedFriend {
+        var friend: Friend
+        var settledAt: Int?
+    }
+    private var addedFriends: [Int: AddedFriend] = [:]
+
+    /// Incoming friend requests, as the server last listed them less the ones answered since.
+    private(set) var requests: [Friend] = []
+    /// Requests being accepted or rejected right now, and ones answered successfully with how
+    /// many requests loads had started by then: a load that started before the answer can still
+    /// list the request, so it stays hidden until a load that started afterwards completes.
+    private var answeringIDs = Set<Int>()
+    private var answeredIDs: [Int: Int] = [:]
+    private var requestsGeneration = 0
+    private var hiddenRequestIDs: Set<Int> { answeringIDs.union(answeredIDs.keys) }
+
+    enum RequestAnswer { case accept, reject }
+    /// Loads the pending requests, calling `onCached` first with a cached copy if there is one.
+    typealias RequestsFetch = @MainActor (_ onCached: ([Friend]) -> Void) async throws -> [Friend]
     @ObservationIgnored private let cachedPage: FriendPager.Fetch
     @ObservationIgnored private let networkPage: FriendPager.Fetch
     @ObservationIgnored private let sendRemoval: (Int) async throws -> Void
     @ObservationIgnored private let clearFriendCaches: () async -> Void
+    @ObservationIgnored private let fetchRequests: RequestsFetch
+    @ObservationIgnored private let sendAnswer: (Int, RequestAnswer) async throws -> Void
+    @ObservationIgnored private let clearRequestsCache: () async -> Void
 
     init(
         recentlyTagged: [User] = [],
@@ -59,13 +92,105 @@ final class CheckInOptions {
         sendRemoval: @escaping (Int) async throws -> Void = { uid in
             _ = try await UntappdAPI.shared.fetch(.removeFriend(uid), as: FriendActionResult.self)
         },
-        clearFriendCaches: @escaping () async -> Void = FriendPager.clearCaches
+        clearFriendCaches: @escaping () async -> Void = FriendPager.clearCaches,
+        fetchRequests: @escaping RequestsFetch = { onCached in
+            try await cacheThenNetwork(.pendingFriendRequests, as: PendingRequestList.self,
+                                       onCached: { onCached($0.requests) }).requests
+        },
+        sendAnswer: @escaping (Int, RequestAnswer) async throws -> Void = { uid, answer in
+            let req = answer == .accept ? APIRequest.acceptFriendRequest(uid) : APIRequest.rejectFriendRequest(uid)
+            _ = try await UntappdAPI.shared.fetch(req, as: FriendRequestResult.self)
+        },
+        clearRequestsCache: @escaping () async -> Void = {
+            await ResponseCache.shared.remove(APIRequest.pendingFriendRequests.cacheKey)
+        }
     ) {
         self.recentlyTagged = recentlyTagged
         self.cachedPage = cachedPage
         self.networkPage = networkPage
         self.sendRemoval = sendRemoval
         self.clearFriendCaches = clearFriendCaches
+        self.fetchRequests = fetchRequests
+        self.sendAnswer = sendAnswer
+        self.clearRequestsCache = clearRequestsCache
+    }
+
+    // MARK: - Friend requests
+
+    /// Loads the incoming requests (cached copy first), for the Friends screen and the Me tab's
+    /// indicator. Only the latest load applies its result, and requests answered since it
+    /// started stay gone.
+    func loadRequests() async {
+        requestsGeneration += 1
+        let generation = requestsGeneration
+        let apply = { (list: [Friend]) in
+            guard generation == self.requestsGeneration else { return }
+            self.requests = self.visibleRequests(list)
+        }
+        guard let list = try? await fetchRequests(apply), generation == requestsGeneration else { return }
+        // This load began after these answers, so the server has caught up with them.
+        answeredIDs = answeredIDs.filter { $0.value >= generation }
+        requests = visibleRequests(list)
+    }
+
+    private func visibleRequests(_ list: [Friend]) -> [Friend] {
+        var seen = hiddenRequestIDs
+        return list.filter { seen.insert($0.id).inserted }
+    }
+
+    /// Accepts a request. The person is a friend at once (in the list and in tagging); if the
+    /// server refuses, the request comes back and the error is thrown. Also used for someone
+    /// whose request was rejected earlier, or who isn't in `requests` for another reason.
+    func acceptRequest(_ person: Friend) async throws {
+        try await answer(person, with: .accept)
+    }
+
+    /// Rejects a request. It leaves the list at once and comes back if the server refuses. A
+    /// reject is a silent decline that can be undone (the person can still be accepted later),
+    /// which is why the UI doesn't confirm it.
+    func rejectRequest(_ person: Friend) async throws {
+        try await answer(person, with: .reject)
+    }
+
+    private func answer(_ person: Friend, with answer: RequestAnswer) async throws {
+        let id = person.id
+        let oldRequests = requests
+        let oldRemoved = removedIDs[id]
+        answeringIDs.insert(id)
+        requests = requests.filter { $0.id != id }
+        if answer == .accept {
+            // They are a friend as of now, so they head the newest-first list.
+            let made = Friend(user: person.user, location: person.location, createdAt: .now)
+            addedFriends[id] = AddedFriend(friend: made, settledAt: nil)
+            removedIDs[id] = nil
+            setFriendships(friendships)
+        }
+        do {
+            try await sendAnswer(id, answer)
+        } catch {
+            answeringIDs.remove(id)
+            // Bring back only this request, keeping whatever else changed meanwhile.
+            if !answeredIDs.keys.contains(id) {
+                requests = Self.reinserting(person, into: requests, was: oldRequests)
+            }
+            if answer == .accept {
+                addedFriends[id] = nil
+                // Put back the removal tombstone the accept cleared, so a load that began before
+                // that removal still can't bring them back.
+                removedIDs[id] = oldRemoved
+                setFriendships(friendships.filter { $0.id != id })
+            }
+            throw error
+        }
+        answeringIDs.remove(id)
+        answeredIDs[id] = requestsGeneration
+        if answer == .accept {
+            addedFriends[id]?.settledAt = loadGeneration
+            friendListChanges += 1
+            friendCountChange += 1
+        }
+        await clearRequestsCache()
+        if answer == .accept { await clearFriendCaches() }
     }
 
     /// Unfriends someone. They leave the list (and tagging suggestions) at once; if the server
@@ -92,7 +217,10 @@ final class CheckInOptions {
         }
         removingIDs.remove(id)
         removedIDs[id] = loadGeneration
+        addedFriends[id] = nil
         friendRemovals += 1
+        friendListChanges += 1
+        friendCountChange -= 1
         await clearFriendCaches()
     }
 
@@ -218,7 +346,7 @@ final class CheckInOptions {
     private func fetchAllPages() async {
         loadGeneration += 1
         let generation = loadGeneration
-        let removalsAtStart = friendRemovals
+        let changesAtStart = friendListChanges
         friendsError = nil
         if friendships.isEmpty {
             let cached = await FriendPager.fetchAll(fetch: cachedPage)
@@ -226,30 +354,37 @@ final class CheckInOptions {
                 setFriendships(cached.friends)
             }
         }
-        let baseline = friendships
+        // Not the optimistic friends of in-flight accepts: setFriendships adds those from
+        // `addedFriends` itself, and if an accept fails they must not return via this copy.
+        let baseline = friendships.filter { addedFriends[$0.id] == nil }
         let result = await FriendPager.fetchAll(fetch: networkPage) { partial in
             self.setFriendships(partial + baseline)
         }
         let complete = result.isComplete
             && (result.found.map { result.friends.count >= $0 } ?? (!result.friends.isEmpty || baseline.isEmpty))
         if complete {
+            // This load began after these removals and accepts, so the server has caught up.
+            removedIDs = removedIDs.filter { $0.value >= generation }
+            addedFriends = addedFriends.filter { $0.value.settledAt.map { $0 >= generation } ?? true }
             setFriendships(result.friends)
             loadedFriends = true
-            // This load began after these removals, so the server has caught up with them.
-            removedIDs = removedIDs.filter { $0.value >= generation }
         } else {
             loadedFriends = false
             if friendships.isEmpty {
                 friendsError = result.error?.localizedDescription
             }
         }
-        // Pages this load cached may predate a removal made while it ran.
-        if friendRemovals != removalsAtStart { await clearFriendCaches() }
+        // Pages this load cached may predate a removal or accept made while it ran.
+        if friendListChanges != changesAtStart { await clearFriendCaches() }
     }
 
     private func setFriendships(_ list: [Friend]) {
         var seen = hiddenIDs
-        friendships = list.filter { seen.insert($0.id).inserted }
+        var out = list.filter { seen.insert($0.id).inserted }
+        // Friends just made by accepting a request, which the list this came from may predate.
+        let added = addedFriends.values.map(\.friend).filter { seen.insert($0.id).inserted }
+        out = Friend.sortedByRecent(added) + out
+        friendships = out
         friends = friendships.map(\.user)
     }
 

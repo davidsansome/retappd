@@ -22,11 +22,12 @@ struct ProfileView: View {
         .navigationBarTitleDisplayMode(.inline)
         .modifier(SettingsDestination(enabled: isAccountTab, username: username))
         .task(id: model.reloads) { await loadInfo() }
-        .onChange(of: CheckInOptions.shared.friendRemovals) {
-            // Someone was unfriended from the Friends screen: show the lower count at once, then
-            // refetch from a cache that no longer holds the old one.
+        .task(id: model.reloads) { if isAccountTab { await CheckInOptions.shared.loadRequests() } }
+        .onChange(of: CheckInOptions.shared.friendCountChange) { old, new in
+            // Someone was unfriended or a request was accepted on the Friends screen: show the new
+            // count at once, then refetch from a cache that no longer holds the old one.
             guard isAccountTab else { return }
-            info?.totalFriends = ProfileFriendCount.adjusted(info?.totalFriends, removalsAtStart: 0, removalsNow: 1)
+            info?.totalFriends = ProfileFriendCount.adjusted(info?.totalFriends, changeAtStart: old, changeNow: new)
             Task {
                 await ResponseCache.shared.remove(APIRequest.userInfo(username).cacheKey)
                 await loadInfo()
@@ -36,7 +37,8 @@ struct ProfileView: View {
             async let a: () = model.refresh()
             async let b: () = loadInfo()
             async let c: () = isAccountTab ? HadBeers.shared.refresh(force: true) : ()
-            _ = await (a, b, c)
+            async let d: () = isAccountTab ? CheckInOptions.shared.loadRequests() : ()
+            _ = await (a, b, c, d)
         }
     }
 
@@ -72,9 +74,14 @@ struct ProfileView: View {
                 stat(info?.totalBeers, "Unique")
                 stat(info?.totalBadges, "Badges")
                 if isAccountTab {
-                    NavigationLink(value: ProfileRoute.friends) { stat(info?.totalFriends, "Friends", chevron: true) }
-                        .buttonStyle(.plain)
-                        .accessibilityHint("Shows your friends")
+                    let waiting = CheckInOptions.shared.requests.count
+                    NavigationLink(value: ProfileRoute.friends) {
+                        stat(info?.totalFriends, "Friends", chevron: true, badge: waiting)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint(waiting > 0
+                        ? "Shows your friends and \(waiting) waiting friend request\(waiting == 1 ? "" : "s")"
+                        : "Shows your friends")
                 } else {
                     stat(info?.totalFriends, "Friends")
                 }
@@ -117,13 +124,23 @@ struct ProfileView: View {
         return "\(name) hasn't checked in anything yet."
     }
 
-    private func stat(_ n: Int?, _ label: String, chevron: Bool = false) -> some View {
+    /// `badge` is how many friend requests are waiting: shown as an amber count by the number.
+    private func stat(_ n: Int?, _ label: String, chevron: Bool = false, badge: Int = 0) -> some View {
         VStack(spacing: 2) {
             Text(n.map { $0.formatted() } ?? "–")
                 .font(.system(size: 22, weight: .heavy).monospacedDigit())
                 .tracking(-0.5)
                 .minimumScaleFactor(0.6)
                 .lineLimit(1)
+                .overlay(alignment: .topTrailing) {
+                    // Sits just past the number's trailing edge, centred on its top.
+                    if badge > 0 {
+                        TaproomCountBadge(count: badge)
+                            .alignmentGuide(.trailing) { $0[.leading] - 2 }
+                            .alignmentGuide(.top) { $0[VerticalAlignment.center] }
+                            .fixedSize()
+                    }
+                }
             HStack(spacing: 3) {
                 Text(label)
                 if chevron { Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold)) }
@@ -136,12 +153,12 @@ struct ProfileView: View {
     }
 
     private func loadInfo() async {
-        // A fetch that began before a friend was removed doesn't know about it: take those off.
-        let removalsAtStart = CheckInOptions.shared.friendRemovals
+        // A fetch that began before a friend was removed or added doesn't know about it.
+        let changeAtStart = CheckInOptions.shared.friendCountChange
         let current = { (p: UserInfo.Profile?) -> UserInfo.Profile? in
             guard var p, isAccountTab else { return p }
             p.totalFriends = ProfileFriendCount.adjusted(
-                p.totalFriends, removalsAtStart: removalsAtStart, removalsNow: CheckInOptions.shared.friendRemovals)
+                p.totalFriends, changeAtStart: changeAtStart, changeNow: CheckInOptions.shared.friendCountChange)
             return p
         }
         if let i = try? await cacheThenNetwork(.userInfo(username), as: UserInfo.self, onCached: { info = current($0.user) }) {
@@ -150,11 +167,12 @@ struct ProfileView: View {
     }
 }
 
-/// The Me tab's friend count while friends are being removed.
+/// The Me tab's friend count while friends are being removed and requests accepted.
 enum ProfileFriendCount {
-    /// `fetched` less the removals made since the fetch began (which it can't include).
-    static func adjusted(_ fetched: Int?, removalsAtStart: Int, removalsNow: Int) -> Int? {
-        fetched.map { max(0, $0 - max(0, removalsNow - removalsAtStart)) }
+    /// `fetched` plus the net change (`CheckInOptions.friendCountChange`: up for an accept, down
+    /// for a removal) made since the fetch began, which it can't include.
+    static func adjusted(_ fetched: Int?, changeAtStart: Int, changeNow: Int) -> Int? {
+        fetched.map { max(0, $0 + changeNow - changeAtStart) }
     }
 }
 

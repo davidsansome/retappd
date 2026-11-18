@@ -644,6 +644,19 @@ struct FriendPage: Decodable {
     }
 }
 
+/// `GET /v4/user/pending`: incoming friend requests. Each item has the same shape as a friends
+/// entry (`created_at` is when they asked), so it decodes as a `Friend`.
+struct PendingRequestList: Decodable {
+    var requests: [Friend]
+
+    init(requests: [Friend]) { self.requests = requests }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        requests = c.list("items", Friend.self)
+    }
+}
+
 /// The reply to `POST /v4/friend/remove/{id}`: only `result: "success"`.
 struct FriendActionResult: Decodable {
     var result: String?
@@ -654,7 +667,8 @@ struct FriendActionResult: Decodable {
     }
 }
 
-/// The reply to `POST /v4/friend/request/{id}` (and `friend/accept/{id}`, which has the same shape).
+/// The reply to `POST /v4/friend/request/{id}` (and `friend/accept/{id}` and `friend/reject/{id}`,
+/// which have the same shape; `request_type` is "accept" or "reject" for those).
 struct FriendRequestResult: Decodable {
     var requestType: String?
     var friendshipType: String?
@@ -908,7 +922,8 @@ struct UserInfo: Decodable {
         var totalBadges: Int?
         var totalFriends: Int?
         /// The signed-in user's relationship to this person: "friends", "follow", "none", or while
-        /// a request is open "pending_them" (you sent it) or "pending_you" (they did).
+        /// a request is open "pending_them" (you sent it) or "pending_you" (they did), or "ignore" when
+        /// they asked and you rejected it.
         var relationship: String?
 
         init(from decoder: Decoder) throws {
