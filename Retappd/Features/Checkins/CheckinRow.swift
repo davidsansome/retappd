@@ -23,9 +23,7 @@ struct CheckinRow<MenuItems: View>: View {
                 header
                 beer
                 if let comment = checkin.comment {
-                    // fixedSize: without it the list reserves room for lines this text doesn't show,
-                    // leaving a bigger gap under the card.
-                    Text(comment).font(.body).lineLimit(4).fixedSize(horizontal: false, vertical: true)
+                    Text(comment).font(.body).lineLimit(4)
                 }
                 ForEach(checkin.badges) { earned($0) }
             }
@@ -64,6 +62,11 @@ struct CheckinRow<MenuItems: View>: View {
                     .overlay(alignment: .top) { divider }
             }
         }
+        // Size the card to its content: in a ScrollView/LazyVStack a line-limited multi-line Text
+        // (comment, style, badges, friends, latest comment) otherwise has its slot measured for
+        // lines it doesn't draw, leaving a bigger gap under the card. The lineLimits still apply
+        // at the width the card is given.
+        .fixedSize(horizontal: false, vertical: true)
         .foregroundStyle(Taproom.ink)
         .background(Taproom.card)
         .clipShape(cardShape)
