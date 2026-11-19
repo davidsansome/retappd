@@ -22,7 +22,7 @@
       "binding": "DB",
       "database_name": "retappd-notify",
       // Replace with the id printed by `wrangler d1 create retappd-notify` (see README).
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "5df2b7e8-3262-46aa-8b5d-bc94a1d0b0cc",
       "migrations_dir": "migrations"
     }
   ]

@@ -1,8 +1,8 @@
 # Retappd notification relay: app <-> server contract (v1)
 
 Base URL: configurable in the app (Info.plist key `RetappdNotifyBaseURL`, set via an
-`INFOPLIST_KEY_`-style setting in project.yml). Placeholder until deploy:
-`https://retappd-notify.example.workers.dev`. All bodies are JSON, UTF-8.
+`INFOPLIST_KEY_`-style setting in project.yml). Deployed at:
+`https://retappd-notify.davidsansome.workers.dev`. All bodies are JSON, UTF-8.
 
 ## Register a device
 POST /v1/devices
