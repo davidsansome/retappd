@@ -1,5 +1,4 @@
-// Everything that knows Untappd's API shape lives here, so findings from the API measurements
-// can be applied in one place. GUESSES (from docs/API.md, not yet measured) are marked `GUESS`.
+// Everything that knows Untappd's API shape lives here (see docs/API.md in untappd-private-api).
 import type { NotifType } from "./env";
 
 const BASE = "https://api.untappd.com";
@@ -34,6 +33,12 @@ export interface Counts {
   unified: number;
 }
 
+export interface FriendRequest {
+  at: number; // ms epoch
+  uid: number;
+  actor: string;
+}
+
 async function call(token: string, path: string, params: Record<string, string> = {}) {
   const qs = new URLSearchParams({ client_id: CLIENT_ID, client_secret: CLIENT_SECRET, utv: "4.0.0", ...params });
   const res = await fetch(`${BASE}${path}?${qs}`, {
@@ -45,10 +50,11 @@ async function call(token: string, path: string, params: Record<string, string> 
       Accept: "application/json; charset=utf-8",
     },
   });
-  if (res.status === 401 || res.status === 403) throw new UntappdAuthError();
+  // Invalid token: HTTP 401, meta.error_type "invalid_token" (its error_detail echoes the token: never log bodies).
+  if (res.status === 401) throw new UntappdAuthError();
   if (!res.ok) {
     const ra = Number(res.headers.get("retry-after"));
-    // GUESS: also honour an X-RateLimit-Reset style header if Untappd sends one.
+    // Valid tokens showed x-auth-type: unlimited and no 429 was ever seen; Retry-After is honoured anyway.
     throw new UntappdError(res.status, Number.isFinite(ra) && ra > 0 ? ra : undefined);
   }
   const json = (await res.json()) as any;
@@ -71,33 +77,50 @@ function parseCounts(json: any): Counts {
   };
 }
 
-/** SWAPPABLE: verifies a token and returns the authenticated user's uid. */
+/** Comments + toasts + others: the counters that GET /v4/notifications clears. Friends are separate. */
+export const unreadActivity = (c: Counts) => c.comments + c.toasts + c.others;
+
+/** SWAPPABLE: verifies a token and returns the authenticated user's uid (usersettings: response.user.uid). */
 export async function fetchUid(token: string): Promise<number> {
-  // GUESS: usersettings returns the authenticated user object (`user.uid`), per docs/API.md. Heavy
-  // but it is the only captured call that identifies the caller without knowing the username.
   const json = await call(token, "/v4/account/usersettings");
   const uid = json?.response?.user?.uid;
   if (!Number.isInteger(uid)) throw new UntappdError(502);
   return uid;
 }
 
-/** Cheap unread-counts check. Every response carries the counts in its envelope. */
-export async function pollCounts(token: string): Promise<Counts> {
-  // GUESS: any authenticated call includes the envelope; use the lightest one. To be measured.
-  return parseCounts(await call(token, "/v4/notifications/subscriptions"));
+function displayName(u?: { first_name?: string; last_name?: string; user_name?: string }): string {
+  return u?.first_name ? `${u.first_name}${u.last_name ? " " + u.last_name[0] : ""}` : (u?.user_name ?? "Someone");
+}
+
+/**
+ * Side-effect-free poll (~222 B): GET /v4/user/pending. Its envelope carries the unread counts and its
+ * body lists pending friend requests (which never appear in /v4/notifications).
+ */
+export async function pollCounts(token: string): Promise<{ counts: Counts; requests: FriendRequest[] }> {
+  const json = await call(token, "/v4/user/pending");
+  const requests: FriendRequest[] = [];
+  for (const i of json?.response?.items ?? []) {
+    const at = Date.parse(i?.created_at);
+    if (Number.isFinite(at) && Number.isInteger(i?.user?.uid)) requests.push({ at, uid: i.user.uid, actor: displayName(i.user) });
+  }
+  return { counts: parseCounts(json), requests };
 }
 
 export interface NotificationItem {
   checkin_id?: number;
   created_at: string;
-  notification_type: string;
+  notification_type: string; // toast | comment | checkinFriendTag (seen); checkinTag | commentTag | promo (never seen)
   count?: number;
-  users?: { user?: { first_name?: string; last_name?: string; user_name?: string } }[];
-  beer?: { beer_name?: string }; // GUESS: may not exist; message falls back to generic text
+  users?: { created_at?: string; user?: { first_name?: string; last_name?: string; user_name?: string } }[];
+  meta?: { beer?: { beer_name?: string } };
 }
 
+/**
+ * GET /v4/notifications, first page. WARNING: this marks the account's notifications read (clears
+ * comments/toasts/others/news and unified_count for the official app too). The returned counts are the
+ * envelope of this very call, i.e. the values from before the clear. Only call when something is unread.
+ */
 export async function fetchNotifications(token: string): Promise<{ items: NotificationItem[]; counts: Counts }> {
-  // NOTE: not yet confirmed whether this marks items read (being measured).
   const json = await call(token, "/v4/notifications", {
     version: "2",
     includes: "commentTag,checkinTag,checkinFriendTag,toast,comment,promo",
@@ -106,22 +129,16 @@ export async function fetchNotifications(token: string): Promise<{ items: Notifi
   return { items: json?.response?.notifications?.items ?? [], counts: parseCounts(json) };
 }
 
-const itemTime = (i: NotificationItem) => Date.parse(i.created_at) || 0;
+export const itemTime = (i: NotificationItem) => Date.parse(i.created_at) || 0;
 
 /**
- * GUESS: marker = max created_at (epoch ms, as string) over the feed. Aggregated items (e.g. more
- * toasts on an old check-in) are assumed to get a fresh created_at so they sort as new.
+ * Items are keyed by (notification_type, checkin_id) and item.created_at moves forward on new activity,
+ * so "new" = created_at strictly after the threshold. Unknown types (promo) are dropped. Oldest first.
  */
-export function newestMarker(items: NotificationItem[]): string {
-  return String(items.reduce((m, i) => Math.max(m, itemTime(i)), 0));
-}
-
-export function newItemsSince(items: NotificationItem[], marker: string | null) {
-  const m = marker === null ? Infinity : Number(marker);
-  return {
-    items: items.filter((i) => itemTime(i) > m).sort((a, b) => itemTime(a) - itemTime(b)),
-    marker: newestMarker(items),
-  };
+export function newItemsSince(items: NotificationItem[], threshold: number): NotificationItem[] {
+  return items
+    .filter((i) => itemTime(i) > threshold && classify(i.notification_type) !== null)
+    .sort((a, b) => itemTime(a) - itemTime(b));
 }
 
 export interface FormattedMessage {
@@ -131,37 +148,33 @@ export interface FormattedMessage {
   body: string;
 }
 
-/** GUESS for notification_type strings; unknown types return null (no push). */
 export function classify(t: string): NotifType | null {
-  const s = t.toLowerCase().replace(/[^a-z]/g, "");
-  if (s.includes("commenttag")) return "comment_tag";
-  if (s.includes("toast")) return "toast";
-  if (s.includes("comment")) return "comment";
-  if (s.includes("tag")) return "tag";
-  if (s.includes("friend")) return "friend_request";
-  return null;
+  switch (t) {
+    case "toast": return "toast";
+    case "comment": return "comment";
+    case "checkinFriendTag": // seen: you were tagged by a friend
+    case "checkinTag": // never produced; best effort
+      return "tag";
+    case "commentTag": return "comment_tag"; // never produced; best effort
+    default: return null;
+  }
 }
 
 export function formatMessage(item: NotificationItem): FormattedMessage | null {
   const type = classify(item.notification_type);
   if (!type) return null;
-  const u = item.users?.[0]?.user;
-  const actor = u?.first_name ? `${u.first_name}${u.last_name ? " " + u.last_name[0] : ""}` : (u?.user_name ?? "Someone");
-  const more = Math.max(0, (item.count ?? item.users?.length ?? 1) - 1);
-  const who = more > 0 ? `${actor} and ${more} other${more > 1 ? "s" : ""}` : actor;
-  const beer = item.beer?.beer_name;
-  const target = beer ? `your ${beer}` : "your check-in";
-  const verbs: Record<NotifType, string> = {
-    toast: `toasted ${target}`,
-    comment: `commented on ${target}`,
-    tag: "tagged you in a check-in",
-    comment_tag: "mentioned you in a comment",
-    friend_request: "sent you a friend request",
-  };
-  return {
-    type,
-    checkinId: type === "friend_request" ? undefined : item.checkin_id,
-    actor,
-    body: `${who} ${verbs[type]}`,
-  };
+  const actor = displayName(item.users?.[0]?.user);
+  const beer = item.meta?.beer?.beer_name;
+  const body = {
+    toast: `${actor} toasted your ${beer ?? "check-in"}`,
+    comment: `${actor} commented on your ${beer ?? "check-in"}`,
+    tag: `${actor} tagged you in ${beer ?? "a check-in"}`,
+    comment_tag: `${actor} mentioned you on ${beer ?? "a check-in"}`,
+    friend_request: `${actor} sent you a friend request`,
+  }[type];
+  return { type, checkinId: item.checkin_id, actor, body };
+}
+
+export function formatFriendRequest(r: FriendRequest): FormattedMessage {
+  return { type: "friend_request", actor: r.actor, body: `${r.actor} sent you a friend request` };
 }

@@ -19,7 +19,7 @@ export interface PollDeps {
 interface UserRow {
   uid: number;
   marker: string | null;
-  last_counts: string | null;
+  friend_marker: string | null;
   next_poll_at: number | null;
   fail_count: number;
   last_seen: number;
@@ -28,7 +28,7 @@ interface UserRow {
 /** Users with >=1 device whose turn it is. No writes. */
 export async function dueUsers(env: Env, now: number): Promise<UserRow[]> {
   const { results } = await env.DB.prepare(
-    `SELECT u.uid, u.marker, u.last_counts, u.next_poll_at, u.fail_count, MAX(d.last_seen_at) AS last_seen
+    `SELECT u.uid, u.marker, u.friend_marker, u.next_poll_at, u.fail_count, MAX(d.last_seen_at) AS last_seen
      FROM users u JOIN devices d ON d.uid = u.uid
      WHERE u.next_poll_at IS NULL OR u.next_poll_at <= ?
      GROUP BY u.uid ORDER BY u.uid`,
@@ -62,9 +62,6 @@ export async function runPoll(env: Env, deps: PollDeps): Promise<void> {
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, users.length) }, worker));
 }
 
-const RISE_KEYS = ["toasts", "comments", "friends", "others"] as const;
-const rose = (prev: U.Counts, cur: U.Counts) => RISE_KEYS.some((k) => cur[k] > prev[k]);
-
 async function setState(env: Env, uid: number, f: Record<string, unknown>) {
   const cols = Object.keys(f);
   await env.DB.prepare(`UPDATE users SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE uid = ?`)
@@ -84,20 +81,33 @@ async function deleteDevice(env: Env, id: string) {
   await env.DB.prepare("DELETE FROM devices WHERE id = ?").bind(id).run();
 }
 
+interface Event {
+  at: number;
+  type: U.FormattedMessage["type"];
+  checkinId?: number;
+  actor: string;
+  body: string;
+}
+
+const MAX_PUSHES = 5; // per device per poll; beyond that the oldest collapse into one summary
+const LOOKBACK_MS = 90_000; // poll interval slack, see below
+
 export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<void> {
+  const { now } = deps;
   const { results: devices } = await env.DB.prepare("SELECT * FROM devices WHERE uid = ? ORDER BY last_seen_at DESC")
     .bind(u.uid)
     .all<DeviceRow>();
 
-  const prev: U.Counts | null = u.last_counts ? JSON.parse(u.last_counts) : null;
-  let counts: U.Counts | null = null;
+  let polled: Awaited<ReturnType<typeof U.pollCounts>> | null = null;
   let fetched: Awaited<ReturnType<typeof U.fetchNotifications>> | null = null;
-  let token: string | null = null;
+  const live: DeviceRow[] = [];
+  const stale = now - u.last_seen >= STALE_MS;
+  // Never fetch the list on the baseline poll: reading it clears the user's unread counts.
+  const baseline = u.marker === null || u.friend_marker === null;
 
   // Use the most-recently-seen device's token; drop devices whose token Untappd rejects.
-  const live: DeviceRow[] = [];
   for (const d of devices) {
-    if (counts) { live.push(d); continue; }
+    if (polled) { live.push(d); continue; }
     let t: string;
     try {
       t = await decryptToken(env, d);
@@ -107,15 +117,10 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
       continue;
     }
     try {
-      const needBaseline = u.marker === null || prev === null;
-      if (needBaseline) {
-        fetched = await U.fetchNotifications(t);
-        counts = fetched.counts;
-      } else {
-        counts = await U.pollCounts(t);
-        if (rose(prev!, counts)) fetched = await U.fetchNotifications(t);
-      }
-      token = t;
+      const p = await U.pollCounts(t);
+      // Reading the list marks everything read in the official app too, so only do it if something is unread.
+      if (!baseline && U.unreadActivity(p.counts) > 0) fetched = await U.fetchNotifications(t);
+      polled = p;
       live.push(d);
     } catch (e) {
       if (e instanceof U.UntappdAuthError) {
@@ -127,27 +132,48 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
       return;
     }
   }
-  if (!counts) {
-    // No usable device left.
+  if (!polled) {
     await env.DB.prepare("DELETE FROM users WHERE uid = ? AND NOT EXISTS (SELECT 1 FROM devices WHERE uid = ?)").bind(u.uid, u.uid).run();
     return;
   }
-  void token;
 
   const upd: Record<string, unknown> = {};
   if (u.fail_count !== 0 || u.next_poll_at !== null) Object.assign(upd, { fail_count: 0, next_poll_at: null });
 
-  if (fetched) {
-    const { items, marker } = U.newItemsSince(fetched.items, u.marker);
-    if (u.marker === null || prev === null) {
-      log("baseline", { uid: u.uid }); // first poll: record, push nothing
-    } else if (items.length) {
-      await pushItems(env, deps, live, items, counts.unified);
+  if (baseline) {
+    // First poll: record watermarks, push nothing. Existing activity and pending requests count as seen.
+    const maxReq = polled.requests.reduce((m, r) => Math.max(m, r.at), 0);
+    upd.marker = String(Math.max(now, Number(u.marker ?? 0)));
+    upd.friend_marker = String(Math.max(now, maxReq));
+    log("baseline", { uid: u.uid });
+  } else {
+    const events: Event[] = [];
+    const wf = Number(u.friend_marker);
+    const newReqs = polled.requests.filter((r) => r.at > wf);
+    for (const r of newReqs) events.push({ at: r.at, ...U.formatFriendRequest(r) });
+    if (newReqs.length) upd.friend_marker = String(Math.max(...newReqs.map((r) => r.at)));
+
+    if (fetched) {
+      // Threshold = max(watermark, previous poll time). We don't store poll times (no write per idle poll),
+      // but polls run every minute (5 for stale users), so "previous poll" ~ now - cadence. That keeps items
+      // that were read in another app between polls (counts back to 0, watermark untouched) from being
+      // pushed late. After errors the previous successful poll was further back, so widen by the backoff.
+      const cadence = (stale ? STALE_EVERY_MIN : 1) * 60_000;
+      const gap = u.fail_count > 0 ? Math.min(BACKOFF_BASE_S * 2 ** u.fail_count, BACKOFF_MAX_S) * 1000 : 0;
+      const threshold = Math.max(Number(u.marker), now - cadence - LOOKBACK_MS - gap);
+      const items = U.newItemsSince(fetched.items, threshold);
+      for (const i of items) {
+        const m = U.formatMessage(i)!;
+        events.push({ at: U.itemTime(i), ...m });
+      }
+      if (items.length) upd.marker = String(Math.max(...items.map(U.itemTime)));
     }
-    if (marker !== u.marker) upd.marker = marker;
+    if (events.length) {
+      events.sort((a, b) => a.at - b.at);
+      // Badge: pre-clear unified_count from the notifications call, else from the pending call.
+      await pushEvents(env, deps, live, events, (fetched ?? polled).counts.unified);
+    }
   }
-  const countsJson = JSON.stringify(counts);
-  if (countsJson !== u.last_counts) upd.last_counts = countsJson;
   if (Object.keys(upd).length) await setState(env, u.uid, upd);
 }
 
@@ -161,30 +187,39 @@ function allowed(prefs: Prefs, type: string): boolean {
   }
 }
 
-async function pushItems(env: Env, deps: PollDeps, devices: DeviceRow[], items: U.NotificationItem[], badge: number) {
-  for (const item of items) {
-    const m = U.formatMessage(item);
-    if (!m) continue;
-    const payload = {
-      aps: {
-        alert: { body: m.body },
-        badge,
-        sound: "default",
-        "thread-id": m.checkinId ? `checkin-${m.checkinId}` : "friends",
-      },
-      retappd: { type: m.type, ...(m.checkinId ? { checkin_id: m.checkinId } : {}), actor: m.actor },
-    };
-    await Promise.all(
-      devices.map(async (d) => {
-        if (!allowed(JSON.parse(d.prefs), m.type)) return;
-        const r = await deps.apns.send(d, payload);
+async function pushEvents(env: Env, deps: PollDeps, devices: DeviceRow[], events: Event[], badge: number) {
+  await Promise.all(
+    devices.map(async (d) => {
+      const prefs = JSON.parse(d.prefs) as Prefs;
+      let mine = events.filter((e) => allowed(prefs, e.type));
+      const payloads: object[] = [];
+      if (mine.length > MAX_PUSHES) {
+        const collapsed = mine.length - (MAX_PUSHES - 1);
+        payloads.push({ aps: { alert: { body: `${collapsed} more notifications` }, badge, sound: "default" } });
+        mine = mine.slice(collapsed);
+      }
+      for (const e of mine) {
+        payloads.push({
+          aps: {
+            alert: { body: e.body },
+            badge,
+            sound: "default",
+            "thread-id": e.checkinId ? `checkin-${e.checkinId}` : "friends",
+          },
+          retappd: { type: e.type, ...(e.checkinId ? { checkin_id: e.checkinId } : {}), actor: e.actor },
+        });
+      }
+      for (const payload of payloads) {
+        const r = await deps.apns.send(d, payload); // sequential so they arrive in order
         if (r === "unregistered") {
           log("apns_unregistered_device_deleted", { device: d.id.slice(0, 8) });
           await deleteDevice(env, d.id);
-        } else if (r === "error") log("apns_error", { device: d.id.slice(0, 8) });
-      }),
-    );
-  }
+          return;
+        }
+        if (r === "error") log("apns_error", { device: d.id.slice(0, 8) });
+      }
+    }),
+  );
 }
 
 /** Daily: drop devices unseen for 30 days, users with no devices, old rate-limit rows; rewrap keys. */

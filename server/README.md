@@ -8,7 +8,7 @@ Security design: [SECURITY.md](SECURITY.md).
 - `src/api.ts` endpoints (POST/PATCH/DELETE `/v1/devices`), validation, per-IP rate limit (D1 counter), device cap
 - `src/poll.ts` scheduled poll (every minute) and daily cleanup + key rewrap
 - `src/untappd.ts` **all Untappd API knowledge** (uid lookup, count poll, notification fetch, new-item detection,
-  message formatting). Entries marked `GUESS` await the measurement findings.
+  message formatting), based on the measured behaviour in `untappd-private-api/docs/API.md`.
 - `src/apns.ts` `ApnsSender` interface + `FetchApnsSender` (ES256 JWT, 50 min cache)
 - `src/crypto.ts` envelope encryption, rewrap, device secrets
 - `migrations/` D1 schema
@@ -50,6 +50,24 @@ subrequests/invocation). D1 writes are the metered item, so polls write nothing 
 only when they change. Queues are avoided: a bounded in-process pool (25 parallel) is enough at this scale and
 Queues would add per-message operations and cost. Over 500 due users, polls are sharded across minutes.
 
+## How polling works (per uid, once a minute)
+1. `GET /v4/user/pending` (about 222 bytes, no side effects): the envelope has the unread counts, the body has pending
+   friend requests (they never appear in `/v4/notifications`). Requests newer than the friend watermark are pushed.
+2. If `comments + toasts + others` is 0, stop. Idle polls make no Untappd list call and no D1 writes.
+3. Otherwise fetch `GET /v4/notifications` (first page) and push items newer than both the watermark and the previous
+   poll time (about now minus one cadence plus 90 s; the poll time itself isn't stored), oldest first, then advance the
+   watermark. Items already read in another app are therefore never pushed late. More than 5 pushes per device collapse
+   the oldest into "N more notifications" (a push with no `retappd` key). Badge = the pre-clear `unified_count`.
+4. The first poll after registration only records the watermarks (and does not read the list).
+Items are keyed by (type, checkin); activity on an existing item moves its `created_at` forward and so pushes again.
+A re-toast can raise the counter without a list item: nothing is pushed.
+
+**The relay clears the user's Untappd unread badge.** Reading `/v4/notifications` marks notifications read for the
+whole account (the official app too), and there is no non-clearing read. So whenever the relay delivers, the unread
+count in the official Untappd app resets, and the first poll after registration clears any backlog that was unread.
+Friend requests are not cleared (the count is the number of pending requests).
+
 ## Known limits
-A user who reads one notification and gets another between two polls leaves counts unchanged and is missed.
-Heartbeat PATCH writes `last_seen_at` (one write per device per 12h at most).
+Heartbeat PATCH writes `last_seen_at` (one write per device per 12h at most). Push failures other than 410 are logged and
+not retried (the watermark has advanced). `checkinTag` and `commentTag` have never been produced by Untappd; they are
+mapped to `tag` and `comment_tag` best-effort. Migrations: `0002` replaces stored counts with a friend watermark.

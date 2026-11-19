@@ -2,7 +2,7 @@
 
 ## What is stored
 - Per device: the Untappd access token (encrypted), a SHA-256 of the device secret, the APNs token, prefs.
-- Per user: Untappd uid, poll state (marker, last unread counts, backoff). No notification contents, names or usernames.
+- Per user: Untappd uid, poll state (two watermark timestamps, backoff). No notification contents, names or usernames.
 - Rate-limit rows keyed by a truncated SHA-256 of the client IP (the IP itself is not stored).
 
 ## Envelope encryption

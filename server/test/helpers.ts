@@ -24,11 +24,12 @@ export interface UntappdMock {
   counts: Record<string, number>;
   unified: number;
   items: any[];
+  pending: any[];
   calls: { path: string; token: string }[];
 }
 
 export function untappdMock(over: Partial<UntappdMock> = {}): UntappdMock {
-  return { uid: 42, authOk: true, status: 200, counts: {}, unified: 0, items: [], calls: [], ...over };
+  return { uid: 42, authOk: true, status: 200, counts: {}, unified: 0, items: [], pending: [], calls: [], ...over };
 }
 
 export function mockFetch(u: UntappdMock) {
@@ -53,7 +54,14 @@ function untappdResponse(u: UntappdMock, url: URL, auth: string): Response {
     notifications: { unread_count: { toasts: 0, comments: 0, friends: 0, messages: 0, venues: 0, others: 0, news: 0, ...u.counts }, unified_count: u.unified },
   };
   if (url.pathname === "/v4/account/usersettings") return Response.json({ ...envelope, response: { user: { uid: u.uid } } });
-  if (url.pathname === "/v4/notifications") return Response.json({ ...envelope, response: { notifications: { items: u.items } } });
+  if (url.pathname === "/v4/notifications") {
+    // Reading the list clears the counters (but this response still shows the pre-clear values).
+    const res = Response.json({ ...envelope, response: { notifications: { items: u.items } } });
+    for (const k of ["toasts", "comments", "others", "news"]) delete u.counts[k];
+    u.unified = u.counts.friends ?? 0;
+    return res;
+  }
+  if (url.pathname === "/v4/user/pending") return Response.json({ ...envelope, response: { count: u.pending.length, items: u.pending } });
   return Response.json({ ...envelope, response: {} });
 }
 
@@ -66,13 +74,21 @@ export class FakeApns implements ApnsSender {
   }
 }
 
-export const toastItem = (checkin: number, at: string, first = "Jamie", last = "Smith") => ({
-  checkin_id: checkin,
-  created_at: at,
-  notification_type: "toast",
-  count: 1,
-  users: [{ user: { first_name: first, last_name: last, user_name: "x" } }],
-  beer: { beer_name: "Late Nights III" },
+export const item = (type: string, checkin: number, at: number | string, first = "Jamie", last = "Smith", beer: string | null = "Late Nights III") => {
+  const created_at = new Date(at).toUTCString().replace("GMT", "+0000");
+  return {
+    checkin_id: checkin,
+    created_at,
+    notification_type: type,
+    count: 1,
+    users: [{ created_at, user: { first_name: first, last_name: last, user_name: "x" } }],
+    meta: beer ? { beer: { beer_name: beer } } : {},
+  };
+};
+export const toastItem = (checkin: number, at: number | string) => item("toast", checkin, at);
+export const pendingReq = (at: number, uid = 7, first = "Sam", last = "Jones") => ({
+  created_at: new Date(at).toUTCString().replace("GMT", "+0000"),
+  user: { uid, user_name: "sj", first_name: first, last_name: last },
 });
 
 export function req(method: string, path: string, body?: unknown, headers: Record<string, string> = {}) {

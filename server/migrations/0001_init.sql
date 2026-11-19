@@ -1,7 +1,7 @@
 -- No notification contents, names or usernames are ever stored.
 CREATE TABLE users (
   uid           INTEGER PRIMARY KEY,           -- Untappd user id
-  marker        TEXT,                          -- newest-seen marker; NULL = baseline not yet recorded
+  marker        TEXT,                          -- activity watermark; NULL = baseline not yet recorded
   last_counts   TEXT,                          -- JSON of last unread counts
   next_poll_at  INTEGER,                       -- ms epoch; NULL = default cadence (only set while backing off)
   fail_count    INTEGER NOT NULL DEFAULT 0,    -- consecutive errors (backoff exponent)
