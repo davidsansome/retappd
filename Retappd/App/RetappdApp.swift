@@ -148,6 +148,11 @@ struct RootTabs: View {
             feed.replace(c)
             profile.replace(c)
         }
+        // Requests may have been accepted or rejected on Me > Friends; the bell lives on Activity,
+        // so it recounts (one small call) when you come back to that tab.
+        .onChange(of: page) { _, page in
+            if page == .feed { Task { await unread.refresh() } }
+        }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background:
