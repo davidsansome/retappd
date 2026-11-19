@@ -1,10 +1,13 @@
-import type { DeviceRow, Env, Prefs } from "./env";
-import { encryptToken, hashSecret, newDeviceSecret, verifySecret, b64encode } from "./crypto";
+import { intVar, type DeviceRow, type Env, type Prefs } from "./env";
+import { encryptToken, hashSecret, keyedHash, newDeviceSecret, verifySecret } from "./crypto";
 import { fetchUid, UntappdAuthError } from "./untappd";
 import { log, safeErr } from "./log";
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store", ...headers },
+  });
 const err = (status: number, error: string, headers?: Record<string, string>) => json({ error }, status, headers);
 
 const PREF_KEYS = ["toast", "comment", "tag", "friend"] as const;
@@ -14,6 +17,8 @@ const MAX_BODY = 8 * 1024;
 class BadRequest extends Error {}
 
 async function readBody(req: Request): Promise<Record<string, unknown>> {
+  const cl = Number(req.headers.get("content-length"));
+  if (Number.isFinite(cl) && cl > MAX_BODY) throw new BadRequest("body too large");
   const text = await req.text();
   if (text.length > MAX_BODY) throw new BadRequest("body too large");
   let v: unknown;
@@ -49,10 +54,18 @@ function vPrefs(v: unknown, base: Prefs): Prefs {
   return out;
 }
 
-async function rateLimited(env: Env, req: Request, now: number): Promise<boolean> {
-  const limit = parseInt(env.REGISTER_LIMIT_PER_HOUR ?? "10", 10);
-  const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
-  const key = b64encode(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ip))).slice(0, 22); // IP not stored
+/** Client key for rate limiting: IPv6 collapsed to its /64, then HMACed so raw IPs are never stored. */
+export function ipPrefix(ip: string): string {
+  if (!ip.includes(":")) return ip;
+  const [head, tail = ""] = ip.split("::");
+  const h = head ? head.split(":") : [];
+  const t = tail ? tail.split(":") : [];
+  const groups = ip.includes("::") ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t] : h;
+  return groups.slice(0, 4).map((g) => g.toLowerCase().replace(/^0+(?=.)/, "")).join(":");
+}
+
+/** Fixed-window counter in D1. Returns true if `limit` is exceeded. */
+async function overLimit(env: Env, key: string, limit: number, now: number): Promise<boolean> {
   const window = Math.floor(now / 3_600_000);
   const row = await env.DB.prepare(
     "INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, 1) ON CONFLICT(key, window_start) DO UPDATE SET count = count + 1 RETURNING count",
@@ -60,6 +73,27 @@ async function rateLimited(env: Env, req: Request, now: number): Promise<boolean
     .bind(key, window)
     .first<{ count: number }>();
   return (row?.count ?? 1) > limit;
+}
+
+const ipLimited = async (env: Env, req: Request, now: number) =>
+  overLimit(
+    env,
+    "ip:" + (await keyedHash(env, "ip", ipPrefix(req.headers.get("cf-connecting-ip") ?? "unknown"))),
+    intVar(env.REGISTER_LIMIT_PER_HOUR, 10),
+    now,
+  );
+
+/**
+ * APNs token takeover rule (M1): a registration (POST, or PATCH changing apns_token) replaces any other row holding
+ * the same APNs token, whichever uid owns it (legitimate cases: reinstall, or an account switch where the old
+ * DELETE failed). To bound abuse, registrations per APNs token are limited to 3 per hour.
+ */
+const tokenLimited = async (env: Env, apns: string, now: number) =>
+  overLimit(env, "tok:" + (await keyedHash(env, "apns", apns)), 3, now);
+
+async function pruneUsers(env: Env, uids: number[]) {
+  for (const uid of new Set(uids))
+    await env.DB.prepare("DELETE FROM users WHERE uid = ? AND NOT EXISTS (SELECT 1 FROM devices WHERE uid = ?)").bind(uid, uid).run();
 }
 
 async function authDevice(env: Env, req: Request, id: string): Promise<DeviceRow | Response> {
@@ -81,7 +115,7 @@ async function verifyOrResponse(token: string): Promise<number | Response> {
 }
 
 async function register(req: Request, env: Env, now: number): Promise<Response> {
-  if (await rateLimited(env, req, now)) return err(429, "rate limited", { "retry-after": "3600" });
+  if (await ipLimited(env, req, now)) return err(429, "rate limited", { "retry-after": "3600" });
   let b: Record<string, unknown>;
   let token: string, apns: string, apnsEnv: "production" | "sandbox", prefs: Prefs, version: string | null;
   try {
@@ -98,10 +132,12 @@ async function register(req: Request, env: Env, now: number): Promise<Response> 
   const uid = await verifyOrResponse(token);
   if (uid instanceof Response) return uid;
 
+  if (await tokenLimited(env, apns, now)) return err(429, "rate limited", { "retry-after": "3600" });
   const id = crypto.randomUUID();
   const secret = newDeviceSecret();
-  const sealed = await encryptToken(env, id, token);
-  const cap = parseInt(env.MAX_DEVICES_PER_UID ?? "10", 10);
+  const sealed = await encryptToken(env, id, uid, token);
+  const cap = intVar(env.MAX_DEVICES_PER_UID, 10);
+  const { results: holders } = await env.DB.prepare("SELECT DISTINCT uid FROM devices WHERE apns_token = ?").bind(apns).all<{ uid: number }>();
   await env.DB.batch([
     env.DB.prepare("INSERT OR IGNORE INTO users (uid, created_at) VALUES (?, ?)").bind(uid, now),
     // Re-registration of the same physical device must not leave a duplicate push target.
@@ -115,6 +151,7 @@ async function register(req: Request, env: Env, now: number): Promise<Response> 
       "DELETE FROM devices WHERE uid = ? AND id NOT IN (SELECT id FROM devices WHERE uid = ? ORDER BY last_seen_at DESC, created_at DESC LIMIT ?)",
     ).bind(uid, uid, cap),
   ]);
+  await pruneUsers(env, holders.map((h) => h.uid));
   log("device_registered", { device: id.slice(0, 8) });
   return json({ device_id: id, device_secret: secret });
 }
@@ -123,11 +160,17 @@ async function patch(req: Request, env: Env, id: string, now: number): Promise<R
   const dev = await authDevice(env, req, id);
   if (dev instanceof Response) return dev;
   let b: Record<string, unknown>;
+  let takeover: string | null = null;
   const sets: string[] = ["last_seen_at = ?"];
   const vals: unknown[] = [now];
   try {
     b = await readBody(req);
-    if (b.apns_token !== undefined) (sets.push("apns_token = ?"), vals.push(vApns(b.apns_token)));
+    if (b.apns_token !== undefined) {
+      const t = vApns(b.apns_token);
+      sets.push("apns_token = ?");
+      vals.push(t);
+      if (t !== dev.apns_token) takeover = t;
+    }
     if (b.apns_env !== undefined) (sets.push("apns_env = ?"), vals.push(vEnv(b.apns_env)));
     if (b.app_version !== undefined) (sets.push("app_version = ?"), vals.push(vVersion(b.app_version)));
     if (b.prefs !== undefined) {
@@ -139,7 +182,7 @@ async function patch(req: Request, env: Env, id: string, now: number): Promise<R
       const uid = await verifyOrResponse(token);
       if (uid instanceof Response) return uid;
       if (uid !== dev.uid) return err(401, "token belongs to a different account");
-      const s = await encryptToken(env, id, token);
+      const s = await encryptToken(env, id, dev.uid, token);
       sets.push("token_enc = ?", "dek_enc = ?", "key_version = ?");
       vals.push(s.token_enc, s.dek_enc, s.key_version);
     }
@@ -147,7 +190,16 @@ async function patch(req: Request, env: Env, id: string, now: number): Promise<R
     if (e instanceof BadRequest) return err(400, e.message);
     throw e;
   }
-  await env.DB.prepare(`UPDATE devices SET ${sets.join(", ")} WHERE id = ?`).bind(...vals, id).run();
+  let holders: { uid: number }[] = [];
+  const stmts: D1PreparedStatement[] = [];
+  if (takeover) {
+    if (await tokenLimited(env, takeover, now)) return err(429, "rate limited", { "retry-after": "3600" });
+    holders = (await env.DB.prepare("SELECT DISTINCT uid FROM devices WHERE apns_token = ? AND id != ?").bind(takeover, id).all<{ uid: number }>()).results;
+    stmts.push(env.DB.prepare("DELETE FROM devices WHERE apns_token = ? AND id != ?").bind(takeover, id));
+  }
+  stmts.push(env.DB.prepare(`UPDATE devices SET ${sets.join(", ")} WHERE id = ?`).bind(...vals, id));
+  await env.DB.batch(stmts);
+  await pruneUsers(env, holders.map((h) => h.uid));
   return json({ ok: true });
 }
 
@@ -155,6 +207,7 @@ async function del(req: Request, env: Env, id: string): Promise<Response> {
   const dev = await authDevice(env, req, id);
   if (dev instanceof Response) return dev.status === 404 ? new Response(null, { status: 204 }) : dev;
   await env.DB.prepare("DELETE FROM devices WHERE id = ?").bind(id).run();
+  await pruneUsers(env, [dev.uid]);
   return new Response(null, { status: 204 });
 }
 

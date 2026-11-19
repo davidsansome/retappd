@@ -13,6 +13,20 @@ export class CryptoError extends Error {
     this.name = "CryptoError";
   }
 }
+/** Bad/missing master key configuration. NEVER a reason to delete data. */
+export class CryptoConfigError extends CryptoError {
+  constructor(msg: string) {
+    super(msg);
+    this.name = "CryptoConfigError";
+  }
+}
+/** Genuine AEAD authentication failure (wrong key, tampered or swapped ciphertext). */
+export class CryptoAuthError extends CryptoError {
+  constructor() {
+    super("decryption failed"); // deliberately generic
+    this.name = "CryptoAuthError";
+  }
+}
 
 export function b64encode(buf: ArrayBuffer | Uint8Array): string {
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
@@ -33,14 +47,14 @@ export function b64url(buf: Uint8Array): string {
 const masterCache = new Map<string, CryptoKey>();
 
 export function currentKeyVersion(env: Env): number {
-  const v = parseInt(String(env.MASTER_KEY_CURRENT ?? "1"), 10);
-  if (!Number.isInteger(v) || v < 1) throw new CryptoError("bad MASTER_KEY_CURRENT");
-  return v;
+  const raw = env.MASTER_KEY_CURRENT;
+  if (typeof raw !== "string" || !/^[1-9]\d*$/.test(raw)) throw new CryptoConfigError("MASTER_KEY_CURRENT missing or invalid");
+  return parseInt(raw, 10);
 }
 
 async function masterKey(env: Env, version: number): Promise<CryptoKey> {
   const raw = env[`MASTER_KEY_V${version}`];
-  if (typeof raw !== "string" || !raw) throw new CryptoError(`master key v${version} not configured`);
+  if (typeof raw !== "string" || !raw) throw new CryptoConfigError(`master key v${version} not configured`);
   const cacheKey = `${version}:${raw}`; // in-memory only
   const hit = masterCache.get(cacheKey);
   if (hit) return hit;
@@ -48,9 +62,9 @@ async function masterKey(env: Env, version: number): Promise<CryptoKey> {
   try {
     bytes = b64decode(raw.trim());
   } catch {
-    throw new CryptoError(`master key v${version} is not base64`);
+    throw new CryptoConfigError(`master key v${version} is not base64`);
   }
-  if (bytes.length !== 32) throw new CryptoError(`master key v${version} must be 32 bytes`);
+  if (bytes.length !== 32) throw new CryptoConfigError(`master key v${version} must be 32 bytes`);
   const key = await crypto.subtle.importKey("raw", bytes, "AES-GCM", false, ["encrypt", "decrypt"]);
   masterCache.set(cacheKey, key);
   return key;
@@ -78,12 +92,13 @@ async function open(key: CryptoKey, sealed: string, aad: string): Promise<Uint8A
       ),
     );
   } catch {
-    throw new CryptoError("decryption failed"); // deliberately generic
+    throw new CryptoAuthError();
   }
 }
 
-const tokenAad = (deviceId: string) => `${deviceId}|token|v1`;
-const dekAad = (deviceId: string, version: number) => `${deviceId}|dek|v${version}`;
+// uid is bound too, so a row can't be re-pointed at another account.
+const tokenAad = (deviceId: string, uid: number) => `${deviceId}|${uid}|token|v1`;
+const dekAad = (deviceId: string, uid: number, version: number) => `${deviceId}|${uid}|dek|v${version}`;
 
 export interface Sealed {
   token_enc: string;
@@ -91,65 +106,84 @@ export interface Sealed {
   key_version: number;
 }
 
-export async function encryptToken(env: Env, deviceId: string, token: string): Promise<Sealed> {
+export async function encryptToken(env: Env, deviceId: string, uid: number, token: string): Promise<Sealed> {
   const version = currentKeyVersion(env);
   const master = await masterKey(env, version);
   const dekBytes = crypto.getRandomValues(new Uint8Array(32));
   const dek = await crypto.subtle.importKey("raw", dekBytes, "AES-GCM", false, ["encrypt"]);
-  const token_enc = await seal(dek, enc.encode(token), tokenAad(deviceId));
-  const dek_enc = await seal(master, dekBytes, dekAad(deviceId, version));
+  const token_enc = await seal(dek, enc.encode(token), tokenAad(deviceId, uid));
+  const dek_enc = await seal(master, dekBytes, dekAad(deviceId, uid, version));
   dekBytes.fill(0);
   return { token_enc, dek_enc, key_version: version };
 }
 
 export async function decryptToken(
   env: Env,
-  row: { id: string; token_enc: string; dek_enc: string; key_version: number },
+  row: { id: string; uid: number; token_enc: string; dek_enc: string; key_version: number },
 ): Promise<string> {
   const master = await masterKey(env, row.key_version);
-  const dekBytes = await open(master, row.dek_enc, dekAad(row.id, row.key_version));
+  const dekBytes = await open(master, row.dek_enc, dekAad(row.id, row.uid, row.key_version));
   const dek = await crypto.subtle.importKey("raw", dekBytes, "AES-GCM", false, ["decrypt"]);
   dekBytes.fill(0);
-  return dec.decode(await open(dek, row.token_enc, tokenAad(row.id)));
+  return dec.decode(await open(dek, row.token_enc, tokenAad(row.id, row.uid)));
 }
 
 /** Re-wrap the row's DEK under the current master key. Token ciphertext is untouched. */
 export async function rewrapDek(
   env: Env,
-  row: { id: string; dek_enc: string; key_version: number },
+  row: { id: string; uid: number; dek_enc: string; key_version: number },
 ): Promise<{ dek_enc: string; key_version: number }> {
   const to = currentKeyVersion(env);
   const oldKey = await masterKey(env, row.key_version);
-  const dekBytes = await open(oldKey, row.dek_enc, dekAad(row.id, row.key_version));
+  const dekBytes = await open(oldKey, row.dek_enc, dekAad(row.id, row.uid, row.key_version));
   const newKey = await masterKey(env, to);
-  const dek_enc = await seal(newKey, dekBytes, dekAad(row.id, to));
+  const dek_enc = await seal(newKey, dekBytes, dekAad(row.id, row.uid, to));
   dekBytes.fill(0);
   return { dek_enc, key_version: to };
 }
 
-/** Rewrap up to `limit` rows not on the current key version. Returns rows rewrapped / failed. */
-export async function rewrapBatch(env: Env, limit = 500): Promise<{ rewrapped: number; failed: number }> {
+/**
+ * Rewrap rows not on the current key version, examining at most `limit` rows per run, starting at a random
+ * point (and wrapping) so rows that can't be rewrapped for config reasons never starve the rest. A genuine
+ * AEAD failure means the row is unreadable for good: it is deleted (the device re-registers).
+ */
+export async function rewrapBatch(env: Env, limit = 500): Promise<{ rewrapped: number; failed: number; deleted: number }> {
   const cur = currentKeyVersion(env);
-  const { results } = await env.DB.prepare(
-    "SELECT id, dek_enc, key_version FROM devices WHERE key_version != ? LIMIT ?",
-  )
-    .bind(cur, limit)
-    .all<{ id: string; dek_enc: string; key_version: number }>();
-  let rewrapped = 0;
-  let failed = 0;
-  for (const row of results) {
-    try {
-      const n = await rewrapDek(env, row);
-      // Guard on old values so a concurrent PATCH (which re-encrypts) is not clobbered.
-      await env.DB.prepare("UPDATE devices SET dek_enc = ?, key_version = ? WHERE id = ? AND key_version = ? AND dek_enc = ?")
-        .bind(n.dek_enc, n.key_version, row.id, row.key_version, row.dek_enc)
-        .run();
-      rewrapped++;
-    } catch {
-      failed++;
+  const start = crypto.randomUUID();
+  const out = { rewrapped: 0, failed: 0, deleted: 0 };
+  let budget = limit;
+  type R = { id: string; uid: number; dek_enc: string; key_version: number };
+  const run = async (sql: string, ...binds: unknown[]) => {
+    const { results } = await env.DB.prepare(sql).bind(...binds, Math.min(100, budget)).all<R>();
+    for (const row of results) {
+      budget--;
+      try {
+        const n = await rewrapDek(env, row);
+        // Guard on old values so a concurrent PATCH (which re-encrypts) is not clobbered.
+        await env.DB.prepare("UPDATE devices SET dek_enc = ?, key_version = ? WHERE id = ? AND key_version = ? AND dek_enc = ?")
+          .bind(n.dek_enc, n.key_version, row.id, row.key_version, row.dek_enc)
+          .run();
+        out.rewrapped++;
+      } catch (e) {
+        if (e instanceof CryptoAuthError) {
+          await env.DB.prepare("DELETE FROM devices WHERE id = ?").bind(row.id).run();
+          out.deleted++;
+        } else out.failed++;
+      }
+    }
+    return results.length > 0 ? results[results.length - 1].id : null;
+  };
+  const sel = "SELECT id, uid, dek_enc, key_version FROM devices WHERE key_version != ? AND id > ?";
+  // Pass 1: ids after the random start; pass 2: ids up to it (wrap-around).
+  for (const [from, to] of [[start, "\uffff"], ["", start]]) {
+    let cursor = from;
+    while (budget > 0) {
+      const last = await run(`${sel} AND id <= ? ORDER BY id LIMIT ?`, cur, cursor, to);
+      if (last === null) break;
+      cursor = last;
     }
   }
-  return { rewrapped, failed };
+  return out;
 }
 
 // ---- device secrets ----
@@ -174,4 +208,24 @@ export function timingSafeEqual(a: string, b: string): boolean {
 
 export async function verifySecret(presented: string, storedHash: string): Promise<boolean> {
   return timingSafeEqual(await hashSecret(presented), storedHash);
+}
+
+// ---- keyed hashes of identifiers (IPs, uids, APNs tokens) ----
+
+const hmacCache = new Map<string, CryptoKey>();
+
+/** HMAC-SHA256(key = HKDF(current master key, info), data), base64url, truncated to `bytes`. */
+export async function keyedHash(env: Env, info: string, data: string, bytes = 16): Promise<string> {
+  const version = currentKeyVersion(env);
+  const raw = env[`MASTER_KEY_V${version}`];
+  if (typeof raw !== "string") throw new CryptoConfigError(`master key v${version} not configured`);
+  const ck = `${version}:${info}:${raw}`;
+  let key = hmacCache.get(ck);
+  if (!key) {
+    const ikm = await crypto.subtle.importKey("raw", b64decode(raw.trim()), "HKDF", false, ["deriveBits"]);
+    const bits = await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: enc.encode(info) }, ikm, 256);
+    key = await crypto.subtle.importKey("raw", bits, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    hmacCache.set(ck, key);
+  }
+  return b64url(new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(data))).slice(0, bytes));
 }

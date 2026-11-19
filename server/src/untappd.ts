@@ -42,6 +42,7 @@ export interface FriendRequest {
 async function call(token: string, path: string, params: Record<string, string> = {}) {
   const qs = new URLSearchParams({ client_id: CLIENT_ID, client_secret: CLIENT_SECRET, utv: "4.0.0", ...params });
   const res = await fetch(`${BASE}${path}?${qs}`, {
+    signal: AbortSignal.timeout(10_000),
     headers: {
       Authorization: `Bearer ${token}`,
       "User-Agent": "Untappd/4.7.13 (android; Android 14)",
@@ -88,8 +89,15 @@ export async function fetchUid(token: string): Promise<number> {
   return uid;
 }
 
+const clip = (v: unknown, n: number) => {
+  const s = typeof v === "string" ? v : "";
+  const chars = Array.from(s);
+  return chars.length > n ? chars.slice(0, n - 1).join("") + "\u2026" : s;
+};
+
 function displayName(u?: { first_name?: string; last_name?: string; user_name?: string }): string {
-  return u?.first_name ? `${u.first_name}${u.last_name ? " " + u.last_name[0] : ""}` : (u?.user_name ?? "Someone");
+  const name = u?.first_name ? `${u.first_name}${u.last_name ? " " + Array.from(u.last_name)[0] : ""}` : (u?.user_name ?? "Someone");
+  return clip(name, 40); // keeps alert bodies short
 }
 
 /**
@@ -170,7 +178,7 @@ export function formatMessage(item: NotificationItem): FormattedMessage | null {
   const type = classify(item.notification_type);
   if (!type) return null;
   const actor = displayName(item.users?.[0]?.user);
-  const beer = item.meta?.beer?.beer_name;
+  const beer = clip(item.meta?.beer?.beer_name, 80) || undefined;
   const body = {
     toast: `${actor} toasted your ${beer ?? "check-in"}`,
     comment: `${actor} commented on your ${beer ?? "check-in"}`,

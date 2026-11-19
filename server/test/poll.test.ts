@@ -183,13 +183,14 @@ describe("polling", () => {
     expect(u.calls.filter((c) => c.path === "/v4/user/pending")).toHaveLength(1);
   });
 
-  it("uses the most recently seen device's token", async () => {
+  it("rotates which device's token is used so every device's token is exercised", async () => {
     await register("token-old-device", "aa".repeat(32), undefined, T0);
     await register("token-new-device", "bb".repeat(32), undefined, T0 + 5000);
+    await poll(T0 + 60_000); // baseline
     u.calls.length = 0;
-    await poll(T0 + 60_000);
-    expect(u.calls.length).toBeGreaterThan(0);
-    expect(u.calls.every((c) => c.token === "token-new-device")).toBe(true);
+    await poll(T0 + 120_000);
+    await poll(T0 + 180_000);
+    expect(new Set(u.calls.map((c) => c.token))).toEqual(new Set(["token-old-device", "token-new-device"]));
   });
 
   it("on Untappd auth error deletes that device and tries the next", async () => {
@@ -207,6 +208,8 @@ describe("polling", () => {
     vi.stubGlobal("fetch", (i: any, init: any) =>
       new Headers(init?.headers).get("authorization") === "Bearer willexpire1" ? Promise.resolve(new Response("{}", { status: 401 })) : orig(i, init));
     await poll(T0 + 60_000);
+    await poll(T0 + 120_000);
+    await poll(T0 + 180_000); // rotation reaches every device's token within n minutes
     const ids = (await env.DB.prepare("SELECT id FROM devices").all<any>()).results.map((r) => r.id);
     expect(ids).not.toContain(id);
     expect(ids).toHaveLength(1);

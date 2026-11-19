@@ -1,8 +1,8 @@
 import type { DeviceRow, Env, Prefs } from "./env";
-import { decryptToken, rewrapBatch } from "./crypto";
+import { CryptoAuthError, decryptToken, rewrapBatch } from "./crypto";
 import { type ApnsSender } from "./apns";
 import * as U from "./untappd";
-import { log, safeErr } from "./log";
+import { log, safeErr, uidTag } from "./log";
 
 const CONCURRENCY = 25;
 const WARN_USERS_PER_RUN = 500; // above this, raise POLL_SHARDS (see README)
@@ -60,7 +60,7 @@ export async function runPoll(env: Env, deps: PollDeps): Promise<void> {
       try {
         await pollUser(env, deps, u);
       } catch (e) {
-        log("poll_error", { uid: u.uid, error: safeErr(e) });
+        log("poll_error", { user: await uidTag(env, u.uid), error: safeErr(e) });
       }
     }
   };
@@ -79,11 +79,13 @@ async function backoff(env: Env, deps: PollDeps, u: UserRow, e: unknown) {
   let secs = Math.min(BACKOFF_BASE_S * 2 ** (n - 1), BACKOFF_MAX_S);
   if (e instanceof U.UntappdError && e.retryAfterSec) secs = Math.min(Math.max(secs, e.retryAfterSec), 6 * 3600);
   await setState(env, u.uid, { fail_count: n, next_poll_at: deps.now + secs * 1000 });
-  log("backoff", { uid: u.uid, n, secs });
+  log("backoff", { user: await uidTag(env, u.uid), n, secs });
 }
 
-async function deleteDevice(env: Env, id: string) {
-  await env.DB.prepare("DELETE FROM devices WHERE id = ?").bind(id).run();
+async function deleteDevice(env: Env, d: { id: string; uid: number }) {
+  await env.DB.prepare("DELETE FROM devices WHERE id = ?").bind(d.id).run();
+  // Drop the user row (and its watermarks) as soon as its last device is gone.
+  await env.DB.prepare("DELETE FROM users WHERE uid = ? AND NOT EXISTS (SELECT 1 FROM devices WHERE uid = ?)").bind(d.uid, d.uid).run();
 }
 
 interface Event {
@@ -109,16 +111,24 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
     // Never fetch the list on the baseline poll: reading it clears the user's unread counts.
   const baseline = u.marker === null || u.friend_marker === null;
 
-  // Use the most-recently-seen device's token; drop devices whose token Untappd rejects.
-  for (const d of devices) {
+  // Rotate which device's token is used each minute so every device's token gets exercised eventually;
+  // devices whose token Untappd rejects are dropped.
+  const rot = devices.length ? Math.floor(now / 60_000) % devices.length : 0;
+  for (const d of [...devices.slice(rot), ...devices.slice(0, rot)]) {
     if (polled) { live.push(d); continue; }
     let t: string;
     try {
       t = await decryptToken(env, d);
     } catch (e) {
-      log("decrypt_failed", { device: d.id.slice(0, 8), error: safeErr(e) });
-      await deleteDevice(env, d.id); // undecryptable (e.g. lost master key): device must re-register
-      continue;
+      if (e instanceof CryptoAuthError) {
+        // Genuine AEAD failure (wrong/lost key, tampered row): unreadable for good, device must re-register.
+        log("decrypt_auth_failed", { device: d.id.slice(0, 8) });
+        await deleteDevice(env, d);
+        continue;
+      }
+      // Config problem (missing/invalid master key, unknown key_version): never delete, skip this user.
+      log("decrypt_config_error", { device: d.id.slice(0, 8), error: safeErr(e) });
+      return;
     }
     try {
       const p = await U.pollCounts(t);
@@ -129,17 +139,14 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
     } catch (e) {
       if (e instanceof U.UntappdAuthError) {
         log("auth_error_device_deleted", { device: d.id.slice(0, 8) });
-        await deleteDevice(env, d.id);
+        await deleteDevice(env, d);
         continue;
       }
       await backoff(env, deps, u, e);
       return;
     }
   }
-  if (!polled) {
-    await env.DB.prepare("DELETE FROM users WHERE uid = ? AND NOT EXISTS (SELECT 1 FROM devices WHERE uid = ?)").bind(u.uid, u.uid).run();
-    return;
-  }
+  if (!polled) return; // every device was dropped; the user row went with the last one
 
   const upd: Record<string, unknown> = {};
   if (u.fail_count !== 0 || u.next_poll_at !== null) Object.assign(upd, { fail_count: 0, next_poll_at: null });
@@ -150,7 +157,7 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
     upd.marker = String(now);
     upd.marker_keys = null;
     upd.friend_marker = String(Math.max(now - FRIEND_SKEW_MS, maxReq));
-    log("baseline", { uid: u.uid });
+    log("baseline", { user: await uidTag(env, u.uid) });
   } else {
     const events: Event[] = [];
     const wf = Number(u.friend_marker);
@@ -219,7 +226,7 @@ async function pushEvents(env: Env, deps: PollDeps, devices: DeviceRow[], events
         const r = await deps.apns.send(d, payload); // sequential so they arrive in order
         if (r === "unregistered") {
           log("apns_unregistered_device_deleted", { device: d.id.slice(0, 8) });
-          await deleteDevice(env, d.id);
+          await deleteDevice(env, d);
           return;
         }
         if (r === "error") log("apns_error", { device: d.id.slice(0, 8) });
@@ -233,8 +240,12 @@ export async function dailyCleanup(env: Env, now: number) {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM devices WHERE last_seen_at < ?").bind(now - 30 * 86_400_000),
     env.DB.prepare("DELETE FROM users WHERE NOT EXISTS (SELECT 1 FROM devices d WHERE d.uid = users.uid)"),
-    env.DB.prepare("DELETE FROM rate_limits WHERE window_start < ?").bind(Math.floor(now / 3_600_000) - 2),
   ]);
   const r = await rewrapBatch(env);
   if (r.rewrapped || r.failed) log("rewrap", r);
+}
+
+/** Hourly: drop expired rate-limit windows. */
+export async function cleanRateLimits(env: Env, now: number) {
+  await env.DB.prepare("DELETE FROM rate_limits WHERE window_start < ?").bind(Math.floor(now / 3_600_000) - 1).run();
 }

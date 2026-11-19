@@ -3,13 +3,14 @@
 ## What is stored
 - Per device: the Untappd access token (encrypted), a SHA-256 of the device secret, the APNs token, prefs.
 - Per user: Untappd uid, poll state (two watermark timestamps, backoff). No notification contents, names or usernames.
-- Rate-limit rows keyed by a truncated SHA-256 of the client IP (the IP itself is not stored).
+- Rate-limit rows keyed by an HMAC of the client IP (IPv6 collapsed to its /64) or APNs token, with a key derived by HKDF
+  from the master key; raw IPs are never stored. Logs carry a keyed short hash of the uid, never the uid.
 
 ## Envelope encryption
 Each Untappd token is encrypted with AES-256-GCM under a random per-row data key (DEK). The DEK is wrapped with
 AES-256-GCM under a master key held only as a Worker secret (`MASTER_KEY_V<n>`). AAD binds ciphertexts to their row:
-token AAD = `deviceId|token|v1`, DEK AAD = `deviceId|dek|v<key_version>`, so rows (or a forged `key_version`) can't be
-swapped. IVs are random 96-bit. WebCrypto only. Tokens, secrets and decrypted values are never logged; crypto errors
+token AAD = `deviceId|uid|token|v1`, DEK AAD = `deviceId|uid|dek|v<key_version>`, so rows can't be swapped, re-pointed
+at another uid, or given a forged `key_version`. IVs are random 96-bit. WebCrypto only. Tokens, secrets and decrypted values are never logged; crypto errors
 are static strings; logs are allowlisted (`log.ts`).
 
 device_secret is 32 random bytes, shown once; only its SHA-256 is stored (high entropy, so no slow hash), compared in
@@ -41,3 +42,20 @@ selects which version encrypts new rows. Local dev uses a throwaway key in the g
 ## Lost master key
 Rows can't be decrypted. The poller deletes undecryptable devices; the app gets 404 on its next heartbeat and
 re-registers. No data of value is lost.
+
+## Other notes
+- **Decrypt errors:** only a genuine AEAD authentication failure deletes a device. Missing/invalid master keys are
+  configuration errors (`CryptoConfigError`): they are logged and the user is skipped, never deleted.
+  `MASTER_KEY_CURRENT` is required and must match `/^[1-9]\d*$/`.
+- **APNs token takeover:** a registration replaces any row holding the same APNs token, whichever uid owns it (reinstall,
+  or an account switch whose DELETE failed). Registrations per APNs token are capped at 3 per hour. Residual risk: someone
+  who learns a victim's APNs token (32 unguessable bytes, never public) can evict the victim's device row, at most 3 times
+  an hour, and would then receive pushes about the attacker's own Untappd account on the victim's phone, not the victim's
+  data. The victim's app re-registers on its next heartbeat (404).
+- **Token validation coverage:** each minute the poller starts at a different device of the user, so every device's
+  Untappd token is exercised within N minutes (N = devices of that uid) and dead ones are deleted.
+- **D1 Time Travel** keeps point-in-time history for about 30 days, so deleted rows (including ciphertext) stay recoverable
+  during that time and remain decryptable with the live master key. Rotating the master key and removing the old version
+  after a deletion-sensitive event makes those historical rows unreadable.
+- Responses carrying `device_secret` are `cache-control: no-store`; invocation logs are disabled (device ids appear in
+  URLs) and application logs are allowlisted.

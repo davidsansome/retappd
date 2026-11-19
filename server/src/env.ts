@@ -32,3 +32,9 @@ export interface DeviceRow {
   created_at: number;
   last_seen_at: number;
 }
+
+/** Numeric env var with default; non-numeric or out-of-range falls back to the default. */
+export function intVar(v: unknown, dflt: number, min = 1, max = 1_000_000): number {
+  const n = typeof v === "string" && /^\d+$/.test(v) ? parseInt(v, 10) : NaN;
+  return Number.isInteger(n) && n >= min && n <= max ? n : dflt;
+}

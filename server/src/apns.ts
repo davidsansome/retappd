@@ -1,6 +1,7 @@
 // APNs sender behind an interface. Requires HTTP/2 to Apple: see README "APNs and HTTP/2".
 import type { Env } from "./env";
 import { b64url } from "./crypto";
+import { log, safeErr } from "./log";
 
 export type SendResult = "ok" | "unregistered" | "error";
 
@@ -9,8 +10,9 @@ export interface ApnsSender {
 }
 
 const enc = new TextEncoder();
-let jwtCache: { key: string; jwt: string; at: number } | null = null;
+let jwtCache: { id: string; jwt: string; at: number } | null = null;
 const JWT_TTL_MS = 50 * 60 * 1000; // Apple: refresh no more often than every 20 min, and before 60
+const MIN_REGEN_MS = 60_000; // never regenerate more than once a minute (e.g. after InvalidProviderToken)
 
 function pemToDer(pem: string): Uint8Array {
   const body = pem.replace(/-----[A-Z ]+-----/g, "").replace(/\s+/g, "");
@@ -19,17 +21,30 @@ function pemToDer(pem: string): Uint8Array {
 
 export async function providerJwt(env: Env, now = Date.now()): Promise<string> {
   if (!env.APNS_KEY_P8) throw new Error("APNS_KEY_P8 not configured");
-  const id = `${env.APNS_KEY_ID}:${env.APNS_TEAM_ID}`;
-  if (jwtCache && jwtCache.key === id && now - jwtCache.at < JWT_TTL_MS) return jwtCache.jwt;
-  const key = await crypto.subtle.importKey("pkcs8", pemToDer(env.APNS_KEY_P8), { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  // Cache id covers the key material too, so a rotated .p8 is picked up.
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(env.APNS_KEY_P8)));
+  const id = `${env.APNS_KEY_ID}:${env.APNS_TEAM_ID}:${b64url(digest.slice(0, 8))}`;
+  if (jwtCache && jwtCache.id === id && now - jwtCache.at < JWT_TTL_MS) return jwtCache.jwt;
+  let key: CryptoKey;
+  try {
+    key = await crypto.subtle.importKey("pkcs8", pemToDer(env.APNS_KEY_P8), { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  } catch (e) {
+    log("apns_key_import_failed", { error: safeErr(e) });
+    throw e;
+  }
   const head = b64url(enc.encode(JSON.stringify({ alg: "ES256", kid: env.APNS_KEY_ID })));
   const claims = b64url(enc.encode(JSON.stringify({ iss: env.APNS_TEAM_ID, iat: Math.floor(now / 1000) })));
   const input = `${head}.${claims}`;
   // WebCrypto ECDSA output is raw r||s, exactly the JWS ES256 signature format.
   const sig = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, enc.encode(input)));
   const jwt = `${input}.${b64url(sig)}`;
-  jwtCache = { key: id, jwt, at: now };
+  jwtCache = { id, jwt, at: now };
   return jwt;
+}
+
+/** Drop the cached JWT, but no more than once a minute (a bad key must not cause a signing storm). */
+export function invalidateJwt(now = Date.now()) {
+  if (jwtCache && now - jwtCache.at >= MIN_REGEN_MS) jwtCache = null;
 }
 
 export function clearJwtCache() {
@@ -54,6 +69,7 @@ export class FetchApnsSender implements ApnsSender {
           "content-type": "application/json",
         },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(10_000),
       });
     } catch {
       return "error";
@@ -64,7 +80,7 @@ export class FetchApnsSender implements ApnsSender {
       reason = ((await res.json()) as any)?.reason ?? "";
     } catch {}
     if (res.status === 410 || DEAD_REASONS.has(reason)) return "unregistered";
-    if (reason === "ExpiredProviderToken" || reason === "InvalidProviderToken") clearJwtCache();
+    if (reason === "ExpiredProviderToken" || reason === "InvalidProviderToken") invalidateJwt();
     return "error";
   }
 }

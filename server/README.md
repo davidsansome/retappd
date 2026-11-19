@@ -39,7 +39,9 @@ Unverified until the first real push: **test a push right after first deploy.** 
 2. `npx wrangler d1 migrations apply retappd-notify --remote`
 3. `openssl rand -base64 32 | npx wrangler secret put MASTER_KEY_V1`
 4. `npx wrangler secret put APNS_KEY_P8 < AuthKey_898X3U57H6.p8` (APNs key id/team id are plain vars in wrangler.jsonc)
-5. `npx wrangler deploy`; put the workers.dev URL in the app's `RetappdNotifyBaseURL`.
+5. Add a Cloudflare WAF rate-limiting rule on `POST /v1/devices` (for example 20 requests per 10 minutes per IP) in
+   front of the Worker; the in-app D1 counter (10/hour per IP, /64 for IPv6) is a second layer.
+6. `npx wrangler deploy`; put the workers.dev URL in the app's `RetappdNotifyBaseURL`.
 Behind the Cloudflare edge, rate limiting uses `cf-connecting-ip`.
 
 ## Cost notes
@@ -73,6 +75,9 @@ count in the official Untappd app resets, and the first poll after registration 
 Friend requests are not cleared (the count is the number of pending requests).
 
 ## Known limits
+Each minute the poller starts at a different device of the user (rotation), so a user with several devices uses all of
+their Untappd tokens over time and dead ones are found and deleted.
+Set `MASTER_KEY_CURRENT` (required) whenever you add a `MASTER_KEY_V<n>`.
 If the notification fetch fails after Untappd already cleared the counts (e.g. the response is lost), those items are
 never pushed; the counts are gone and the list is only read when something is unread. Rare, accepted.
 Heartbeat PATCH writes `last_seen_at` (one write per device per 12h at most). Push failures other than 410 are logged and

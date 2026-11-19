@@ -3,7 +3,8 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
-  "observability": { "enabled": true },
+  // invocation_logs off: request logs would carry device ids in URLs. App logs are allowlisted (src/log.ts).
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
   "triggers": {
     // Every minute: poll Untappd. Daily 03:17 UTC: cleanup + key rewrap.
     "crons": ["* * * * *", "17 3 * * *"]
