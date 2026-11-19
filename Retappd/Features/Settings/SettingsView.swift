@@ -10,11 +10,15 @@ struct SettingsView: View {
     @State private var loadError: String?
     @State private var saveError: String?
     @State private var confirmSignOut = false
+    @State private var notifications = NotificationService.shared
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
                 TaproomSection("Theme") { themeTiles }
+
+                TaproomSection("Notifications") { notificationControls }
 
                 if let settings {
                     TaproomSection("Privacy") {
@@ -118,6 +122,43 @@ struct SettingsView: View {
             }
         }
         .sensoryFeedback(.selection, trigger: appearance)
+    }
+
+    /// The notification master switch, a note on what it shares, and one switch per type.
+    private var notificationControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switchCard {
+                Toggle("Push notifications", isOn: Binding(
+                    get: { notifications.enabled },
+                    set: { on in Task { await notifications.setEnabled(on) } }))
+                    .tint(Taproom.amber)
+                if notifications.enabled {
+                    prefToggle("Toasts", \.toast)
+                    prefToggle("Comments", \.comment)
+                    prefToggle("Tags", \.tag)
+                    prefToggle("Friend requests", \.friend)
+                }
+            }
+            if notifications.permissionDenied {
+                caption("Notifications are turned off for Retappd in iOS. Turn them on in the Settings app, then come back and switch this on.")
+                Button("Open iOS Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                }
+                .buttonStyle(TaproomOutlineButton())
+            }
+            caption("Get a notification when someone toasts, comments on or tags you in a check-in, or sends a friend request. To check for activity while the app is closed, turning this on stores an encrypted copy of your Untappd sign-in on Retappd's notification server. Turning it off, or signing out, deletes it.")
+        }
+    }
+
+    private func prefToggle(_ title: String, _ key: WritableKeyPath<NotifyPrefs, Bool>) -> some View {
+        Toggle(title, isOn: Binding(
+            get: { notifications.prefs[keyPath: key] },
+            set: { on in
+                var p = notifications.prefs
+                p[keyPath: key] = on
+                Task { await notifications.setPrefs(p) }
+            }))
+            .tint(Taproom.amber)
     }
 
     /// Switch rows in a card, with a line between each.

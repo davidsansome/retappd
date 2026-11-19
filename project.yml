@@ -17,7 +17,22 @@ targets:
     platform: iOS
     sources:
       - path: Retappd
+        excludes: ["*.entitlements", "Info.plist"]
+    # Keys Xcode's INFOPLIST_KEY_ settings don't cover; merged with the generated Info.plist.
+    info:
+      path: Retappd/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UIBackgroundModes: [remote-notification]
+        # Where the notification relay lives (see .claude/notify-contract.md); placeholder until deployed.
+        RetappdNotifyBaseURL: "https://retappd-notify.example.workers.dev"
     settings:
+      configs:
+        Debug:
+          APS_ENVIRONMENT: development
+        Release:
+          APS_ENVIRONMENT: production
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.davidsansome.retappd
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -32,6 +47,7 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        CODE_SIGN_ENTITLEMENTS: Retappd/Retappd.entitlements
         # Only HTTPS, which is exempt: TestFlight builds then don't wait on an export compliance answer.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
   RetappdTests:

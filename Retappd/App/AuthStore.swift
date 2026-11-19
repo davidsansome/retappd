@@ -55,6 +55,10 @@ final class AuthStore {
     #endif
 
     func signOut() {
+        // Stash the notification registration for deletion and start the DELETE before the token
+        // goes. It doesn't wait: an unreachable server mustn't hold up signing out (a failed
+        // DELETE is retried on the next launch).
+        NotificationService.shared.signedOut()
         // First and synchronously: the ticks go at once, an in-flight sync is abandoned, and a
         // sign-in straight afterwards can't pick up this account's list.
         HadBeers.shared.clear()
@@ -81,10 +85,10 @@ enum Keychain {
         return String(data: d, encoding: .utf8)
     }
 
-    static func write(_ account: String, _ value: String) {
+    static func write(_ account: String, _ value: String, accessible: CFString = kSecAttrAccessibleAfterFirstUnlock) {
         delete(account)
         let q: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account,
-                                  kSecValueData: Data(value.utf8), kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock]
+                                  kSecValueData: Data(value.utf8), kSecAttrAccessible: accessible]
         SecItemAdd(q as CFDictionary, nil)
     }
 

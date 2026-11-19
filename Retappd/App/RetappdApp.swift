@@ -2,9 +2,11 @@ import SwiftUI
 
 @main
 struct RetappdApp: App {
+    @UIApplicationDelegateAdaptor(NotificationAppDelegate.self) private var appDelegate
     @State private var auth = AuthStore()
     @State private var location = LocationProvider()
     @AppStorage(Appearance.storageKey) private var appearance = Appearance.system
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         Task { await LocalIndex.shared.warmUp() }
@@ -27,6 +29,12 @@ struct RetappdApp: App {
             .environment(location)
             .tint(Taproom.amber)
             .preferredColorScheme(appearance.colorScheme)
+            // A notification registration deleted at sign-out that couldn't reach the server is
+            // retried here, signed in or not.
+            .task { await NotificationService.shared.retryPendingDeletion() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await NotificationService.shared.retryPendingDeletion() } }
+            }
         }
     }
 }
@@ -57,6 +65,7 @@ struct RootTabs: View {
     /// Bumped to focus Discover's search field, or open its barcode scanner, from the tab bar.
     @State private var searchRequests = 0
     @State private var scanRequests = 0
+    @State private var router = NotificationRouter.shared
 
     init(username: String) {
         self.username = username
@@ -96,6 +105,12 @@ struct RootTabs: View {
         // you're at, even before the Discover tab is opened.
         .task { location.start() }
         .task { await loadMe() }
+        .task { await NotificationService.shared.appBecameActive() }
+        .onChange(of: router.pending, initial: true) { _, route in
+            guard let route else { return }
+            router.pending = nil
+            open(route)
+        }
         .task { await HadBeers.shared.refresh() }
         .task { await CheckInOptions.shared.loadAccountSettings() }
         .task { await CheckInOptions.shared.loadRecentVenues(username: username) }
@@ -127,6 +142,7 @@ struct RootTabs: View {
             case .background:
                 backgroundedAt = .now
             case .active:
+                Task { await NotificationService.shared.appBecameActive() }
                 Task { await HadBeers.shared.refresh() }
                 if let at = backgroundedAt, Date.now.timeIntervalSince(at) >= Self.staleAfter {
                     reopenedAfterAWhile()
@@ -171,6 +187,25 @@ extension RootTabs {
                     searchRequests += 1
                 }
                     .accessibilityHint("Searches for beers and venues")
+            }
+        }
+    }
+
+    /// Opens what a tapped push notification is about: a check-in on the Activity tab, or the
+    /// Friends screen (with its requests) on Me.
+    private func open(_ route: NotificationRoute) {
+        switch route {
+        case .friendRequest:
+            page = .profile
+            profilePath = NavigationPath([ProfileRoute.friends])
+        case .checkin(let id):
+            page = .feed
+            feedPath = NavigationPath()
+            Task {
+                // Not fetched yet, so the feed is shown meanwhile; a failure just leaves it there.
+                guard let r = try? await UntappdAPI.shared.fetch(.checkinView(id), as: CheckinView.self),
+                      let c = r.checkin else { return }
+                feedPath.append(CheckinRoute(checkin: c, listID: UUID()))
             }
         }
     }
