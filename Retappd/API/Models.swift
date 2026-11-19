@@ -19,6 +19,46 @@ struct Meta: Decodable {
 struct Envelope<T: Decodable>: Decodable {
     var meta: Meta?
     var response: T?
+    /// The account's unread counts, which every response carries.
+    var notifications: UnreadCounts?
+
+    private enum Keys: String, CodingKey { case meta, response, notifications }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        meta = try? c.decodeIfPresent(Meta.self, forKey: .meta)
+        response = try c.decodeIfPresent(T.self, forKey: .response)
+        notifications = try? c.decodeIfPresent(UnreadCounts.self, forKey: .notifications)
+    }
+}
+
+/// `notifications.unread_count` in every response's envelope (see "Response Envelope" in the API
+/// docs). Reading `GET /v4/notifications` resets `comments`, `toasts` and `others`; `friends` is
+/// the number of pending friend requests and stays until they're answered.
+struct UnreadCounts: Decodable, Equatable {
+    var comments = 0
+    var toasts = 0
+    var friends = 0
+    var others = 0
+
+    /// Unread activity on checkins (not friend requests).
+    var activity: Int { comments + toasts + others }
+
+    init(comments: Int = 0, toasts: Int = 0, friends: Int = 0, others: Int = 0) {
+        self.comments = comments
+        self.toasts = toasts
+        self.friends = friends
+        self.others = others
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        guard let n = c.nested("unread_count") else { throw APIError.decoding }
+        comments = n.int("comments") ?? 0
+        toasts = n.int("toasts") ?? 0
+        friends = n.int("friends") ?? 0
+        others = n.int("others") ?? 0
+    }
 }
 
 // MARK: - Users

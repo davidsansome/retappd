@@ -145,6 +145,14 @@ row) for lists of many checkins at one place, grouped under recency labels
   kept across launches; zero bars get none; crowded charts label every other bar or sparser so labels
   never touch, newest bar first). **Press and hold, then drag** to scrub: the totals switch to the
   touched bar and a haptic ticks per bar. VoiceOver gets a "Show/Hide values on bars" action.
+- **Notifications** (pushed from the bell at the right of the Activity title; the bell carries a `TaproomCountBadge`
+  when something is new, or an amber dot when only the app icon's badge is set) is a heavy title, a
+  "Friend requests" row (amber icon, `TaproomCountBadge`, chevron; opens Me > Friends) only while requests are
+  waiting, then plain `TaproomRowStyle` rows with dividers in a `LazyVStack`: the actor's avatar, one line of
+  text with the names in semibold ("Jamie S and 2 others toasted your Late Nights III"), the short age in muted
+  footnote, and the beer's `BeerLabel` (44pt) on the right, dropped at accessibility text sizes. Rows newer than
+  what was last seen get a faint amber wash while the screen is open. Empty and error states use
+  `ContentUnavailableView` and `ErrorRow`.
 - **Friends** (pushed from the Friends stat on Me, which carries a small chevron) is a heavy
   title, then, only while incoming requests are waiting, a "Requests" `TaproomSection` above the
   search field: each row is the person (avatar, name, "@username · asked 2 hours ago", opening

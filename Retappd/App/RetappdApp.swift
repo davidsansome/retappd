@@ -66,11 +66,13 @@ struct RootTabs: View {
     @State private var searchRequests = 0
     @State private var scanRequests = 0
     @State private var router = NotificationRouter.shared
+    @State private var unread: NotificationUnread
 
     init(username: String) {
         self.username = username
         _profile = State(initialValue: CheckinListModel(source: .user(username)))
         _discover = State(initialValue: DiscoverModel(username: username))
+        _unread = State(initialValue: NotificationUnread(username: username))
     }
 
     var body: some View {
@@ -80,6 +82,9 @@ struct RootTabs: View {
                 NavigationStack(path: $feedPath) {
                     FeedView(model: feed).safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
                         .beerAndBreweryDestinations()
+                        .navigationDestination(for: NotificationsRoute.self) { _ in
+                            NotificationsView(unread: unread, openCheckin: { await showCheckin($0) }, openFriends: openFriends)
+                        }
                 }
                 .toolbarVisibility(.hidden, for: .tabBar)
             }
@@ -101,10 +106,16 @@ struct RootTabs: View {
             }
         }
         .environment(discover)
+        .environment(unread)
         // Track location app-wide, so Discover is ready and check-ins can preselect the venue
         // you're at, even before the Discover tab is opened.
         .task { location.start() }
         .task { await loadMe() }
+        .task {
+            // Every response's envelope says how much is unread; the bell listens.
+            let unread = unread
+            UntappdAPI.shared.onUnreadCounts = { counts in Task { @MainActor in unread.ingest(counts) } }
+        }
         .task { await NotificationService.shared.appBecameActive() }
         .onChange(of: router.pending, initial: true) { _, route in
             guard let route else { return }
@@ -143,6 +154,7 @@ struct RootTabs: View {
                 backgroundedAt = .now
             case .active:
                 Task { await NotificationService.shared.appBecameActive() }
+                Task { await unread.refresh() }
                 Task { await HadBeers.shared.refresh() }
                 if let at = backgroundedAt, Date.now.timeIntervalSince(at) >= Self.staleAfter {
                     reopenedAfterAWhile()
@@ -196,18 +208,26 @@ extension RootTabs {
     private func open(_ route: NotificationRoute) {
         switch route {
         case .friendRequest:
-            page = .profile
-            profilePath = NavigationPath([ProfileRoute.friends])
+            openFriends()
         case .checkin(let id):
             page = .feed
             feedPath = NavigationPath()
-            Task {
-                // Not fetched yet, so the feed is shown meanwhile; a failure just leaves it there.
-                guard let r = try? await UntappdAPI.shared.fetch(.checkinView(id), as: CheckinView.self),
-                      let c = r.checkin else { return }
-                feedPath.append(CheckinRoute(checkin: c, listID: UUID()))
-            }
+            // Not fetched yet, so the feed is shown meanwhile; a failure just leaves it there.
+            Task { _ = await showCheckin(id) }
         }
+    }
+
+    private func openFriends() {
+        page = .profile
+        profilePath = NavigationPath([ProfileRoute.friends])
+    }
+
+    /// Fetches a checkin by id and pushes it on the Activity stack. False if that failed.
+    private func showCheckin(_ id: Int) async -> Bool {
+        guard let r = try? await UntappdAPI.shared.fetch(.checkinView(id), as: CheckinView.self),
+              let c = r.checkin else { return false }
+        feedPath.append(CheckinRoute(checkin: c, listID: UUID()))
+        return true
     }
 
     /// Switches tab; choosing the tab you're on takes its list back to the top.

@@ -52,6 +52,11 @@ final class UntappdAPI: @unchecked Sendable {
     /// Called (on any thread) when the server rejects our token.
     var onUnauthorized: (@Sendable () -> Void)?
 
+    /// Called (on any thread) with the unread counts in each successful response's envelope,
+    /// except `GET /v4/notifications`, whose own envelope still shows the counts from before it
+    /// cleared them.
+    var onUnreadCounts: (@Sendable (UnreadCounts) -> Void)?
+
     let session: URLSession = {
         let c = URLSessionConfiguration.default
         c.requestCachePolicy = .reloadIgnoringLocalCacheData  // we cache ourselves
@@ -98,7 +103,8 @@ final class UntappdAPI: @unchecked Sendable {
     func data(_ r: APIRequest) async throws -> Data {
         let (data, resp) = try await session.data(for: urlRequest(r))
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        let meta = (try? JSONDecoder().decode(Envelope<Ignored>.self, from: data))?.meta
+        let envelope = try? JSONDecoder().decode(Envelope<Ignored>.self, from: data)
+        let meta = envelope?.meta
         if status == 401 || meta?.code == 401 || meta?.errorType == "invalid_auth" {
             if token != nil { onUnauthorized?() }
             throw APIError.unauthorized
@@ -107,6 +113,7 @@ final class UntappdAPI: @unchecked Sendable {
             throw APIError.server(code: meta.code, detail: meta.errorDetail)
         }
         guard (200..<300).contains(status) else { throw APIError.http(status) }
+        if let counts = envelope?.notifications, r.path != "/v4/notifications" { onUnreadCounts?(counts) }
         return data
     }
 
@@ -156,6 +163,17 @@ extension APIRequest {
         var q = ["limit": "\(limit)"]
         if let maxId { q["max_id"] = "\(maxId)" }
         return APIRequest(path: "/v4/checkin/recent", query: q)
+    }
+
+    /// The notification feed, newest first, as the official app asks for it. **Reading it marks
+    /// the account's notifications as read** (see `GET /v4/notifications` in the API docs). It
+    /// pages with `limit`/`offset`, and `response.pagination.next_url` is empty on the last page.
+    static func notifications(offset: Int = 0, limit: Int = 25) -> APIRequest {
+        APIRequest(path: "/v4/notifications", query: [
+            "includes": "commentTag,checkinTag,checkinFriendTag,toast,comment,promo",
+            "is_news": "false", "version": "2",
+            "limit": "\(limit)", "offset": "\(offset)",
+        ])
     }
 
     static func userCheckins(_ username: String, maxId: Int? = nil, limit: Int = 25) -> APIRequest {

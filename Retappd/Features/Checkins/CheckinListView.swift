@@ -167,16 +167,52 @@ struct ErrorRow: View {
 
 struct FeedView: View {
     let model: CheckinListModel
+    @Environment(NotificationUnread.self) private var unread
 
     var body: some View {
         CheckinList(model: model, showActions: true, emptyText: "Your friends haven't checked in anything yet.") {
-            Text("Activity")
-                .font(.system(size: 34, weight: .heavy))
-                .tracking(-0.8)
-                .padding(.top, 4)
-                .accessibilityAddTraits(.isHeader)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Activity")
+                    .font(.system(size: 34, weight: .heavy))
+                    .tracking(-0.8)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                NotificationsBell(unread: unread)
+            }
+            .padding(.top, 4)
         }
         .toolbar(.hidden, for: .navigationBar)
+        // The feed refreshing (first load, pull to refresh, coming back after a while) is when the
+        // bell checks for friend requests and the icon badge.
+        .onChange(of: model.isRefreshing) { was, now in
+            if was && !now { Task { await unread.refresh() } }
+        }
+    }
+}
+
+/// The Activity page's bell: opens Notifications, with a count (or just a dot) when there's
+/// something new.
+struct NotificationsBell: View {
+    let unread: NotificationUnread
+
+    var body: some View {
+        NavigationLink(value: NotificationsRoute()) {
+            Image(systemName: unread.hasUnread ? "bell.fill" : "bell")
+                .font(.title3)
+                .foregroundStyle(Taproom.ink)
+                .frame(width: 44, height: 44)
+                .overlay(alignment: .topTrailing) {
+                    if unread.count > 0 {
+                        TaproomCountBadge(count: unread.count).padding(.top, 2)
+                    } else if unread.hasUnread {
+                        Circle().fill(Taproom.amber).frame(width: 10, height: 10).padding(.top, 8).padding(.trailing, 8)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Notifications")
+        .accessibilityValue(unread.count > 0 ? "\(unread.count) new" : unread.hasUnread ? "New" : "")
     }
 }
 
