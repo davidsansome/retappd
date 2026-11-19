@@ -25,8 +25,8 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UIBackgroundModes: [remote-notification]
-        # Where the notification relay lives (see .claude/notify-contract.md); placeholder until deployed.
-        RetappdNotifyBaseURL: "https://retappd-notify.example.workers.dev"
+        # Where the notification relay lives (see .claude/notify-contract.md).
+        RetappdNotifyBaseURL: "https://retappd-notify.davidsansome.workers.dev"
     settings:
       configs:
         Debug:

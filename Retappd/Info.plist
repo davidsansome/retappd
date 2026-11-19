@@ -19,7 +19,7 @@
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>RetappdNotifyBaseURL</key>
-	<string>https://retappd-notify.example.workers.dev</string>
+	<string>https://retappd-notify.davidsansome.workers.dev</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
