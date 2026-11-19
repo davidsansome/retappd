@@ -124,12 +124,15 @@ export interface NotificationItem {
 }
 
 /**
- * GET /v4/notifications, first page. WARNING: this marks the account's notifications read (clears
+ * GET /v4/notifications (first page by default; `offset` for later pages). WARNING: this marks the account's notifications read (clears
  * comments/toasts/others/news and unified_count for the official app too). The returned counts are the
  * envelope of this very call, i.e. the values from before the clear. Only call when something is unread.
  */
-export async function fetchNotifications(token: string): Promise<{ items: NotificationItem[]; counts: Counts }> {
+export const PAGE_SIZE = 25; // default page size of /v4/notifications
+
+export async function fetchNotifications(token: string, offset = 0): Promise<{ items: NotificationItem[]; counts: Counts }> {
   const json = await call(token, "/v4/notifications", {
+    ...(offset > 0 ? { offset: String(offset) } : {}),
     version: "2",
     includes: "commentTag,checkinTag,checkinFriendTag,toast,comment,promo",
     is_news: "false",

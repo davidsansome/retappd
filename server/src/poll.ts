@@ -6,6 +6,7 @@ import { log, safeErr, uidTag } from "./log";
 
 const CONCURRENCY = 25;
 const WARN_USERS_PER_RUN = 500; // above this, raise POLL_SHARDS (see README)
+const MAX_ITEMS_PER_POLL = 100; // sanity cap on notification items examined (and so pushes sent) per user per poll
 const MAX_ITEM_AGE_MS = 24 * 3_600_000; // safety cap for the re-toast overcount case
 const STALE_MS = 7 * 86_400_000;
 const STALE_EVERY_MIN = 5;
@@ -96,7 +97,6 @@ interface Event {
   body: string;
 }
 
-const MAX_PUSHES = 5; // per device per poll; beyond that the oldest collapse into one summary
 const FRIEND_SKEW_MS = 60_000; // Untappd vs server clock allowance for the friend baseline
 
 export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<void> {
@@ -133,7 +133,7 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
     try {
       const p = await U.pollCounts(t);
       // Reading the list marks everything read in the official app too, so only do it if something is unread.
-      if (!baseline && U.unreadActivity(p.counts) > 0) fetched = await U.fetchNotifications(t);
+      if (!baseline && U.unreadActivity(p.counts) > 0) fetched = await fetchAllUnhandled(t, u, deps.now);
       polled = p;
       live.push(d);
     } catch (e) {
@@ -201,18 +201,13 @@ function allowed(prefs: Prefs, type: string): boolean {
 }
 
 async function pushEvents(env: Env, deps: PollDeps, devices: DeviceRow[], events: Event[], badge: number) {
+  // One push per event, however many. Devices in parallel; sequential within a device to keep order.
   await Promise.all(
     devices.map(async (d) => {
       const prefs = JSON.parse(d.prefs) as Prefs;
-      let mine = events.filter((e) => allowed(prefs, e.type));
-      const payloads: object[] = [];
-      if (mine.length > MAX_PUSHES) {
-        const collapsed = mine.length - (MAX_PUSHES - 1);
-        payloads.push({ aps: { alert: { body: `${collapsed} more notifications` }, badge, sound: "default" } });
-        mine = mine.slice(collapsed);
-      }
-      for (const e of mine) {
-        payloads.push({
+      for (const e of events) {
+        if (!allowed(prefs, e.type)) continue;
+        const payload = {
           aps: {
             alert: { body: e.body },
             badge,
@@ -220,10 +215,8 @@ async function pushEvents(env: Env, deps: PollDeps, devices: DeviceRow[], events
             "thread-id": e.checkinId ? `checkin-${e.checkinId}` : "friends",
           },
           retappd: { type: e.type, ...(e.checkinId ? { checkin_id: e.checkinId } : {}), actor: e.actor },
-        });
-      }
-      for (const payload of payloads) {
-        const r = await deps.apns.send(d, payload); // sequential so they arrive in order
+        };
+        const r = await deps.apns.send(d, payload);
         if (r === "unregistered") {
           log("apns_unregistered_device_deleted", { device: d.id.slice(0, 8) });
           await deleteDevice(env, d);
@@ -233,6 +226,39 @@ async function pushEvents(env: Env, deps: PollDeps, devices: DeviceRow[], events
       }
     }),
   );
+}
+
+/**
+ * First page, then further pages while the unread count K says there are more new items than found so far,
+ * the last page was full and still reached back to the marker. Capped at MAX_ITEMS_PER_POLL.
+ * A failing later page is tolerated: the counts are already cleared, so push what we have.
+ */
+async function fetchAllUnhandled(token: string, u: UserRow, now: number) {
+  const first = await U.fetchNotifications(token);
+  const k = U.unreadActivity(first.counts);
+  const marker = Number(u.marker);
+  const seen = new Set<string>(u.marker_keys ? JSON.parse(u.marker_keys) : []);
+  const items = [...first.items];
+  let page = first.items;
+  while (
+    U.newItemsSince(items, marker, seen, now - MAX_ITEM_AGE_MS).length < k &&
+    page.length >= U.PAGE_SIZE &&
+    U.itemTime(page[page.length - 1]) >= marker
+  ) {
+    if (items.length >= MAX_ITEMS_PER_POLL) {
+      log("item_cap_hit", { cap: MAX_ITEMS_PER_POLL });
+      break;
+    }
+    try {
+      page = (await U.fetchNotifications(token, items.length)).items;
+    } catch (e) {
+      log("page_fetch_failed", { error: safeErr(e) });
+      break;
+    }
+    const keys = new Set(items.map(U.itemKey));
+    items.push(...page.filter((i) => !keys.has(U.itemKey(i)))); // paging while items move can repeat one
+  }
+  return { items, counts: first.counts };
 }
 
 /** Daily: drop devices unseen for 30 days, users with no devices, old rate-limit rows; rewrap keys. */

@@ -157,17 +157,45 @@ describe("polling", () => {
     expect(apns.sent).toEqual([]);
   });
 
-  it("collapses more than 5 pushes into 'N more notifications' and keeps order", async () => {
+  it("sends one push per new item however many, oldest first", async () => {
     await register();
     await poll(T1);
     const t = T1 + 70_000;
-    u.items = Array.from({ length: 8 }, (_, i) => toastItem(100 + i, t + i * 1000)).reverse(); // newest first
-    u.counts = { toasts: 8 };
-    u.unified = 8;
+    u.items = Array.from({ length: 12 }, (_, i) => toastItem(100 + i, t + i * 1000)).reverse(); // newest first
+    u.counts = { toasts: 12 };
+    u.unified = 12;
     await poll(T1 + 120_000);
-    expect(apns.sent).toHaveLength(5);
-    expect(apns.sent[0].payload.aps.alert.body).toBe("4 more notifications");
-    expect(apns.sent.slice(1).map((s) => s.payload.retappd.checkin_id)).toEqual([104, 105, 106, 107]);
+    expect(apns.sent.map((s) => s.payload.retappd.checkin_id)).toEqual(Array.from({ length: 12 }, (_, i) => 100 + i));
+  });
+
+  it("reads further pages while K exceeds the new items found, up to the 100-item cap", async () => {
+    await register();
+    await poll(T1);
+    const t = T1 + 70_000;
+    u.items = Array.from({ length: 30 }, (_, i) => toastItem(200 + i, t + i * 1000)).reverse();
+    u.counts = { toasts: 30 };
+    await poll(T1 + 120_000);
+    expect(apns.sent).toHaveLength(30);
+    expect(notifCalls()).toBe(2); // pages of 25
+    // cap: 130 new items, K=130 -> only the newest 100 examined and pushed
+    apns.sent.length = 0;
+    u.calls.length = 0;
+    u.items = Array.from({ length: 130 }, (_, i) => toastItem(500 + i, t + 200_000 + i * 1000)).reverse();
+    u.counts = { toasts: 130 };
+    await poll(T1 + 300_000);
+    expect(apns.sent).toHaveLength(100);
+    expect(apns.sent[99].payload.retappd.checkin_id).toBe(629);
+    expect(notifCalls()).toBe(4);
+  });
+
+  it("does not page when the first page already reaches back to the marker", async () => {
+    await register();
+    await poll(T1);
+    u.items = [toastItem(300, T1 + 70_000), ...Array.from({ length: 24 }, (_, i) => toastItem(400 + i, T1 - 1000 - i))];
+    u.counts = { toasts: 5 }; // overcount
+    await poll(T1 + 120_000);
+    expect(apns.sent).toHaveLength(1);
+    expect(notifCalls()).toBe(1);
   });
 
   it("filters by per-device prefs and pushes to every device of the uid", async () => {

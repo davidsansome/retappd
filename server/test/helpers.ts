@@ -56,7 +56,7 @@ function untappdResponse(u: UntappdMock, url: URL, auth: string): Response {
   if (url.pathname === "/v4/account/usersettings") return Response.json({ ...envelope, response: { user: { uid: u.uid } } });
   if (url.pathname === "/v4/notifications") {
     // Reading the list clears the counters (but this response still shows the pre-clear values).
-    const res = Response.json({ ...envelope, response: { notifications: { items: u.items } } });
+    const res = Response.json({ ...envelope, response: { notifications: { items: u.items.slice(Number(url.searchParams.get("offset") ?? 0), Number(url.searchParams.get("offset") ?? 0) + 25) } } });
     for (const k of ["toasts", "comments", "others", "news"]) delete u.counts[k];
     u.unified = u.counts.friends ?? 0;
     return res;
