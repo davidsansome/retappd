@@ -77,6 +77,11 @@ count in the official Untappd app resets, and the first poll after registration 
 Friend requests are not cleared (the count is the number of pending requests).
 
 ## Known limits
+While paging, an item that moves to the top of the list (new activity) between page fetches can shift the later pages
+by one, so a single other item may be skipped. Rare; accepted.
+Unit accounting: K is spent newest-first by each item's new `users[]` entries; a user acting twice on one item is two
+units but one entry, so older unhandled items inside a window of 2 poll periods + 2 minutes can still be pushed in that case.
+A baseline is recorded at registration (and by the first poll if that call failed): marker = now - 60 s.
 Each minute the poller starts at a different device of the user (rotation), so a user with several devices uses all of
 their Untappd tokens over time and dead ones are found and deleted.
 Set `MASTER_KEY_CURRENT` (required) whenever you add a `MASTER_KEY_V<n>`.

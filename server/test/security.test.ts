@@ -58,7 +58,8 @@ describe("apns_token takeover (M1)", () => {
 
   it("limits registrations per APNs token to 3/hour across POST and PATCH", async () => {
     const e = testEnv({ REGISTER_LIMIT_PER_HOUR: "100" });
-    for (let i = 0; i < 3; i++) expect((await register(tok("c"), 10 + i, "9.9.9." + i, T0, e)).res.status).toBe(200);
+    // first registration has no holder; the next 3 are cross-uid replacements (counted); the 4th replacement is refused
+    for (let i = 0; i < 4; i++) expect((await register(tok("c"), 10 + i, "9.9.9." + i, T0, e)).res.status).toBe(200);
     expect((await register(tok("c"), 20, "9.9.9.9", T0, e)).res.status).toBe(429);
     // PATCH to the throttled token is refused too
     const mine = await register(tok("d"), 30, "8.8.8.8", T0, e);
@@ -67,6 +68,11 @@ describe("apns_token takeover (M1)", () => {
     // next hour is fine
     expect((await register(tok("c"), 20, "9.9.9.9", T0 + 3_700_000, e)).res.status).toBe(200);
   });
+});
+
+it("same-uid re-registration of a token is never limited", async () => {
+  const e = testEnv({ REGISTER_LIMIT_PER_HOUR: "100" });
+  for (let i = 0; i < 8; i++) expect((await register(tok("5"), 77, "7.7.7." + i, T0, e)).res.status).toBe(200);
 });
 
 describe("decrypt failures (M2)", () => {
@@ -98,6 +104,8 @@ describe("rate limit hygiene (L2)", () => {
     expect(ipPrefix("2001:db8:1:2:aaaa:bbbb:cccc:dddd")).toBe("2001:db8:1:2");
     expect(ipPrefix("2001:0db8:0:0::1")).toBe("2001:db8:0:0");
     expect(ipPrefix("::1")).toBe("0:0:0:0");
+    expect(ipPrefix("::ffff:1.2.3.4")).toBe("1.2.3.4");
+    expect(ipPrefix("0:0:0:0:0:ffff:1.2.3.4")).toBe("1.2.3.4");
   });
   it("same /64 shares one bucket and the stored key is not the IP", async () => {
     const e = testEnv({ REGISTER_LIMIT_PER_HOUR: "2" });

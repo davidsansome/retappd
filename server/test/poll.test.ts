@@ -30,8 +30,9 @@ afterEach(() => vi.unstubAllGlobals());
 describe("polling", () => {
   const T1 = T0 + 60_000;
 
-  it("first poll records a baseline, pushes nothing and does NOT read the notification list", async () => {
+  it("first poll (no baseline yet) records one, pushes nothing and does NOT read the notification list", async () => {
     await register();
+    await env.DB.prepare("UPDATE users SET marker = NULL, friend_marker = NULL").run();
     u.items = [toastItem(1, T0 - 5000)];
     u.counts = { toasts: 1 };
     u.unified = 1;
@@ -40,7 +41,7 @@ describe("polling", () => {
     expect(apns.sent).toEqual([]);
     expect(notifCalls()).toBe(0); // reading it would clear the user's unread badge
     const row = await user();
-    expect(Number(row.marker)).toBe(T1);
+    expect(Number(row.marker)).toBe(T1 - 60_000);
     expect(Number(row.friend_marker)).toBe(T1 - 60_000); // minus clock-skew allowance
   });
 
@@ -132,9 +133,9 @@ describe("polling", () => {
   });
 
   it("pushes friend requests from /v4/user/pending without reading the list", async () => {
-    await register();
     u.pending = [pendingReq(T0 - 1000, 7)];
-    await poll(T1); // baseline: existing request not pushed
+    await register(); // baselined at registration: existing request not pushed
+    await poll(T1);
     u.pending = [pendingReq(T1 + 30_000, 8, "Pat", "Quinn"), pendingReq(T0 - 1000, 7)];
     u.counts = { friends: 2 };
     u.unified = 2;
@@ -191,7 +192,7 @@ describe("polling", () => {
   it("does not page when the first page already reaches back to the marker", async () => {
     await register();
     await poll(T1);
-    u.items = [toastItem(300, T1 + 70_000), ...Array.from({ length: 24 }, (_, i) => toastItem(400 + i, T1 - 1000 - i))];
+    u.items = [toastItem(300, T1 + 70_000), ...Array.from({ length: 24 }, (_, i) => toastItem(400 + i, T0 - 120_000 - i))];
     u.counts = { toasts: 5 }; // overcount
     await poll(T1 + 120_000);
     expect(apns.sent).toHaveLength(1);
@@ -407,6 +408,63 @@ describe("count-based new-item detection", () => {
       expect(minutes[2] - minutes[1]).toBe(3);
       void uid;
     }
+  });
+});
+
+describe("unit accounting and registration baseline", () => {
+  const T1 = T0 + 60_000;
+  const agg = (checkin: number, times: number[]) => {
+    const f = (at: number) => new Date(at).toUTCString().replace("GMT", "+0000");
+    return {
+      checkin_id: checkin,
+      created_at: f(times[0]),
+      notification_type: "toast",
+      count: times.length,
+      users: times.map((at, n) => ({ created_at: f(at), user: { first_name: "U" + n, last_name: "X", user_name: "u" + n } })),
+      meta: { beer: { beer_name: "Late Nights III" } },
+    };
+  };
+
+  it("toasts by A then B on one check-in (K=2, one item) do not drag in an older read item", async () => {
+    await register();
+    await poll(T1);
+    const now = T1 + 120_000;
+    u.items = [agg(1, [now - 5000, now - 20_000]), toastItem(2, T1 + 3000)]; // item 2 was read elsewhere
+    u.counts = { toasts: 2 };
+    await poll(now);
+    expect(apns.sent.map((x) => x.payload.retappd.checkin_id)).toEqual([1]);
+  });
+
+  it("the same user commenting twice (K=2, one entry) does not push an older read item", async () => {
+    await register();
+    await poll(T1);
+    const now = T1 + 600_000;
+    u.items = [item("comment", 1, now - 30_000), toastItem(2, T1 + 100_000)]; // item 2: read elsewhere, older than the window
+    u.counts = { comments: 2 };
+    await poll(now);
+    expect(apns.sent.map((x) => x.payload.retappd.checkin_id)).toEqual([1]);
+  });
+
+  it("k = 0 (read elsewhere between the pending poll and the fetch) pushes nothing but marks items handled", async () => {
+    await register();
+    await poll(T1);
+    u.items = [toastItem(1, T1 + 10_000), toastItem(2, T1 + 20_000)];
+    u.counts = { toasts: 2 };
+    u.zeroOnFetch = true;
+    await poll(T1 + 60_000);
+    expect(apns.sent).toEqual([]);
+    expect(Number((await user()).marker)).toBe(T1 + 20_000);
+  });
+
+  it("registration baselines, so activity before the first scheduled poll is pushed", async () => {
+    u.pending = [pendingReq(T0 - 5000)]; // pre-existing request: not pushed
+    await register();
+    const row = await user();
+    expect(Number(row.marker)).toBe(T0 - 60_000);
+    u.items = [toastItem(1, T0 + 10_000)];
+    u.counts = { toasts: 1, friends: 1 };
+    await poll(T1);
+    expect(apns.sent.map((x) => x.payload.retappd.type)).toEqual(["toast"]);
   });
 });
 

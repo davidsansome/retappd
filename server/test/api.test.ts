@@ -33,7 +33,7 @@ describe("POST /v1/devices", () => {
     expect(JSON.stringify(row)).not.toContain(data.device_secret);
     expect(await decryptToken(env, row)).toBe("good-token-1234");
     expect(JSON.parse(row.prefs).comment).toBe(false);
-    expect((await env.DB.prepare("SELECT * FROM users").first<any>()).marker).toBeNull();
+    expect((await env.DB.prepare("SELECT * FROM users").first<any>()).marker).toBe(String(1_000_000 - 60_000)); // baselined at registration
   });
 
   it("401 when Untappd rejects the token", async () => {

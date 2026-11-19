@@ -59,3 +59,7 @@ re-registers. No data of value is lost.
   after a deletion-sensitive event makes those historical rows unreadable.
 - Responses carrying `device_secret` are `cache-control: no-store`; invocation logs are disabled (device ids appear in
   URLs) and application logs are allowlisted.
+- An overwritten but valid `MASTER_KEY_V<n>` (the wrong key under the same name) is indistinguishable from tampering: rows
+  fail AEAD authentication and are deleted by the poller/rewrap (devices re-register). Never reuse a version number.
+- `uidTag` log hashes are derived from the master key, so log correlation of a user breaks across a master-key rotation.
+- D1 Time Travel note above applies to every deleted row.

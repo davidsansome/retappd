@@ -1,3 +1,6 @@
+import type { Env } from "./env";
+import { keyedHash } from "./crypto";
+
 // Allowlisted structured logging. Never pass tokens, secrets or Untappd content here.
 export function log(event: string, fields: Record<string, string | number | boolean | undefined> = {}) {
   console.log(JSON.stringify({ event, ...fields }));
@@ -8,8 +11,6 @@ export function safeErr(e: unknown): string {
   return e instanceof Error ? e.name : "UnknownError";
 }
 
-import type { Env } from "./env";
-import { keyedHash } from "./crypto";
 
 /** Short keyed hash of a uid for logs (raw uids are never logged). */
 export async function uidTag(env: Env, uid: number): Promise<string> {

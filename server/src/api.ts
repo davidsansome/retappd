@@ -1,6 +1,7 @@
 import { intVar, type DeviceRow, type Env, type Prefs } from "./env";
 import { encryptToken, hashSecret, keyedHash, newDeviceSecret, verifySecret } from "./crypto";
-import { fetchUid, UntappdAuthError } from "./untappd";
+import { fetchUid, pollCounts, UntappdAuthError } from "./untappd";
+import { BASELINE_SKEW_MS } from "./poll";
 import { log, safeErr } from "./log";
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -56,6 +57,8 @@ function vPrefs(v: unknown, base: Prefs): Prefs {
 
 /** Client key for rate limiting: IPv6 collapsed to its /64, then HMACed so raw IPs are never stored. */
 export function ipPrefix(ip: string): string {
+  const mapped = /(?:^|:)ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip); // IPv4-mapped IPv6
+  if (mapped) return mapped[1];
   if (!ip.includes(":")) return ip;
   const [head, tail = ""] = ip.split("::");
   const h = head ? head.split(":") : [];
@@ -86,7 +89,8 @@ const ipLimited = async (env: Env, req: Request, now: number) =>
 /**
  * APNs token takeover rule (M1): a registration (POST, or PATCH changing apns_token) replaces any other row holding
  * the same APNs token, whichever uid owns it (legitimate cases: reinstall, or an account switch where the old
- * DELETE failed). To bound abuse, registrations per APNs token are limited to 3 per hour.
+ * DELETE failed). To bound abuse, only CROSS-UID replacements are limited, to 3 per hour per APNs token. Same-uid
+ * re-registration is unlimited, so nobody can lock a victim out by burning the budget and repeated sign-out/in works.
  */
 const tokenLimited = async (env: Env, apns: string, now: number) =>
   overLimit(env, "tok:" + (await keyedHash(env, "apns", apns)), 3, now);
@@ -132,14 +136,26 @@ async function register(req: Request, env: Env, now: number): Promise<Response> 
   const uid = await verifyOrResponse(token);
   if (uid instanceof Response) return uid;
 
-  if (await tokenLimited(env, apns, now)) return err(429, "rate limited", { "retry-after": "3600" });
+  const { results: holders } = await env.DB.prepare("SELECT DISTINCT uid FROM devices WHERE apns_token = ?").bind(apns).all<{ uid: number }>();
+  if (holders.some((h) => h.uid !== uid) && (await tokenLimited(env, apns, now))) return err(429, "rate limited", { "retry-after": "3600" });
   const id = crypto.randomUUID();
   const secret = newDeviceSecret();
   const sealed = await encryptToken(env, id, uid, token);
   const cap = intVar(env.MAX_DEVICES_PER_UID, 10);
-  const { results: holders } = await env.DB.prepare("SELECT DISTINCT uid FROM devices WHERE apns_token = ?").bind(apns).all<{ uid: number }>();
+  // Baseline at registration (cheap, side-effect free call) so activity before the first poll isn't swallowed.
+  let marker: string | null = null;
+  let friendMarker: string | null = null;
+  if (!(await env.DB.prepare("SELECT 1 FROM users WHERE uid = ?").bind(uid).first())) {
+    try {
+      const p = await pollCounts(token);
+      marker = String(now - BASELINE_SKEW_MS);
+      friendMarker = String(Math.max(now - BASELINE_SKEW_MS, ...p.requests.map((r) => r.at)));
+    } catch {
+      // the first scheduled poll baselines instead
+    }
+  }
   await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO users (uid, created_at) VALUES (?, ?)").bind(uid, now),
+    env.DB.prepare("INSERT OR IGNORE INTO users (uid, created_at, marker, friend_marker) VALUES (?, ?, ?, ?)").bind(uid, now, marker, friendMarker),
     // Re-registration of the same physical device must not leave a duplicate push target.
     env.DB.prepare("DELETE FROM devices WHERE apns_token = ?").bind(apns),
     env.DB.prepare(
@@ -193,8 +209,8 @@ async function patch(req: Request, env: Env, id: string, now: number): Promise<R
   let holders: { uid: number }[] = [];
   const stmts: D1PreparedStatement[] = [];
   if (takeover) {
-    if (await tokenLimited(env, takeover, now)) return err(429, "rate limited", { "retry-after": "3600" });
     holders = (await env.DB.prepare("SELECT DISTINCT uid FROM devices WHERE apns_token = ? AND id != ?").bind(takeover, id).all<{ uid: number }>()).results;
+    if (holders.some((h) => h.uid !== dev.uid) && (await tokenLimited(env, takeover, now))) return err(429, "rate limited", { "retry-after": "3600" });
     stmts.push(env.DB.prepare("DELETE FROM devices WHERE apns_token = ? AND id != ?").bind(takeover, id));
   }
   stmts.push(env.DB.prepare(`UPDATE devices SET ${sets.join(", ")} WHERE id = ?`).bind(...vals, id));

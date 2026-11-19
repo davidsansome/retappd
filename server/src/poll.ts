@@ -33,6 +33,12 @@ interface UserRow {
  * `minute % period == uid % period`, period = POLL_SHARDS (default 1: every minute), times 5 for users
  * unseen for 7 days. Correctness never depends on cadence (new items are found by unread count, not by time).
  */
+/** Effective poll period in minutes: POLL_SHARDS, times 5 for users unseen for 7 days. */
+export function periodMin(env: Env, lastSeen: number, now: number): number {
+  const shards = Math.max(1, parseInt(String(env.POLL_SHARDS ?? "1"), 10) || 1);
+  return (now - lastSeen >= STALE_MS ? STALE_EVERY_MIN : 1) * shards;
+}
+
 export async function dueUsers(env: Env, now: number): Promise<UserRow[]> {
   const { results } = await env.DB.prepare(
     `SELECT u.uid, u.marker, u.marker_keys, u.friend_marker, u.next_poll_at, u.fail_count, MAX(d.last_seen_at) AS last_seen
@@ -43,12 +49,11 @@ export async function dueUsers(env: Env, now: number): Promise<UserRow[]> {
     .bind(now)
     .all<UserRow>();
   const minute = Math.floor(now / 60_000);
-  const shards = Math.max(1, parseInt(String(env.POLL_SHARDS ?? "1"), 10) || 1);
   const due = results.filter((u) => {
-    const period = (now - u.last_seen >= STALE_MS ? STALE_EVERY_MIN : 1) * shards;
+    const period = periodMin(env, u.last_seen, now);
     return u.uid % period === minute % period;
   });
-  if (due.length > WARN_USERS_PER_RUN) log("over_capacity", { due: due.length, shards });
+  if (due.length > WARN_USERS_PER_RUN) log("over_capacity", { due: due.length });
   return due;
 }
 
@@ -89,6 +94,33 @@ async function deleteDevice(env: Env, d: { id: string; uid: number }) {
   await env.DB.prepare("DELETE FROM users WHERE uid = ? AND NOT EXISTS (SELECT 1 FROM devices WHERE uid = ?)").bind(d.uid, d.uid).run();
 }
 
+/** New activity units in an item: its users[] entries after the marker (a repeat by one user is one entry). */
+function units(i: U.NotificationItem, marker: number, seen: Set<string>): number {
+  const key = U.itemKey(i);
+  const n = (i.users ?? []).filter((x) => {
+    const t = Date.parse(x.created_at ?? "") || U.itemTime(i);
+    return t > marker || (t === marker && !seen.has(key));
+  }).length;
+  return Math.max(1, n);
+}
+
+/**
+ * Candidates (oldest first) -> the items to push. Spend K newest-first. The newest item is always eligible;
+ * older ones are vetoed if older than `veto` (a user commenting twice is 2 units but 1 entry, so K can still
+ * overcount; the window only trims such extras, the marker decides what is new). k = 0 pushes nothing.
+ */
+export function selectNew(candidates: U.NotificationItem[], k: number, marker: number, seen: Set<string>, veto: number) {
+  const out: U.NotificationItem[] = [];
+  let remaining = k;
+  for (let idx = candidates.length - 1; idx >= 0 && remaining > 0; idx--) {
+    const i = candidates[idx];
+    if (idx !== candidates.length - 1 && U.itemTime(i) < veto) continue;
+    out.push(i);
+    remaining -= units(i, marker, seen);
+  }
+  return out.reverse();
+}
+
 interface Event {
   at: number;
   type: U.FormattedMessage["type"];
@@ -97,7 +129,7 @@ interface Event {
   body: string;
 }
 
-const FRIEND_SKEW_MS = 60_000; // Untappd vs server clock allowance for the friend baseline
+export const BASELINE_SKEW_MS = 60_000; // Untappd vs server clock allowance for baselines
 
 export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<void> {
   const { now } = deps;
@@ -113,7 +145,8 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
 
   // Rotate which device's token is used each minute so every device's token gets exercised eventually;
   // devices whose token Untappd rejects are dropped.
-  const rot = devices.length ? Math.floor(now / 60_000) % devices.length : 0;
+  const period = periodMin(env, u.last_seen, now);
+  const rot = devices.length ? Math.floor(Math.floor(now / 60_000) / period) % devices.length : 0;
   for (const d of [...devices.slice(rot), ...devices.slice(0, rot)]) {
     if (polled) { live.push(d); continue; }
     let t: string;
@@ -154,9 +187,9 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
   if (baseline) {
     // First poll: record watermarks, push nothing. Existing activity and pending requests count as seen.
     const maxReq = polled.requests.reduce((m, r) => Math.max(m, r.at), 0);
-    upd.marker = String(now);
+    upd.marker = String(now - BASELINE_SKEW_MS);
     upd.marker_keys = null;
-    upd.friend_marker = String(Math.max(now - FRIEND_SKEW_MS, maxReq));
+    upd.friend_marker = String(Math.max(now - BASELINE_SKEW_MS, maxReq));
     log("baseline", { user: await uidTag(env, u.uid) });
   } else {
     const events: Event[] = [];
@@ -166,13 +199,14 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
     if (newReqs.length) upd.friend_marker = String(Math.max(...newReqs.map((r) => r.at)));
 
     if (fetched) {
-      // Each unread unit (toast/comment/other) is at most one item event, so the newest K unhandled items are
-      // the new ones; anything else unhandled was read in another app. No dependence on poll timing.
+      // K = unread units (each toast/comment/other). One item can hold several units (aggregation), so walk
+      // newest-first spending K by each item's new users[] entries. Items beyond K were read elsewhere.
       const k = U.unreadActivity(fetched.counts); // pre-clear counts of the fetch's own envelope
       const marker = Number(u.marker);
       const seen = new Set<string>(u.marker_keys ? JSON.parse(u.marker_keys) : []);
       const candidates = U.newItemsSince(fetched.items, marker, seen, now - MAX_ITEM_AGE_MS);
-      for (const i of candidates.slice(-k)) events.push({ at: U.itemTime(i), ...U.formatMessage(i)! });
+      const veto = now - 2 * periodMin(env, u.last_seen, now) * 60_000 - 120_000;
+      for (const i of selectNew(candidates, k, marker, seen, veto)) events.push({ at: U.itemTime(i), ...U.formatMessage(i)! });
       if (candidates.length) {
         // Everything unhandled is now handled, pushed or not.
         const newest = U.itemTime(candidates[candidates.length - 1]);
@@ -241,7 +275,7 @@ async function fetchAllUnhandled(token: string, u: UserRow, now: number) {
   const items = [...first.items];
   let page = first.items;
   while (
-    U.newItemsSince(items, marker, seen, now - MAX_ITEM_AGE_MS).length < k &&
+    U.newItemsSince(items, marker, seen, now - MAX_ITEM_AGE_MS).reduce((n, i) => n + units(i, marker, seen), 0) < k &&
     page.length >= U.PAGE_SIZE &&
     U.itemTime(page[page.length - 1]) >= marker
   ) {
@@ -268,7 +302,7 @@ export async function dailyCleanup(env: Env, now: number) {
     env.DB.prepare("DELETE FROM users WHERE NOT EXISTS (SELECT 1 FROM devices d WHERE d.uid = users.uid)"),
   ]);
   const r = await rewrapBatch(env);
-  if (r.rewrapped || r.failed) log("rewrap", r);
+  if (r.rewrapped || r.failed || r.deleted) log("rewrap", r);
 }
 
 /** Hourly: drop expired rate-limit windows. */
