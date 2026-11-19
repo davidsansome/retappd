@@ -65,6 +65,8 @@ final class AuthStore {
         Keychain.delete("access_token")
         UserDefaults.standard.removeObject(forKey: "username")
         UntappdAPI.shared.token = nil
+        UntappdAPI.shared.onUnreadCounts = nil
+        CheckInOptions.shared.clearRequests()
         token = nil
         username = nil
         Task {

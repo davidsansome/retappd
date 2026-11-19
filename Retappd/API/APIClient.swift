@@ -52,10 +52,23 @@ final class UntappdAPI: @unchecked Sendable {
     /// Called (on any thread) when the server rejects our token.
     var onUnauthorized: (@Sendable () -> Void)?
 
+    private var _onUnreadCounts: (@Sendable (UnreadCounts, Int) -> Void)?
+    private var sequence = 0
+
     /// Called (on any thread) with the unread counts in each successful response's envelope,
     /// except `GET /v4/notifications`, whose own envelope still shows the counts from before it
-    /// cleared them.
-    var onUnreadCounts: (@Sendable (UnreadCounts) -> Void)?
+    /// cleared them. The second argument is the number `currentSequence` had when that request
+    /// *started*: responses finish out of order, so a receiver uses it to drop counts that were
+    /// already old when something (opening the Notifications screen) cleared them. Set to nil at
+    /// sign-out.
+    var onUnreadCounts: (@Sendable (UnreadCounts, Int) -> Void)? {
+        get { lock.withLock { _onUnreadCounts } }
+        set { lock.withLock { _onUnreadCounts = newValue } }
+    }
+
+    /// How many requests have started so far; each takes the next number as it starts.
+    var currentSequence: Int { lock.withLock { sequence } }
+    private func nextSequence() -> Int { lock.withLock { sequence += 1; return sequence } }
 
     let session: URLSession = {
         let c = URLSessionConfiguration.default
@@ -101,6 +114,7 @@ final class UntappdAPI: @unchecked Sendable {
 
     /// Fetches raw bytes and validates the envelope. Only valid responses are returned (and so cached).
     func data(_ r: APIRequest) async throws -> Data {
+        let started = nextSequence()
         let (data, resp) = try await session.data(for: urlRequest(r))
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let envelope = try? JSONDecoder().decode(Envelope<Ignored>.self, from: data)
@@ -113,7 +127,7 @@ final class UntappdAPI: @unchecked Sendable {
             throw APIError.server(code: meta.code, detail: meta.errorDetail)
         }
         guard (200..<300).contains(status) else { throw APIError.http(status) }
-        if let counts = envelope?.notifications, r.path != "/v4/notifications" { onUnreadCounts?(counts) }
+        if let counts = envelope?.notifications, r.path != "/v4/notifications" { onUnreadCounts?(counts, started) }
         return data
     }
 

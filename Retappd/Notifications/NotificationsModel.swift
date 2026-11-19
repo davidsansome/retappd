@@ -37,26 +37,31 @@ final class NotificationsModel {
         self.fetch = fetch
     }
 
-    /// Loads the newest page, replacing what's shown. Keeps the old list if it fails.
-    func refresh() async {
-        guard !isLoading else { return }
+    /// Loads the newest page, replacing what's shown. Keeps the old list if it fails. Returns
+    /// whether the list is now fresh from the server.
+    @discardableResult
+    func refresh() async -> Bool {
+        guard !isLoading else { return false }
         isLoading = true
         generation += 1
         let mine = generation
         defer { if mine == generation { isLoading = false } }
         do {
             let page = try await fetch(0, Self.pageSize)
-            guard mine == generation else { return }
+            guard mine == generation else { return false }
             items = Self.unique(page.items)
             loadedRaw = page.rawCount
             reachedEnd = !page.hasMore
             hasLoaded = true
             error = nil
             moreError = nil
+            return true
         } catch is CancellationError {
+            return false
         } catch {
-            guard mine == generation else { return }
+            guard mine == generation else { return false }
             if (error as? URLError)?.code != .cancelled { self.error = error.localizedDescription }
+            return false
         }
     }
 

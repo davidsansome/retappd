@@ -18,7 +18,7 @@ final class NotificationTextTests: XCTestCase {
         XCTAssertEqual(item(.comment).sentence, "Jamie S commented on your Late Nights III")
         XCTAssertEqual(item(.comment, own: false).sentence, "Jamie S commented on Late Nights III")
         XCTAssertEqual(item(.tagged, own: false).sentence, "Jamie S tagged you in Late Nights III")
-        XCTAssertEqual(item(.mentioned, own: false).sentence, "Jamie S mentioned you on Late Nights III")
+        XCTAssertEqual(item(.mentioned, own: false).sentence, "Jamie S mentioned you in a comment on Late Nights III")
         XCTAssertEqual(item(.other("promo")).sentence, "Jamie S sent you a notification about Late Nights III")
     }
 
@@ -31,7 +31,12 @@ final class NotificationTextTests: XCTestCase {
     }
 
     func testMissingBeerName() {
-        XCTAssertEqual(item(.toast, beer: nil).sentence, "Jamie S toasted your a beer")
+        XCTAssertEqual(item(.toast, beer: nil).sentence, "Jamie S toasted your check-in")
+        XCTAssertEqual(item(.comment, beer: nil).sentence, "Jamie S commented on your check-in")
+        XCTAssertEqual(item(.comment, own: false, beer: nil).sentence, "Jamie S commented on a check-in")
+        XCTAssertEqual(item(.tagged, own: false, beer: nil).sentence, "Jamie S tagged you in a check-in")
+        XCTAssertEqual(item(.mentioned, own: false, beer: nil).sentence, "Jamie S mentioned you in a comment")
+        XCTAssertEqual(item(.other("promo"), beer: nil).sentence, "Jamie S sent you a notification")
     }
 
     func testKindsFromRawTypes() {
@@ -97,8 +102,9 @@ final class NotificationUnreadTests: XCTestCase {
         return d
     }
     private func unread(_ d: UserDefaults, username: String = "me", badge: Int = 0) -> NotificationUnread {
-        NotificationUnread(username: username, defaults: d, loadRequests: { [] }, readIconBadge: { badge }, clearIconBadge: {})
+        NotificationUnread(username: username, defaults: d, loadRequests: { [] }, sequence: { self.seq }, readIconBadge: { badge }, clearIconBadge: {})
     }
+    private var seq = 0
     private func request(_ id: Int, at: Date?) -> Friend { Friend(user: user(id, "A", "B"), createdAt: at) }
 
     func testNewerThanLastSeenIsNew() {
@@ -115,7 +121,7 @@ final class NotificationUnreadTests: XCTestCase {
         let d = defaults()
         var u = unread(d)
         XCTAssertFalse(u.hasUnread)
-        u.ingest(UnreadCounts(comments: 1, toasts: 1, friends: 5, others: 0))
+        u.ingest(UnreadCounts(comments: 1, toasts: 1, friends: 5, others: 0), startedAt: 1)
         XCTAssertEqual(u.count, 2)  // friends come from the pending list, not the envelope
         XCTAssertTrue(u.hasUnread)
 
@@ -132,7 +138,7 @@ final class NotificationUnreadTests: XCTestCase {
 
     func testMarkSeenClearsEverythingAndKeepsSeenRequestsQuiet() {
         let u = unread(defaults())
-        u.ingest(UnreadCounts(comments: 2))
+        u.ingest(UnreadCounts(comments: 2), startedAt: 1)
         u.setRequests([request(1, at: Date(timeIntervalSince1970: 100))])
         u.markSeen(newest: Date(timeIntervalSince1970: 500))
         XCTAssertFalse(u.hasUnread)
@@ -152,9 +158,40 @@ final class NotificationUnreadTests: XCTestCase {
         XCTAssertNil(unread(d, username: "bob").lastSeen)
     }
 
+    func testStaleCountsAreDropped() {
+        let u = unread(defaults())
+        // Requests 1 and 2 started; the list was read after both (sequence 2) and marked seen.
+        seq = 2
+        u.markSeen(newest: nil)
+        // Request 2 finishes late with the counts from before the clear: dropped.
+        u.ingest(UnreadCounts(toasts: 3), startedAt: 2)
+        XCTAssertFalse(u.hasUnread)
+        // A request that started after the clear is believed.
+        u.ingest(UnreadCounts(toasts: 1), startedAt: 3)
+        XCTAssertEqual(u.activity, 1)
+        // A slower, older one finishing after it doesn't overwrite it.
+        u.ingest(UnreadCounts(toasts: 0), startedAt: 2)
+        u.ingest(UnreadCounts(toasts: 0), startedAt: 3)
+        XCTAssertEqual(u.activity, 1)
+        u.ingest(UnreadCounts(toasts: 0), startedAt: 4)
+        XCTAssertEqual(u.activity, 0)
+    }
+
+    func testFailedRequestLoadKeepsWhatWeHad() async {
+        var fail = false
+        let u = NotificationUnread(username: "me", defaults: defaults(),
+                                   loadRequests: { if fail { throw APIError.http(500) }; return [Friend(user: user(1, "A", "B"))] },
+                                   sequence: { 0 }, readIconBadge: { 0 }, clearIconBadge: {})
+        await u.refresh()
+        XCTAssertEqual(u.requests.count, 1)
+        fail = true
+        await u.refresh()
+        XCTAssertEqual(u.requests.count, 1)
+    }
+
     func testMarkSeenClearsIconBadge() async {
         var cleared = 0
-        let u = NotificationUnread(username: "me", defaults: defaults(), loadRequests: { [] },
+        let u = NotificationUnread(username: "me", defaults: defaults(), loadRequests: { [] }, sequence: { 0 },
                                    readIconBadge: { 4 }, clearIconBadge: { cleared += 1 })
         await u.refresh()
         XCTAssertTrue(u.hasUnread)
@@ -259,12 +296,14 @@ final class NotificationsModelTests: XCTestCase {
     func testRefreshReplacesAndFailureKeepsTheList() async {
         let s = Server(total: 10)
         let m = model(s)
-        await m.refresh()
+        let first = await m.refresh()
+        XCTAssertTrue(first)
         s.total = 3
         await m.refresh()
         XCTAssertEqual(m.items.count, 3)
         s.failNext = true
-        await m.refresh()
+        let ok = await m.refresh()
+        XCTAssertFalse(ok)  // so the screen doesn't mark anything seen
         XCTAssertEqual(m.items.count, 3)
         XCTAssertNotNil(m.error)
     }

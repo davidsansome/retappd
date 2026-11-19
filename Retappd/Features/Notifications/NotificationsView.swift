@@ -15,6 +15,7 @@ struct NotificationsView: View {
     @State private var model = NotificationsModel()
     /// What had been seen when the screen opened, so what's new stays marked while it's open.
     @State private var seenOnOpen: Date?
+    @State private var didOpen = false
     @State private var opening: Int?
     @State private var openFailed = false
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -32,7 +33,8 @@ struct NotificationsView: View {
                         .taproomRowDivider()
                 }
                 ForEach(model.items) { item in
-                    NotificationRow(item: item, isNew: item.isNew(since: seenOnOpen), compactLayout: typeSize.isAccessibilitySize) {
+                    NotificationRow(item: item, isNew: item.isNew(since: seenOnOpen), isOpening: opening == item.checkinID,
+                                    compactLayout: typeSize.isAccessibilitySize) {
                         open(item)
                     }
                     .taproomRowDivider()
@@ -49,8 +51,13 @@ struct NotificationsView: View {
         .toolbarBackground(Taproom.background, for: .navigationBar)
         .refreshable { await load() }
         .task {
-            seenOnOpen = unread.lastSeen
-            await load()
+            // Runs again when you come back from a check-in; only the first time takes the
+            // "what was new" baseline and loads, so the highlights and scroll position stay.
+            if !didOpen {
+                didOpen = true
+                seenOnOpen = unread.lastSeen
+            }
+            if !model.hasLoaded { await load() }
         }
         .alert("Couldn't open the check-in", isPresented: $openFailed) {
             Button("OK") {}
@@ -60,10 +67,11 @@ struct NotificationsView: View {
     }
 
     private func load() async {
-        async let list: () = model.refresh()
+        async let list = model.refresh()
         async let requests: () = unread.refresh()
-        _ = await (list, requests)
-        guard model.hasLoaded else { return }
+        let (loaded, _) = await (list, requests)
+        // A failed refresh may still be showing an old list: nothing new was seen.
+        guard loaded else { return }
         unread.markSeen(newest: model.newest)
     }
 
@@ -103,6 +111,7 @@ struct NotificationsView: View {
 private struct NotificationRow: View {
     let item: NotificationItem
     let isNew: Bool
+    let isOpening: Bool
     let compactLayout: Bool
     let action: () -> Void
 
@@ -122,13 +131,16 @@ private struct NotificationRow: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if !compactLayout {
+                if isOpening {
+                    ProgressView().frame(width: 44, height: 44)
+                } else if !compactLayout {
                     BeerLabel(beer: item.beerLabel, brewery: nil, size: 44, cornerRadius: 8)
                 }
             }
             .padding(.vertical, 10)
             .frame(minHeight: 64)
             .background(isNew ? Taproom.amber.opacity(0.14) : Color.clear)
+            .opacity(isOpening ? 0.6 : 1)
         }
         .buttonStyle(TaproomRowStyle())
         .accessibilityElement(children: .ignore)

@@ -25,16 +25,21 @@ final class NotificationUnread {
     private(set) var iconBadge = 0
 
     @ObservationIgnored private let defaults: UserDefaults
-    @ObservationIgnored private let loadRequests: @MainActor () async -> [Friend]
+    @ObservationIgnored private let loadRequests: @MainActor () async throws -> [Friend]
+    @ObservationIgnored private let sequence: @MainActor () -> Int
+    /// Counts from requests that started at or before this are older than the last `markSeen`.
+    private var clearedAt = 0
+    /// The newest request whose counts have been applied.
+    private var appliedAt = 0
     @ObservationIgnored private let readIconBadge: @MainActor () -> Int
     @ObservationIgnored private let clearIconBadge: @MainActor () async -> Void
 
     init(username: String,
          defaults: UserDefaults = .standard,
-         loadRequests: @escaping @MainActor () async -> [Friend] = {
-             await CheckInOptions.shared.loadRequests()
-             return CheckInOptions.shared.requests
+         loadRequests: @escaping @MainActor () async throws -> [Friend] = {
+             try await UntappdAPI.shared.fetch(.pendingFriendRequests, as: PendingRequestList.self).requests
          },
+         sequence: @escaping @MainActor () -> Int = { UntappdAPI.shared.currentSequence },
          // There's no non-deprecated way to read the badge (`setBadgeCount` only writes it).
          readIconBadge: @escaping @MainActor () -> Int = { UIApplication.shared.applicationIconBadgeNumber },
          clearIconBadge: @escaping @MainActor () async -> Void = {
@@ -43,6 +48,7 @@ final class NotificationUnread {
         self.username = username
         self.defaults = defaults
         self.loadRequests = loadRequests
+        self.sequence = sequence
         self.readIconBadge = readIconBadge
         self.clearIconBadge = clearIconBadge
         let stored = defaults.double(forKey: Self.key(username))
@@ -63,8 +69,12 @@ final class NotificationUnread {
     var count: Int { activity + unseenRequests }
     var hasUnread: Bool { count > 0 || iconBadge > 0 }
 
-    /// Takes the counts from an API response's envelope.
-    func ingest(_ counts: UnreadCounts) {
+    /// Takes the counts from an API response's envelope. `startedAt` is the sequence number its
+    /// request started with: counts from a request that started before the last `markSeen` (the
+    /// server has cleared them since) or before one already applied are stale and dropped.
+    func ingest(_ counts: UnreadCounts, startedAt: Int) {
+        guard startedAt > clearedAt, startedAt > appliedAt else { return }
+        appliedAt = startedAt
         activity = counts.activity
     }
 
@@ -73,9 +83,10 @@ final class NotificationUnread {
     /// Re-reads what's cheap to read: the icon badge and the pending friend requests (a small
     /// call whose envelope also carries the unread counts). Called when the app comes to the
     /// foreground and when the feed refreshes.
+    /// A failed load keeps the requests as they were.
     func refresh() async {
         iconBadge = readIconBadge()
-        requests = await loadRequests()
+        if let list = try? await loadRequests() { requests = list }
         iconBadge = readIconBadge()
     }
 
@@ -87,6 +98,7 @@ final class NotificationUnread {
             defaults.set(latest.timeIntervalSince1970, forKey: Self.key(username))
         }
         activity = 0
+        clearedAt = sequence()
         iconBadge = 0
         Task { await clearIconBadge() }
     }

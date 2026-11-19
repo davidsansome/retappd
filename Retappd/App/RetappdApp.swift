@@ -114,7 +114,7 @@ struct RootTabs: View {
         .task {
             // Every response's envelope says how much is unread; the bell listens.
             let unread = unread
-            UntappdAPI.shared.onUnreadCounts = { counts in Task { @MainActor in unread.ingest(counts) } }
+            UntappdAPI.shared.onUnreadCounts = { counts, seq in Task { @MainActor in unread.ingest(counts, startedAt: seq) } }
         }
         .task { await NotificationService.shared.appBecameActive() }
         .onChange(of: router.pending, initial: true) { _, route in

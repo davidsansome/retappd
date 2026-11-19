@@ -133,6 +133,15 @@ final class CheckInOptions {
         requests = visibleRequests(list)
     }
 
+    /// Forgets the incoming requests (at sign-out, so the next account never sees the last one's)
+    /// and abandons any load still in flight.
+    func clearRequests() {
+        requestsGeneration += 1
+        requests = []
+        answeringIDs = []
+        answeredIDs = [:]
+    }
+
     private func visibleRequests(_ list: [Friend]) -> [Friend] {
         var seen = hiddenRequestIDs
         return list.filter { seen.insert($0.id).inserted }

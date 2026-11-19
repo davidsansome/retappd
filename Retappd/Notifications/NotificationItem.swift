@@ -98,13 +98,19 @@ struct NotificationItem: Decodable, Identifiable, Hashable {
 
     /// What they did, ending with the beer: "toasted your Late Nights III".
     var action: String {
-        let beer = beerName ?? "a beer"
+        let beer = beerName
         switch kind {
-        case .toast: return "toasted your \(beer)"
-        case .comment: return isOwnCheckin ? "commented on your \(beer)" : "commented on \(beer)"
-        case .tagged: return "tagged you in \(beer)"
-        case .mentioned: return "mentioned you on \(beer)"
-        case .other: return "sent you a notification about \(beer)"
+        case .toast:
+            return beer.map { "toasted your \($0)" } ?? "toasted your check-in"
+        case .comment:
+            if isOwnCheckin { return beer.map { "commented on your \($0)" } ?? "commented on your check-in" }
+            return beer.map { "commented on \($0)" } ?? "commented on a check-in"
+        case .tagged:
+            return beer.map { "tagged you in \($0)" } ?? "tagged you in a check-in"
+        case .mentioned:
+            return beer.map { "mentioned you in a comment on \($0)" } ?? "mentioned you in a comment"
+        case .other:
+            return beer.map { "sent you a notification about \($0)" } ?? "sent you a notification"
         }
     }
 
