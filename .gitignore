@@ -4,3 +4,7 @@ DerivedData/
 .DS_Store
 xcuserdata/
 test-accounts.local
+
+server/node_modules/
+server/.dev.vars
+server/.wrangler/

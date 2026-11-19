@@ -1,0 +1,29 @@
+{
+  "name": "retappd-notify",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "triggers": {
+    // Every minute: poll Untappd. Daily 03:17 UTC: cleanup + key rewrap.
+    "crons": ["* * * * *", "17 3 * * *"]
+  },
+  "vars": {
+    "APNS_TOPIC": "com.davidsansome.retappd",
+    "APNS_KEY_ID": "898X3U57H6",
+    "APNS_TEAM_ID": "7B2GP77Y4A",
+    "MASTER_KEY_CURRENT": "1",
+    "MAX_DEVICES_PER_UID": "10",
+    "REGISTER_LIMIT_PER_HOUR": "10"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "retappd-notify",
+      // Replace with the id printed by `wrangler d1 create retappd-notify` (see README).
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+  // Secrets (never in this file): MASTER_KEY_V1, APNS_KEY_P8
+}
