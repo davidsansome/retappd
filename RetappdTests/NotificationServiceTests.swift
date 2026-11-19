@@ -306,5 +306,8 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertNil(route("toast"), "check-in types need an id")
         XCTAssertNil(route("mystery", id: 1))
         XCTAssertNil(NotificationRoute(userInfo: ["aps": [:]]))
+        // A "N more notifications" summary carries no `retappd` key: the tap just opens the app.
+        XCTAssertNil(NotificationRoute(userInfo: ["aps": ["alert": ["body": "3 more notifications"], "badge": 5]]))
+        XCTAssertNil(NotificationRoute(userInfo: ["retappd": "oops"]))
     }
 }

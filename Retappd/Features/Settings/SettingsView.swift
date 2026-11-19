@@ -147,6 +147,7 @@ struct SettingsView: View {
                 .buttonStyle(TaproomOutlineButton())
             }
             caption("Get a notification when someone toasts, comments on or tags you in a check-in, or sends a friend request. To check for activity while the app is closed, turning this on stores an encrypted copy of your Untappd sign-in on Retappd's notification server. Turning it off, or signing out, deletes it.")
+            caption("Retappd's server checks your Untappd activity about once a minute. When it sends you a notification, Untappd marks your notifications as read, so they won't show as unread in other apps, including the official Untappd app.")
         }
     }
 
