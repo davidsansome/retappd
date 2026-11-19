@@ -58,3 +58,9 @@ online, then forgets them.
 }
 Tapping: checkin types open that check-in (fetch via GET /v4/checkin/view/{id} if needed);
 friend_request opens Me > Friends (the Requests section).
+
+## Addendum (server behaviour)
+- `friend_request` pushes use `"thread-id": "friends"` and no `checkin_id`.
+- When more than 5 pushes are due in one poll, the oldest collapse into one push with body "N more notifications",
+  `badge` set, and no `retappd` key (tapping just opens the app).
+- Delivering a push marks the user's Untappd notifications read (reading the feed is the only way to see it).

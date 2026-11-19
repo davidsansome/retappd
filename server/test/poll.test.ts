@@ -41,7 +41,7 @@ describe("polling", () => {
     expect(notifCalls()).toBe(0); // reading it would clear the user's unread badge
     const row = await user();
     expect(Number(row.marker)).toBe(T1);
-    expect(Number(row.friend_marker)).toBe(T1);
+    expect(Number(row.friend_marker)).toBe(T1 - 60_000); // minus clock-skew allowance
   });
 
   it("idle polls (nothing unread) fetch nothing and write nothing", async () => {
@@ -85,7 +85,7 @@ describe("polling", () => {
       item("promo", 6, t + 4000),
       item("toast", 7, t, "Cy", "Dee", null),
     ];
-    u.counts = { comments: 1, toasts: 1, others: 1 };
+    u.counts = { comments: 1, toasts: 1, others: 2 };
     await poll(T1 + 120_000);
     expect(apns.sent.map((s) => [s.payload.retappd.type, s.payload.aps.alert.body])).toEqual([
       ["toast", "Cy D toasted your check-in"],
@@ -282,6 +282,100 @@ describe("polling", () => {
     // active device: every minute
     expect((await dueUsers(env, T0 + 60_000)).length).toBe(1);
     expect((await dueUsers(env, T0 + 120_000)).length).toBe(1);
+  });
+});
+
+describe("count-based new-item detection", () => {
+  const T1 = T0 + 60_000;
+  const pushed = () => apns.sent.map((x) => x.payload.retappd.checkin_id);
+
+  it("read elsewhere then new activity within one interval: only the new one is pushed", async () => {
+    await register();
+    await poll(T1);
+    // X arrived and was read in another app (counts back to 0), then Y arrived: counter says 1 unread.
+    u.items = [toastItem(2, T1 + 50_000), toastItem(1, T1 + 10_000)];
+    u.counts = { toasts: 1 };
+    await poll(T1 + 60_000);
+    expect(pushed()).toEqual([2]);
+    expect(Number((await user()).marker)).toBe(T1 + 50_000); // X is marked handled too
+  });
+
+  it("two items in the same second across polls are both pushed exactly once", async () => {
+    await register();
+    await poll(T1);
+    const t = T1 + 30_000;
+    u.items = [toastItem(10, t)];
+    u.counts = { toasts: 1 };
+    await poll(T1 + 60_000);
+    u.items = [toastItem(11, t), toastItem(10, t)];
+    u.counts = { toasts: 1 };
+    await poll(T1 + 120_000);
+    u.counts = { toasts: 1 }; // counter noise: nothing new in the list
+    await poll(T1 + 180_000);
+    expect(pushed()).toEqual([10, 11]);
+  });
+
+  it("friend request withdrawn and re-sent pushes again", async () => {
+    await register();
+    await poll(T1);
+    u.pending = [pendingReq(T1 + 10_000)];
+    u.counts = { friends: 1 };
+    await poll(T1 + 60_000);
+    u.pending = [];
+    u.counts = {};
+    await poll(T1 + 120_000);
+    u.pending = [pendingReq(T1 + 130_000)];
+    u.counts = { friends: 1 };
+    await poll(T1 + 180_000);
+    expect(apns.sent).toHaveLength(2);
+  });
+
+  it("a re-toast counter rise with only stale unhandled items is bounded by the 24h cap", async () => {
+    await register();
+    await poll(T1);
+    u.items = [toastItem(20, T1 + 600_000)]; // read elsewhere long ago
+    u.counts = { toasts: 1 }; // overcount from a re-toast without a list item
+    await poll(T1 + 3 * 86_400_000);
+    expect(apns.sent).toEqual([]);
+  });
+
+  it("a long backoff (beyond the 1h cap) loses nothing on recovery", async () => {
+    await register();
+    await poll(T1);
+    await env.DB.prepare("UPDATE users SET fail_count = 20, next_poll_at = ?").bind(T1 + 3_600_000).run();
+    const later = T1 + 5 * 3_600_000;
+    u.items = [toastItem(30, later - 3 * 3_600_000)]; // arrived 3 hours before recovery
+    u.counts = { toasts: 1 };
+    await poll(later);
+    expect(pushed()).toEqual([30]);
+    expect((await user()).fail_count).toBe(0);
+  });
+
+  it("stale users polled irregularly (skipped cron minutes) still get old unread items", async () => {
+    await register();
+    await poll(T1);
+    const later = Math.ceil((T0 + 8 * 86_400_000) / 300_000) * 300_000 + (42 % 5) * 60_000; // uid 42's slot
+    expect((await dueUsers(env, later)).length).toBe(1);
+    u.items = [toastItem(40, later - 25 * 60_000)];
+    u.counts = { toasts: 1 };
+    await poll(later);
+    expect(pushed()).toEqual([40]);
+  });
+
+  it("sharding keeps a stable schedule: each user once per POLL_SHARDS minutes, never flipping", async () => {
+    for (let uid = 1; uid <= 7; uid++) await register("good-token-" + uid + "xx", String(uid).repeat(64), undefined, T0, uid);
+    const sharded = testEnv({ POLL_SHARDS: "3" });
+    const m0 = Math.floor(T0 / 60_000) * 60_000 + 60_000;
+    const counts = new Map<number, number[]>();
+    for (let i = 0; i < 9; i++)
+      for (const x of await dueUsers(sharded, m0 + i * 60_000)) counts.set(x.uid, [...(counts.get(x.uid) ?? []), i]);
+    expect(counts.size).toBe(7);
+    for (const [uid, minutes] of counts) {
+      expect(minutes).toHaveLength(3);
+      expect(minutes[1] - minutes[0]).toBe(3);
+      expect(minutes[2] - minutes[1]).toBe(3);
+      void uid;
+    }
   });
 });
 

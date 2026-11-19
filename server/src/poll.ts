@@ -5,7 +5,8 @@ import * as U from "./untappd";
 import { log, safeErr } from "./log";
 
 const CONCURRENCY = 25;
-const MAX_USERS_PER_RUN = 500; // keeps subrequests well under limits; above this, users are sharded across minutes
+const WARN_USERS_PER_RUN = 500; // above this, raise POLL_SHARDS (see README)
+const MAX_ITEM_AGE_MS = 24 * 3_600_000; // safety cap for the re-toast overcount case
 const STALE_MS = 7 * 86_400_000;
 const STALE_EVERY_MIN = 5;
 const BACKOFF_BASE_S = 60;
@@ -19,16 +20,21 @@ export interface PollDeps {
 interface UserRow {
   uid: number;
   marker: string | null;
+  marker_keys: string | null;
   friend_marker: string | null;
   next_poll_at: number | null;
   fail_count: number;
   last_seen: number;
 }
 
-/** Users with >=1 device whose turn it is. No writes. */
+/**
+ * Users with >=1 device whose turn it is. No writes. Schedule is stable per user: a user is polled when
+ * `minute % period == uid % period`, period = POLL_SHARDS (default 1: every minute), times 5 for users
+ * unseen for 7 days. Correctness never depends on cadence (new items are found by unread count, not by time).
+ */
 export async function dueUsers(env: Env, now: number): Promise<UserRow[]> {
   const { results } = await env.DB.prepare(
-    `SELECT u.uid, u.marker, u.friend_marker, u.next_poll_at, u.fail_count, MAX(d.last_seen_at) AS last_seen
+    `SELECT u.uid, u.marker, u.marker_keys, u.friend_marker, u.next_poll_at, u.fail_count, MAX(d.last_seen_at) AS last_seen
      FROM users u JOIN devices d ON d.uid = u.uid
      WHERE u.next_poll_at IS NULL OR u.next_poll_at <= ?
      GROUP BY u.uid ORDER BY u.uid`,
@@ -36,13 +42,12 @@ export async function dueUsers(env: Env, now: number): Promise<UserRow[]> {
     .bind(now)
     .all<UserRow>();
   const minute = Math.floor(now / 60_000);
-  // Stale users (no heartbeat for 7 days) are polled every 5 min, staggered by uid; stateless.
-  let due = results.filter((u) => now - u.last_seen < STALE_MS || u.uid % STALE_EVERY_MIN === minute % STALE_EVERY_MIN);
-  if (due.length > MAX_USERS_PER_RUN) {
-    const shards = Math.ceil(due.length / MAX_USERS_PER_RUN);
-    log("sharding", { due: due.length, shards });
-    due = due.filter((u) => u.uid % shards === minute % shards);
-  }
+  const shards = Math.max(1, parseInt(String(env.POLL_SHARDS ?? "1"), 10) || 1);
+  const due = results.filter((u) => {
+    const period = (now - u.last_seen >= STALE_MS ? STALE_EVERY_MIN : 1) * shards;
+    return u.uid % period === minute % period;
+  });
+  if (due.length > WARN_USERS_PER_RUN) log("over_capacity", { due: due.length, shards });
   return due;
 }
 
@@ -90,7 +95,7 @@ interface Event {
 }
 
 const MAX_PUSHES = 5; // per device per poll; beyond that the oldest collapse into one summary
-const LOOKBACK_MS = 90_000; // poll interval slack, see below
+const FRIEND_SKEW_MS = 60_000; // Untappd vs server clock allowance for the friend baseline
 
 export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<void> {
   const { now } = deps;
@@ -101,8 +106,7 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
   let polled: Awaited<ReturnType<typeof U.pollCounts>> | null = null;
   let fetched: Awaited<ReturnType<typeof U.fetchNotifications>> | null = null;
   const live: DeviceRow[] = [];
-  const stale = now - u.last_seen >= STALE_MS;
-  // Never fetch the list on the baseline poll: reading it clears the user's unread counts.
+    // Never fetch the list on the baseline poll: reading it clears the user's unread counts.
   const baseline = u.marker === null || u.friend_marker === null;
 
   // Use the most-recently-seen device's token; drop devices whose token Untappd rejects.
@@ -143,8 +147,9 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
   if (baseline) {
     // First poll: record watermarks, push nothing. Existing activity and pending requests count as seen.
     const maxReq = polled.requests.reduce((m, r) => Math.max(m, r.at), 0);
-    upd.marker = String(Math.max(now, Number(u.marker ?? 0)));
-    upd.friend_marker = String(Math.max(now, maxReq));
+    upd.marker = String(now);
+    upd.marker_keys = null;
+    upd.friend_marker = String(Math.max(now - FRIEND_SKEW_MS, maxReq));
     log("baseline", { uid: u.uid });
   } else {
     const events: Event[] = [];
@@ -154,19 +159,20 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
     if (newReqs.length) upd.friend_marker = String(Math.max(...newReqs.map((r) => r.at)));
 
     if (fetched) {
-      // Threshold = max(watermark, previous poll time). We don't store poll times (no write per idle poll),
-      // but polls run every minute (5 for stale users), so "previous poll" ~ now - cadence. That keeps items
-      // that were read in another app between polls (counts back to 0, watermark untouched) from being
-      // pushed late. After errors the previous successful poll was further back, so widen by the backoff.
-      const cadence = (stale ? STALE_EVERY_MIN : 1) * 60_000;
-      const gap = u.fail_count > 0 ? Math.min(BACKOFF_BASE_S * 2 ** u.fail_count, BACKOFF_MAX_S) * 1000 : 0;
-      const threshold = Math.max(Number(u.marker), now - cadence - LOOKBACK_MS - gap);
-      const items = U.newItemsSince(fetched.items, threshold);
-      for (const i of items) {
-        const m = U.formatMessage(i)!;
-        events.push({ at: U.itemTime(i), ...m });
+      // Each unread unit (toast/comment/other) is at most one item event, so the newest K unhandled items are
+      // the new ones; anything else unhandled was read in another app. No dependence on poll timing.
+      const k = U.unreadActivity(fetched.counts); // pre-clear counts of the fetch's own envelope
+      const marker = Number(u.marker);
+      const seen = new Set<string>(u.marker_keys ? JSON.parse(u.marker_keys) : []);
+      const candidates = U.newItemsSince(fetched.items, marker, seen, now - MAX_ITEM_AGE_MS);
+      for (const i of candidates.slice(-k)) events.push({ at: U.itemTime(i), ...U.formatMessage(i)! });
+      if (candidates.length) {
+        // Everything unhandled is now handled, pushed or not.
+        const newest = U.itemTime(candidates[candidates.length - 1]);
+        const keys = candidates.filter((i) => U.itemTime(i) === newest).map(U.itemKey);
+        upd.marker = String(newest);
+        upd.marker_keys = JSON.stringify(newest === marker ? [...seen, ...keys] : keys);
       }
-      if (items.length) upd.marker = String(Math.max(...items.map(U.itemTime)));
     }
     if (events.length) {
       events.sort((a, b) => a.at - b.at);

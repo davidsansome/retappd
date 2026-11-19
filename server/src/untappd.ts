@@ -131,13 +131,19 @@ export async function fetchNotifications(token: string): Promise<{ items: Notifi
 
 export const itemTime = (i: NotificationItem) => Date.parse(i.created_at) || 0;
 
+export const itemKey = (i: NotificationItem) => `${i.notification_type}:${i.checkin_id}`;
+
 /**
- * Items are keyed by (notification_type, checkin_id) and item.created_at moves forward on new activity,
- * so "new" = created_at strictly after the threshold. Unknown types (promo) are dropped. Oldest first.
+ * Items are keyed by (notification_type, checkin_id) and item.created_at moves forward on new activity, so an
+ * item is unhandled if created_at is after the marker, or equal to it and its key wasn't already pushed at
+ * that exact time (`seenAtMarker`). Items older than `minTime` and unknown types (promo) are dropped. Oldest first.
  */
-export function newItemsSince(items: NotificationItem[], threshold: number): NotificationItem[] {
+export function newItemsSince(items: NotificationItem[], marker: number, seenAtMarker: Set<string>, minTime = 0): NotificationItem[] {
   return items
-    .filter((i) => itemTime(i) > threshold && classify(i.notification_type) !== null)
+    .filter((i) => {
+      const t = itemTime(i);
+      return (t > marker || (t === marker && !seenAtMarker.has(itemKey(i)))) && t >= minTime && classify(i.notification_type) !== null;
+    })
     .sort((a, b) => itemTime(a) - itemTime(b));
 }
 

@@ -10,6 +10,7 @@ export interface Env {
   APNS_TOPIC: string;
   MAX_DEVICES_PER_UID?: string;
   REGISTER_LIMIT_PER_HOUR?: string;
+  POLL_SHARDS?: string; // spread users over N minutes; raise when >500 users are due per minute
   // MASTER_KEY_V2, V3... are read dynamically by crypto.ts
   [k: string]: unknown;
 }
