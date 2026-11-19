@@ -80,7 +80,10 @@ Friend requests are not cleared (the count is the number of pending requests).
 While paging, an item that moves to the top of the list (new activity) between page fetches can shift the later pages
 by one, so a single other item may be skipped. Rare; accepted.
 Unit accounting: K is spent newest-first by each item's new `users[]` entries; a user acting twice on one item is two
-units but one entry, so older unhandled items inside a window of 2 poll periods + 2 minutes can still be pushed in that case.
+units but one entry, so older unhandled items inside a window of 3 poll periods + 5 minutes can still be pushed in that case. That window vetoes older
+extras only, and is skipped entirely when the user was in backoff. Trade-off: after a long silent gap without backoff
+(e.g. Cloudflare not running the cron for many minutes) older genuine items beyond the window can be dropped when K is
+smaller than the items' age spread suggests, since the counts are already cleared.
 A baseline is recorded at registration (and by the first poll if that call failed): marker = now - 60 s.
 Each minute the poller starts at a different device of the user (rotation), so a user with several devices uses all of
 their Untappd tokens over time and dead ones are found and deleted.

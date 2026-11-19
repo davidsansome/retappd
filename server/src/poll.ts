@@ -106,7 +106,7 @@ function units(i: U.NotificationItem, marker: number, seen: Set<string>): number
 
 /**
  * Candidates (oldest first) -> the items to push. Spend K newest-first. The newest item is always eligible;
- * older ones are vetoed if older than `veto` (a user commenting twice is 2 units but 1 entry, so K can still
+ * older ones are vetoed if older than `veto` (0 = no veto) (a user commenting twice is 2 units but 1 entry, so K can still
  * overcount; the window only trims such extras, the marker decides what is new). k = 0 pushes nothing.
  */
 export function selectNew(candidates: U.NotificationItem[], k: number, marker: number, seen: Set<string>, veto: number) {
@@ -205,7 +205,8 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
       const marker = Number(u.marker);
       const seen = new Set<string>(u.marker_keys ? JSON.parse(u.marker_keys) : []);
       const candidates = U.newItemsSince(fetched.items, marker, seen, now - MAX_ITEM_AGE_MS);
-      const veto = now - 2 * periodMin(env, u.last_seen, now) * 60_000 - 120_000;
+      // No veto after errors (u.fail_count is the pre-reset value): the gap is unbounded and nothing was read in between.
+      const veto = u.fail_count > 0 ? 0 : now - 3 * periodMin(env, u.last_seen, now) * 60_000 - 5 * 60_000;
       for (const i of selectNew(candidates, k, marker, seen, veto)) events.push({ at: U.itemTime(i), ...U.formatMessage(i)! });
       if (candidates.length) {
         // Everything unhandled is now handled, pushed or not.

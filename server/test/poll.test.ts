@@ -445,6 +445,27 @@ describe("unit accounting and registration baseline", () => {
     expect(apns.sent.map((x) => x.payload.retappd.checkin_id)).toEqual([1]);
   });
 
+  it("after backoff there is no veto: 3 distinct items older than the window are all pushed", async () => {
+    await register();
+    await poll(T1);
+    await env.DB.prepare("UPDATE users SET fail_count = 1, next_poll_at = ?").bind(T1 + 60_000).run();
+    const now = T1 + 3_600_000;
+    u.items = [toastItem(3, now - 120_000), toastItem(2, now - 1_200_000), toastItem(1, now - 2_400_000)];
+    u.counts = { toasts: 3 };
+    await poll(now);
+    expect(apns.sent.map((x) => x.payload.retappd.checkin_id)).toEqual([1, 2, 3]);
+  });
+
+  it("after one skipped cron minute, 3 distinct items inside the widened window are all pushed", async () => {
+    await register();
+    await poll(T1);
+    const now = T1 + 180_000; // two minutes since the last poll
+    u.items = [toastItem(3, now - 10_000), toastItem(2, now - 90_000), toastItem(1, now - 170_000)];
+    u.counts = { toasts: 3 };
+    await poll(now);
+    expect(apns.sent.map((x) => x.payload.retappd.checkin_id)).toEqual([1, 2, 3]);
+  });
+
   it("k = 0 (read elsewhere between the pending poll and the fetch) pushes nothing but marks items handled", async () => {
     await register();
     await poll(T1);
