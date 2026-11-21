@@ -71,10 +71,11 @@ struct User: Decodable, Hashable, Identifiable {
     var avatar: URL?
     var relationship: String?
 
-    var displayName: String {
+    static func displayName(firstName: String?, lastName: String?, userName: String) -> String {
         let full = [firstName, lastName].compactMap { $0 }.joined(separator: " ")
         return full.isEmpty ? userName : full
     }
+    var displayName: String { Self.displayName(firstName: firstName, lastName: lastName, userName: userName) }
     /// First name plus last initial ("Jamie Curtis" → "Jamie C"), for space-constrained places.
     var shortName: String {
         let first = firstName?.trimmingCharacters(in: .whitespaces) ?? ""
@@ -99,7 +100,7 @@ struct User: Decodable, Hashable, Identifiable {
         userName = c.string("user_name") ?? ""
         firstName = c.text("first_name")
         lastName = c.text("last_name")
-        avatar = c.text("user_avatar").flatMap(URL.init(string:))
+        avatar = c.url("user_avatar")
         relationship = c.text("relationship")
     }
 
@@ -139,8 +140,8 @@ struct BeerRef: Decodable, Hashable {
         let c = try decoder.container(keyedBy: AnyKey.self)
         bid = c.int("bid") ?? 0
         name = c.string("beer_name") ?? ""
-        label = c.text("beer_label").flatMap(URL.init(string:))
-        labelHD = c.text("beer_label_hd").flatMap(URL.init(string:))
+        label = c.url("beer_label")
+        labelHD = c.url("beer_label_hd")
         style = c.text("beer_style")
         abv = c.double("beer_abv")
         hasHad = c.bool("has_had")
@@ -157,7 +158,7 @@ struct BreweryRef: Decodable, Hashable {
         let c = try decoder.container(keyedBy: AnyKey.self)
         id = c.int("brewery_id") ?? 0
         name = c.string("brewery_name") ?? ""
-        label = c.text("brewery_label").flatMap(URL.init(string:))
+        label = c.url("brewery_label")
         country = c.text("country_name")
     }
 }
@@ -346,7 +347,7 @@ struct Venue: Codable, Hashable, Identifiable {
             lng = l.double("lng")
         }
         isVerified = c.bool("is_verified") ?? false
-        icon = (c.nested("venue_icon")?.text("md")).flatMap(URL.init(string:))
+        icon = c.nested("venue_icon")?.url("md")
         // Distances from /venue/around are in km when dist_pref=m.
         reportedDistance = c.double("distance").map { $0 * 1000 }
         isCustom = c.bool("is_custom_venue") ?? false
@@ -459,21 +460,31 @@ struct Checkin: Decodable, Hashable, Identifiable {
             userBadgeId = c.int("user_badge_id")
             id = userBadgeId ?? badgeId ?? 0
             name = c.string("badge_name") ?? ""
-            description = c.text("badge_description").flatMap { $0.isEmpty ? nil : $0 }
+            description = c.text("badge_description")
             let img = c.nested("badge_image")
-            image = (img?.text("md") ?? img?.text("sm")).flatMap(URL.init(string:))
-            largeImage = img?.text("lg").flatMap(URL.init(string:))
+            image = img?.url("md") ?? img?.url("sm")
+            largeImage = img?.url("lg")
         }
     }
 
     var beerLite: BeerLite? { beer.map { BeerLite(beer: $0, brewery: brewery) } }
 
-    static func == (a: Checkin, b: Checkin) -> Bool {
-        a.id == b.id && a.toastCount == b.toastCount && a.youToasted == b.youToasted
-            && a.rating == b.rating && a.comment == b.comment && a.servingType == b.servingType
-            && a.retailVenue?.id == b.retailVenue?.id
+    /// Optimistically toggles the signed-in user's toast on this checkin.
+    mutating func applyToastToggle(me: User?) {
+        youToasted.toggle()
+        toastCount = max(0, toastCount + (youToasted ? 1 : -1))
+        if let me {
+            toasters.removeAll { $0.id == me.id }
+            if youToasted { toasters.append(me) }
+        }
     }
-    func hash(into h: inout Hasher) { h.combine(id) }
+
+    /// Restores toast state after a failed toggle without clobbering other fields.
+    mutating func revertToast(toasted: Bool, count: Int, toasters: [User]) {
+        youToasted = toasted
+        toastCount = count
+        self.toasters = toasters
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
@@ -533,8 +544,7 @@ struct Checkin: Decodable, Hashable, Identifiable {
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: AnyKey.self)
             guard let p = c.nested("photo") else { photo = nil; return }
-            func u(_ k: String) -> URL? { p.text(k).flatMap(URL.init(string:)) }
-            photo = Photo(small: u("photo_img_sm"), medium: u("photo_img_md"), large: u("photo_img_lg") ?? u("photo_img_og"))
+            photo = Photo(small: p.url("photo_img_sm"), medium: p.url("photo_img_md"), large: p.url("photo_img_lg") ?? p.url("photo_img_og"))
         }
     }
 }
@@ -849,8 +859,9 @@ struct VenueInfo: Decodable {
     }
 
     init(from decoder: Decoder) throws {
-        let v = try decoder.container(keyedBy: AnyKey.self).nested("venue")
-        venue = try? decoder.container(keyedBy: AnyKey.self).obj("venue")
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        let v = c.nested("venue")
+        venue = c.obj("venue")
         onTap = v?.items("recently_added") ?? []
         stats = v?.obj("stats")
         country = v?.nested("location")?.text("venue_country")
@@ -861,7 +872,15 @@ struct VenueInfo: Decodable {
     static func websiteURL(_ s: String) -> URL? {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return nil }
-        let withScheme = t.lowercased().hasPrefix("http") ? t : "https://\(t)"
+        let lower = t.lowercased()
+        let withScheme: String
+        if lower.hasPrefix("http://") || lower.hasPrefix("https://") {
+            withScheme = t
+        } else {
+            let stripped = t.drop(while: { $0 == "/" })
+            guard !stripped.isEmpty else { return nil }
+            withScheme = "https://\(stripped)"
+        }
         guard let url = URL(string: withScheme), url.host?.contains(".") == true else { return nil }
         return url
     }
@@ -917,7 +936,7 @@ struct MenuSections: Decodable {
                     abv: c.double("abv"),
                     // Menu items' brewery logo field hasn't been captured, so they fall back
                     // straight to the placeholder.
-                    label: (c.text("label_image") ?? c.text("label_image_thumb")).flatMap(URL.init(string:)),
+                    label: c.url("label_image") ?? c.url("label_image_thumb"),
                     rating: c.double("rating"),
                     ratingCount: c.int("rating_count"),
                     hasHad: c.bool("has_had"))
@@ -973,9 +992,8 @@ struct UserInfo: Decodable {
             firstName = c.text("first_name")
             lastName = c.text("last_name")
             userName = c.string("user_name") ?? ""
-            let full = [firstName, lastName].compactMap { $0 }.joined(separator: " ")
-            displayName = full.isEmpty ? userName : full
-            avatar = (c.text("user_avatar_hd") ?? c.text("user_avatar")).flatMap(URL.init(string:))
+            displayName = User.displayName(firstName: firstName, lastName: lastName, userName: userName)
+            avatar = c.url("user_avatar_hd") ?? c.url("user_avatar")
             location = c.text("location")
             let s = c.nested("stats")
             totalCheckins = s?.int("total_checkins")
@@ -1059,8 +1077,8 @@ struct CheckinAddResponse: Decodable {
         result = c.text("result")
         checkinId = c.int("checkin_id")
         let upload = c.nested("photo_upload")
-        photoUploadURL = upload?.text("url").flatMap(URL.init(string:))
-        photoDestinationURL = upload?.text("destination_url").flatMap(URL.init(string:))
+        photoUploadURL = upload?.url("url")
+        photoDestinationURL = upload?.url("destination_url")
     }
 }
 
@@ -1087,10 +1105,10 @@ struct AlgoliaBeerHits: Decodable {
             beer = BeerLite(
                 bid: bid, name: c.string("beer_name") ?? "", brewery: c.string("brewery_name") ?? "",
                 style: c.text("type_name"), abv: c.double("beer_abv"),
-                label: c.text("beer_label").flatMap(URL.init(string:)),
+                label: c.url("beer_label"),
                 rating: c.double("rating_score"), ratingCount: c.int("rating_count"),
                 popularity: c.int("popularity"),
-                breweryLabel: c.text("brewery_label").flatMap(URL.init(string:)),
+                breweryLabel: c.url("brewery_label"),
                 breweryId: c.int("brewery_id"))
         }
     }
@@ -1172,13 +1190,11 @@ struct UserBeerList: Decodable {
     /// Whether `bids` arrived base64-encoded rather than as plain text.
     var wasBase64 = false
 
-    enum CodingKeys: String, CodingKey { case bids, bidsCount = "bids_count" }
-
     init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        count = try? c.decode(Int.self, forKey: .bidsCount)
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        count = c.int("bids_count")
         // A missing or non-string `bids` must fail, not read as "no beers".
-        let raw = try c.decode(String.self, forKey: .bids).trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw = try c.decode(String.self, forKey: AnyKey("bids")).trimmingCharacters(in: .whitespacesAndNewlines)
         if let ids = Self.parse(raw) {
             bids = ids
         } else if let d = Data(base64Encoded: Self.padded(raw)),

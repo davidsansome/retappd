@@ -31,6 +31,13 @@ final class HadBeersTests: XCTestCase {
         XCTAssertEqual(try UntappdAPI.decode(UserBeerList.self, from: json(bids: "")).bids, [])
     }
 
+    func testDecodesStringifiedBidsCount() throws {
+        let d = Data(#"{"meta":{"code":200},"response":{"bids_count":"3","bids":"1,2,3"}}"#.utf8)
+        let l = try UntappdAPI.decode(UserBeerList.self, from: d)
+        XCTAssertEqual(l.bids, [1, 2, 3])
+        XCTAssertEqual(l.count, 3)
+    }
+
     /// What the live server sent for a one-beer account: plain text with a leading comma.
     func testDecodesLiveLeadingComma() throws {
         let l = try UntappdAPI.decode(UserBeerList.self, from: json(bids: ",6755412"))
@@ -264,11 +271,52 @@ final class HadBeersTests: XCTestCase {
 
     /// Fix 4: signing out empties the had-list at once, not in a later task.
     @MainActor func testSignOutClearsHadListImmediately() {
+        Keychain.write("access_token", "test-token")
+        UserDefaults.standard.set("test-user", forKey: "username")
+        defer {
+            Keychain.delete("access_token")
+            UserDefaults.standard.removeObject(forKey: "username")
+        }
+        let auth = AuthStore()
         HadBeers.shared.add(424242)
         XCTAssertTrue(HadBeers.shared.has(424242))
-        AuthStore().signOut()
+        auth.signOut()
         XCTAssertFalse(HadBeers.shared.has(424242))
         XCTAssertTrue(HadBeers.shared.ids.isEmpty)
         XCTAssertFalse(HadBeers.shared.isAuthoritative)
+    }
+
+    /// A forced refresh that arrives while another fetch is in flight waits for it and then runs a
+    /// fresh fetch so post-mutation changes (like deleting a check-in) are picked up.
+    @MainActor func testForceRefreshWhileInFlightRunsFreshFetch() async {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let gate = AsyncStream<Void>.makeStream()
+        let callCount = Counter()
+        let s = HadBeers(url: url, currentUser: { "alice" }, fetchList: {
+            let n = callCount.next()
+            if n == 1 {
+                for await _ in gate.stream { break }
+                return UserBeerList(bids: [1, 2], count: 2)
+            }
+            return UserBeerList(bids: [1], count: 1)
+        })
+        let first = Task { await s.refresh(force: false) }
+        try? await Task.sleep(for: .milliseconds(50))
+        let forced = Task { await s.refresh(force: true) }
+        try? await Task.sleep(for: .milliseconds(50))
+        gate.continuation.yield()
+        await first.value
+        await forced.value
+        XCTAssertEqual(callCount.value, 2)
+        XCTAssertEqual(s.ids, [1])
+        XCTAssertTrue(s.isAuthoritative)
+    }
+
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var n = 0
+        var value: Int { lock.withLock { n } }
+        func next() -> Int { lock.withLock { n += 1; return n } }
     }
 }

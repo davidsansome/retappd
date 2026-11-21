@@ -46,8 +46,8 @@ struct BeerInfo: Decodable {
         }
         self.bid = bid
         name = c.string("beer_name") ?? ""
-        label = c.text("beer_label").flatMap(URL.init(string:))
-        labelHD = c.text("beer_label_hd").flatMap(URL.init(string:))
+        label = c.url("beer_label")
+        labelHD = c.url("beer_label_hd")
         style = c.text("beer_style")
         abv = c.double("beer_abv")
         ibu = c.int("beer_ibu")
@@ -113,8 +113,8 @@ struct BreweryInfo: Decodable {
         }
         self.id = id
         name = c.string("brewery_name") ?? ""
-        label = c.text("brewery_label").flatMap(URL.init(string:))
-        labelHD = c.text("brewery_label_hd").flatMap(URL.init(string:))
+        label = c.url("brewery_label")
+        labelHD = c.url("brewery_label_hd")
         country = c.text("country_name")
         type = c.text("brewery_type")
         let loc = c.nested("location")
@@ -143,8 +143,11 @@ struct BreweryInfo: Decodable {
     /// beyond the docs' examples.
     static func social(_ value: String?, host: String) -> URL? {
         guard var v = value?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty else { return nil }
-        if v.lowercased().hasPrefix("http") { return URL(string: v) }
+        let lower = v.lowercased()
+        if lower.hasPrefix("http://") || lower.hasPrefix("https://") { return URL(string: v) }
         if v.hasPrefix("@") { v.removeFirst() }
+        v = String(v.drop(while: { $0 == "/" }))
+        guard !v.isEmpty else { return nil }
         if v.contains("/") || v.lowercased().contains(host) { return URL(string: "https://\(v)") }
         return URL(string: "https://\(host)/\(v)")
     }

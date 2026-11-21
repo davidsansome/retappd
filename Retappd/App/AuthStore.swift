@@ -10,8 +10,17 @@ final class AuthStore {
     var isSignedIn: Bool { token != nil && username != nil }
 
     init() {
-        token = Keychain.read("access_token")
-        username = UserDefaults.standard.string(forKey: "username")
+        let savedToken = Keychain.read("access_token")
+        let savedUsername = UserDefaults.standard.string(forKey: "username")
+        if let savedToken, let savedUsername {
+            token = savedToken
+            username = savedUsername
+        } else {
+            token = nil
+            username = nil
+            Keychain.delete("access_token")
+            UserDefaults.standard.removeObject(forKey: "username")
+        }
         UntappdAPI.shared.token = token
         UntappdAPI.shared.onUnauthorized = { [weak self] in
             Task { @MainActor in self?.signOut() }
@@ -55,6 +64,7 @@ final class AuthStore {
     #endif
 
     func signOut() {
+        guard token != nil || username != nil else { return }
         // Stash the notification registration for deletion and start the DELETE before the token
         // goes. It doesn't wait: an unreachable server mustn't hold up signing out (a failed
         // DELETE is retried on the next launch).
@@ -87,11 +97,12 @@ enum Keychain {
         return String(data: d, encoding: .utf8)
     }
 
-    static func write(_ account: String, _ value: String, accessible: CFString = kSecAttrAccessibleAfterFirstUnlock) {
+    @discardableResult
+    static func write(_ account: String, _ value: String, accessible: CFString = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly) -> Bool {
         delete(account)
         let q: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: account,
                                   kSecValueData: Data(value.utf8), kSecAttrAccessible: accessible]
-        SecItemAdd(q as CFDictionary, nil)
+        return SecItemAdd(q as CFDictionary, nil) == errSecSuccess
     }
 
     static func delete(_ account: String) {

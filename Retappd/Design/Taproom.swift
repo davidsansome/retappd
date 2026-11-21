@@ -18,6 +18,8 @@ enum Taproom {
     static let had = dynamic(0x3B8449, 0x5CAE6B)
     /// The tick drawn on `had`.
     static let onHad = dynamic(0xFFFFFF, 0x0F2414)
+    /// Destructive actions (delete, remove friend): a warm crimson that fits the palette.
+    static let destructive = dynamic(0xC93B2B, 0xE85D4A)
     static let glassRim = dynamic(0xCDBFA8, 0x5A4C3C)
     static let glassInside = dynamic(0xF1EADF, 0x211B14)
     static let foam = dynamic(0xFFFDF7, 0xF6EBD3)
@@ -105,10 +107,11 @@ struct TaproomOutlineButton: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
+        let color = configuration.role == .destructive ? Taproom.destructive : Taproom.ink
         configuration.label
             .labelStyle(TightLabel())
             .font(.subheadline.weight(.medium))
-            .foregroundStyle(Taproom.ink)
+            .foregroundStyle(color)
             .frame(maxWidth: .infinity, minHeight: 44)
             .background(Taproom.card, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Taproom.border))
@@ -191,6 +194,7 @@ struct TaproomPrimaryButton: ButtonStyle {
             .padding(.horizontal, fullWidth ? 0 : 20)
             .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: compact ? 44 : 54)
             .foregroundStyle(Taproom.background)
+            .tint(Taproom.background)
             .background(Taproom.ink, in: RoundedRectangle(cornerRadius: radius))
             .opacity(!isEnabled ? 0.4 : configuration.isPressed ? 0.8 : 1)
             .contentShape(RoundedRectangle(cornerRadius: radius))
@@ -459,15 +463,14 @@ struct TaproomSearchField: View {
             }
         }
         .animation(.snappy(duration: 0.2), value: focused || !text.isEmpty)
-        .onAppear(perform: handleFocusRequest)
-        .onChange(of: focusRequests) { handleFocusRequest() }
-    }
-
-    private func handleFocusRequest() {
-        guard focusRequests > handledRequests else { return }
-        handledRequests = focusRequests
-        // Wait for the tab switch to settle, or the keyboard doesn't come up.
-        Task { try? await Task.sleep(for: .milliseconds(150)); focused = true }
+        .task(id: focusRequests) {
+            guard focusRequests > handledRequests else { return }
+            handledRequests = focusRequests
+            // Wait for the tab switch to settle, or the keyboard doesn't come up.
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            focused = true
+        }
     }
 }
 
@@ -587,12 +590,12 @@ struct TaproomSegmented<Value: Hashable>: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            ForEach(options.indices, id: \.self) { i in
-                let on = options[i].value == selection
+            ForEach(options, id: \.value) { option in
+                let on = option.value == selection
                 Button {
-                    withAnimation(.interactiveSpring(response: 0.25, dampingFraction: 0.85)) { selection = options[i].value }
+                    withAnimation(.interactiveSpring(response: 0.25, dampingFraction: 0.85)) { selection = option.value }
                 } label: {
-                    Text(options[i].title)
+                    Text(option.title)
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(on ? Taproom.onAmber : Taproom.ink)
                         .frame(maxWidth: .infinity, minHeight: 44)
@@ -725,5 +728,100 @@ struct HadCorner: View {
         .frame(width: size, height: size)
         .accessibilityElement()
         .accessibilityLabel("You've had this beer")
+    }
+}
+
+/// Helpers for building and formatting external links (Google Maps, websites).
+enum ExternalLinks {
+    /// Opens a place in Google Maps (the app if installed, else the web): by name and address
+    /// when any address part is present, else by coordinates.
+    static func mapsURL(name: String, address: String? = nil, city: String? = nil,
+                        state: String? = nil, country: String? = nil,
+                        lat: Double? = nil, lng: Double? = nil) -> URL? {
+        let addressParts = [address, city, state, country].compactMap { $0 }.filter { !$0.isEmpty }
+        let query: String
+        if !addressParts.isEmpty {
+            query = ([name] + addressParts).filter { !$0.isEmpty }.joined(separator: ", ")
+        } else if let lat, let lng, lat != 0 || lng != 0 {
+            query = "\(lat),\(lng)"
+        } else {
+            return nil
+        }
+        var u = URLComponents(string: "https://www.google.com/maps/search/")!
+        u.queryItems = [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "query", value: query)]
+        return u.url
+    }
+
+    /// "coppertap.com.au/menu" for a website, without the scheme or a leading "www.".
+    static func displayHost(_ url: URL) -> String {
+        var s = url.absoluteString
+        for p in ["https://", "http://"] where s.lowercased().hasPrefix(p) { s.removeFirst(p.count) }
+        if s.lowercased().hasPrefix("www.") { s.removeFirst(4) }
+        while s.hasSuffix("/") { s.removeLast() }
+        return s
+    }
+}
+
+/// One or two rating columns side by side ("Everyone" beside "You" or "Your average").
+struct TaproomRatingCard: View {
+    struct Column {
+        let title: String
+        let rating: Double?
+        var empty: String = "No ratings"
+        var caption: String? = nil
+    }
+
+    let leading: Column
+    var trailing: Column? = nil
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            column(leading)
+            if let trailing {
+                Rectangle().fill(Taproom.border).frame(width: 1)
+                column(trailing)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .taproomCard()
+        .accessibilityElement(children: .contain)
+    }
+
+    private func column(_ c: Column) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(c.title).font(.caption.weight(.semibold)).foregroundStyle(Taproom.muted)
+            if let rating = c.rating, rating > 0 {
+                TaproomRating(rating: rating, size: 34)
+            } else {
+                Text(c.empty).font(.system(size: 22, weight: .heavy)).tracking(-0.4).foregroundStyle(Taproom.glassRim)
+                    .frame(minHeight: 34, alignment: .leading)
+                    .accessibilityLabel("\(c.title): \(c.empty)")
+            }
+            if let caption = c.caption { Text(caption).font(.caption).foregroundStyle(Taproom.muted) }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ScrollNavigationTitleModifier: ViewModifier {
+    let title: String
+    let threshold: CGFloat
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        content
+            .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > threshold } action: { _, hidden in
+                withAnimation(.easeInOut(duration: 0.15)) { shown = hidden }
+            }
+            .navigationTitle(shown ? title : "")
+            .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+extension View {
+    /// Shows `title` in the inline navigation bar once a scroll view has scrolled past its hero.
+    func taproomScrollTitle(_ title: String, threshold: CGFloat = 90) -> some View {
+        modifier(ScrollNavigationTitleModifier(title: title, threshold: threshold))
     }
 }

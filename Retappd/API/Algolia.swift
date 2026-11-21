@@ -13,7 +13,7 @@ enum Algolia {
             URLQueryItem(name: "query", value: query),
             URLQueryItem(name: "hitsPerPage", value: "\(hits)"),
             URLQueryItem(name: "attributesToRetrieve",
-                         value: "bid,beer_name,brewery_name,type_name,beer_abv,rating_score,rating_count,beer_label,brewery_label,popularity"),
+                         value: "bid,beer_name,brewery_id,brewery_name,type_name,beer_abv,rating_score,rating_count,beer_label,brewery_label,popularity"),
             URLQueryItem(name: "attributesToHighlight", value: ""),
         ]
         var req = URLRequest(url: comps.url!)

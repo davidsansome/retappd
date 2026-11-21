@@ -8,6 +8,7 @@ final class LocationProvider: NSObject, CLLocationManagerDelegate {
     private(set) var location: CLLocation?
     private(set) var authorization: CLAuthorizationStatus
     private let manager = CLLocationManager()
+    @ObservationIgnored private var isStarted = false
 
     override init() {
         authorization = manager.authorizationStatus
@@ -27,11 +28,15 @@ final class LocationProvider: NSObject, CLLocationManagerDelegate {
     var isDenied: Bool { authorization == .denied || authorization == .restricted }
 
     func start() {
+        isStarted = true
         if manager.authorizationStatus == .notDetermined { manager.requestWhenInUseAuthorization() }
         manager.startUpdatingLocation()
     }
 
-    func stop() { manager.stopUpdatingLocation() }
+    func stop() {
+        isStarted = false
+        manager.stopUpdatingLocation()
+    }
 
     nonisolated func locationManager(_ m: CLLocationManager, didUpdateLocations locs: [CLLocation]) {
         guard let l = locs.last, l.horizontalAccuracy >= 0 else { return }
@@ -48,7 +53,7 @@ final class LocationProvider: NSObject, CLLocationManagerDelegate {
         let s = m.authorizationStatus
         Task { @MainActor in
             self.authorization = s
-            if s == .authorizedWhenInUse || s == .authorizedAlways { self.manager.startUpdatingLocation() }
+            if self.isStarted, s == .authorizedWhenInUse || s == .authorizedAlways { self.manager.startUpdatingLocation() }
         }
     }
 

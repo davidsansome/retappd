@@ -32,6 +32,9 @@ struct RetappdApp: App {
             // A notification registration deleted at sign-out that couldn't reach the server is
             // retried here, signed in or not.
             .task { await NotificationService.shared.retryPendingDeletion() }
+            .onChange(of: auth.isSignedIn) { _, signedIn in
+                if !signedIn { location.stop() }
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { Task { await NotificationService.shared.retryPendingDeletion() } }
             }
@@ -131,9 +134,10 @@ struct RootTabs: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .didCheckIn)) { _ in
             Task {
-                await feed.refresh()
-                await profile.refresh()
-                await CheckInOptions.shared.loadRecentVenues(username: username)
+                async let f: Void = feed.refresh()
+                async let p: Void = profile.refresh()
+                async let v: Void = CheckInOptions.shared.loadRecentVenues(username: username)
+                _ = await (f, p, v)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .checkinDeleted)) { n in

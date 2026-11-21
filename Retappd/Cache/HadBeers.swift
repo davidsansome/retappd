@@ -79,17 +79,28 @@ final class HadBeers {
         save()
     }
 
-    /// Fetches the list unless a recent one is on hand (or `force`). Concurrent calls share one fetch.
+    /// Fetches the list unless a recent one is on hand (or `force`). Concurrent calls share one fetch;
+    /// a `force` call that arrives mid-fetch waits for it and then runs a fresh fetch so mutations
+    /// made since the earlier sync started are reflected.
     func refresh(force: Bool = false) async {
-        if let inFlight { return await inFlight.value }
+        if let existing = inFlight {
+            await existing.value
+            if !force { return }
+        }
         guard let user = currentUser() else { return }  // signed out: nothing to sync
         if !force, let fetchedAt, Date.now.timeIntervalSince(fetchedAt) < Self.minimumInterval { return }
+        if let existing = inFlight {
+            await existing.value
+            return
+        }
         let gen = generation
-        let task = Task { await self.fetch(generation: gen, user: user) }
+        let task = Task {
+            await self.fetch(generation: gen, user: user)
+            // A clear() (and perhaps a newer refresh) may have happened meanwhile; don't nil out its task.
+            if self.generation == gen { self.inFlight = nil }
+        }
         inFlight = task
         await task.value
-        // A clear() (and perhaps a newer refresh) may have happened meanwhile; don't nil out its task.
-        if generation == gen { inFlight = nil }
     }
 
     /// `gen` and `user` are the session the fetch started in: if the user signed out (`clear()`

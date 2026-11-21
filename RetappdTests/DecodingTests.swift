@@ -542,4 +542,102 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(BadgeName.base(of: "(Level 3)"), "(Level 3)")
         XCTAssertNil(BadgeName.level(of: "Level (Level 3) Up"))
     }
+
+    func testDecodingIntOverflowGuard() throws {
+        struct Box: Decodable {
+            let huge: Int?
+            let negHuge: Int?
+            let frac: Int?
+            let str: Int?
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: AnyKey.self)
+                huge = c.int("huge")
+                negHuge = c.int("negHuge")
+                frac = c.int("frac")
+                str = c.int("str")
+            }
+        }
+        let json = #"{"huge": 1e30, "negHuge": -1e30, "frac": 42.9, "str": "17"}"#
+        let box = try JSONDecoder().decode(Box.self, from: Data(json.utf8))
+        XCTAssertNil(box.huge)
+        XCTAssertNil(box.negHuge)
+        XCTAssertEqual(box.frac, 42)
+        XCTAssertEqual(box.str, 17)
+    }
+
+    func testDecodingBoolStrings() throws {
+        struct Box: Decodable {
+            let t1: Bool?
+            let t2: Bool?
+            let f1: Bool?
+            let f2: Bool?
+            let empty: Bool?
+            let unknown: Bool?
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: AnyKey.self)
+                t1 = c.bool("t1")
+                t2 = c.bool("t2")
+                f1 = c.bool("f1")
+                f2 = c.bool("f2")
+                empty = c.bool("empty")
+                unknown = c.bool("unknown")
+            }
+        }
+        let json = #"{"t1":"1","t2":"TRUE","f1":"0","f2":"False","empty":"","unknown":"yes"}"#
+        let box = try JSONDecoder().decode(Box.self, from: Data(json.utf8))
+        XCTAssertEqual(box.t1, true)
+        XCTAssertEqual(box.t2, true)
+        XCTAssertEqual(box.f1, false)
+        XCTAssertEqual(box.f2, false)
+        XCTAssertNil(box.empty)
+        XCTAssertNil(box.unknown)
+    }
+
+    func testWebsiteAndSocialURLPrefixes() {
+        XCTAssertEqual(VenueInfo.websiteURL("httpbin.org")?.absoluteString, "https://httpbin.org")
+        XCTAssertEqual(VenueInfo.websiteURL("//example.com/beer")?.absoluteString, "https://example.com/beer")
+        XCTAssertEqual(VenueInfo.websiteURL("HTTPS://Example.com")?.absoluteString, "HTTPS://Example.com")
+        XCTAssertNil(VenueInfo.websiteURL("///"))
+        XCTAssertEqual(BreweryInfo.social("httpbrewing", host: "x.com")?.absoluteString, "https://x.com/httpbrewing")
+        XCTAssertEqual(BreweryInfo.social("//x.com/taproom", host: "x.com")?.absoluteString, "https://x.com/taproom")
+    }
+
+    func testCheckinEqualityAndToastToggle() throws {
+        let json = """
+        {"meta":{"code":200},"response":{"checkins":{"count":1,"items":[{
+          "checkin_id": 42,
+          "toasts": {"total_count": 1, "auth_toast": false, "items": [{"user": {"uid": 2, "user_name": "other"}}]},
+          "comments": {"total_count": 0, "items": []}
+        }]}}}
+        """
+        let base = try XCTUnwrap(UntappdAPI.decode(CheckinPage.self, from: Data(json.utf8)).checkins.first)
+        var modified = base
+        modified.commentCount = 1
+        XCTAssertNotEqual(base, modified)
+
+        let me = User(id: 99, userName: "me", firstName: "Me", lastName: nil, avatar: nil)
+        var toggled = base
+        toggled.applyToastToggle(me: me)
+        XCTAssertTrue(toggled.youToasted)
+        XCTAssertEqual(toggled.toastCount, 2)
+        XCTAssertEqual(toggled.toasters.map(\.id), [2, 99])
+        XCTAssertNotEqual(base, toggled)
+
+        toggled.applyToastToggle(me: me)
+        XCTAssertFalse(toggled.youToasted)
+        XCTAssertEqual(toggled.toastCount, 1)
+        XCTAssertEqual(toggled.toasters.map(\.id), [2])
+        XCTAssertEqual(base, toggled)
+
+        toggled.applyToastToggle(me: me)
+        toggled.revertToast(toasted: base.youToasted, count: base.toastCount, toasters: base.toasters)
+        XCTAssertEqual(base, toggled)
+    }
+
+    func testGMTOffsetString() {
+        XCTAssertEqual(APIRequest.gmtOffsetString(for: TimeZone(secondsFromGMT: 0)!), "0")
+        XCTAssertEqual(APIRequest.gmtOffsetString(for: TimeZone(secondsFromGMT: 10 * 3600)!), "10")
+        XCTAssertEqual(APIRequest.gmtOffsetString(for: TimeZone(secondsFromGMT: 5 * 3600 + 1800)!), "5.5")
+        XCTAssertEqual(APIRequest.gmtOffsetString(for: TimeZone(secondsFromGMT: -3 * 3600 - 1800)!), "-3.5")
+    }
 }

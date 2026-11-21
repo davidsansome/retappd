@@ -17,6 +17,12 @@ enum APIError: LocalizedError {
     }
 }
 
+extension Error {
+    var isCancellation: Bool {
+        self is CancellationError || (self as? URLError)?.code == .cancelled
+    }
+}
+
 /// A request to any backend we talk to. `cacheKey` identifies its response in `ResponseCache`.
 struct APIRequest: Sendable {
     enum Method: String, Sendable { case get = "GET", post = "POST" }
@@ -49,8 +55,12 @@ final class UntappdAPI: @unchecked Sendable {
         set { lock.withLock { _token = newValue } }
     }
 
+    private var _onUnauthorized: (@Sendable () -> Void)?
     /// Called (on any thread) when the server rejects our token.
-    var onUnauthorized: (@Sendable () -> Void)?
+    var onUnauthorized: (@Sendable () -> Void)? {
+        get { lock.withLock { _onUnauthorized } }
+        set { lock.withLock { _onUnauthorized = newValue } }
+    }
 
     private var _onUnreadCounts: (@Sendable (UnreadCounts, Int) -> Void)?
     private var sequence = 0
@@ -119,8 +129,8 @@ final class UntappdAPI: @unchecked Sendable {
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let envelope = try? JSONDecoder().decode(Envelope<Ignored>.self, from: data)
         let meta = envelope?.meta
-        if status == 401 || meta?.code == 401 || meta?.errorType == "invalid_auth" {
-            if token != nil { onUnauthorized?() }
+        if token != nil, status == 401 || meta?.code == 401 || meta?.errorType == "invalid_auth" {
+            onUnauthorized?()
             throw APIError.unauthorized
         }
         if let meta, meta.code != 200 {
@@ -132,8 +142,12 @@ final class UntappdAPI: @unchecked Sendable {
     }
 
     static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
-        guard let r = try JSONDecoder().decode(Envelope<T>.self, from: data).response else { throw APIError.decoding }
-        return r
+        do {
+            guard let r = try JSONDecoder().decode(Envelope<T>.self, from: data).response else { throw APIError.decoding }
+            return r
+        } catch is DecodingError {
+            throw APIError.decoding
+        }
     }
 
     func fetch<T: Decodable>(_ r: APIRequest, as type: T.Type = T.self) async throws -> T {
@@ -159,6 +173,14 @@ final class UntappdAPI: @unchecked Sendable {
 // MARK: - Endpoints
 
 extension APIRequest {
+    static func gmtOffsetString(_ hours: Double) -> String {
+        hours == hours.rounded() ? String(Int(hours)) : String(hours)
+    }
+
+    static func gmtOffsetString(for tz: TimeZone = .current) -> String {
+        gmtOffsetString(Double(tz.secondsFromGMT()) / 3600)
+    }
+
     static func xauth(username: String, password: String) -> APIRequest {
         let device = UIDevice.current
         return APIRequest(method: .post, path: "/v4/xauth", form: [
@@ -201,7 +223,7 @@ extension APIRequest {
     static func userStats(start: String, end: String, gmtOffset: Double) -> APIRequest {
         APIRequest(path: "/v4/user/stats", query: [
             "start_date": start, "end_date": end, "v2": "true",
-            "gmt_offset": gmtOffset == gmtOffset.rounded() ? String(Int(gmtOffset)) : String(gmtOffset),
+            "gmt_offset": gmtOffsetString(gmtOffset),
         ])
     }
 
@@ -290,7 +312,7 @@ extension APIRequest {
     static func venueInfo(_ id: Int) -> APIRequest {
         APIRequest(path: "/v4/venue/info/\(id)", query: [
             "compact": "venue_menu_compact", "multipleHours": "1",
-            "timezone": "\(TimeZone.current.secondsFromGMT() / 3600)", "track": "false",
+            "timezone": gmtOffsetString(), "track": "false",
         ])
     }
 
@@ -330,7 +352,7 @@ extension APIRequest {
             "flavor_profiles": "",
             "is_photo": isPhoto ? "true" : "false",
             "photo_file_ext": "jpg",
-            "gmt_offset": "\(tz.secondsFromGMT() / 3600)",
+            "gmt_offset": gmtOffsetString(for: tz),
             "timezone": tz.identifier,
             "purchase_foursquare_id": purchaseFoursquareId ?? "",
         ]
@@ -536,7 +558,7 @@ extension APIRequest {
             "bid": "\(beer)",
             "rating": rating > 0 ? String(format: "%.2f", rating) : "0",
             "shout": shout,
-            "gmt_offset": "\(tz.secondsFromGMT() / 3600)",
+            "gmt_offset": gmtOffsetString(for: tz),
             "timezone": tz.identifier,
             "platform": "android",
             "app_theme": "light",

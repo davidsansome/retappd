@@ -30,6 +30,10 @@ extension KeyedDecodingContainer where Key == AnyKey {
         return s
     }
 
+    func url(_ key: String) -> URL? {
+        text(key).flatMap(URL.init(string:))
+    }
+
     func double(_ key: String) -> Double? {
         let k = AnyKey(key)
         if let d = try? decodeIfPresent(Double.self, forKey: k) { return d }
@@ -40,7 +44,8 @@ extension KeyedDecodingContainer where Key == AnyKey {
     func int(_ key: String) -> Int? {
         let k = AnyKey(key)
         if let i = try? decodeIfPresent(Int.self, forKey: k) { return i }
-        if let d = try? decodeIfPresent(Double.self, forKey: k) { return Int(d) }
+        if let d = try? decodeIfPresent(Double.self, forKey: k),
+           let i = Int(exactly: d.rounded(.towardZero)) { return i }
         if let s = try? decodeIfPresent(String.self, forKey: k) { return Int(s) }
         return nil
     }
@@ -49,7 +54,13 @@ extension KeyedDecodingContainer where Key == AnyKey {
         let k = AnyKey(key)
         if let b = try? decodeIfPresent(Bool.self, forKey: k) { return b }
         if let i = try? decodeIfPresent(Int.self, forKey: k) { return i != 0 }
-        if let s = try? decodeIfPresent(String.self, forKey: k) { return s == "1" || s == "true" }
+        if let s = try? decodeIfPresent(String.self, forKey: k) {
+            switch s.lowercased() {
+            case "1", "true": return true
+            case "0", "false": return false
+            default: return nil
+            }
+        }
         return nil
     }
 

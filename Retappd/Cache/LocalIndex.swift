@@ -70,6 +70,7 @@ actor LocalIndex {
         loadIfNeeded()
         for b in new where b.bid > 0 && !b.name.isEmpty {
             if var e = beers[b.bid] {
+                let oldName = e.beer.name, oldBrewery = e.beer.brewery
                 // Keep the richest version of each field.
                 e.beer = BeerLite(bid: b.bid, name: b.name, brewery: b.brewery.isEmpty ? e.beer.brewery : b.brewery,
                                   style: b.style ?? e.beer.style, abv: b.abv ?? e.beer.abv, label: b.label ?? e.beer.label,
@@ -81,6 +82,9 @@ actor LocalIndex {
                                   hasHad: (b.hasHad == true || e.beer.hasHad == true) ? true : (b.hasHad ?? e.beer.hasHad),
                                   breweryLabel: b.breweryLabel ?? e.beer.breweryLabel,
                                   breweryId: b.breweryId ?? e.beer.breweryId)
+                if e.beer.name != oldName || e.beer.brewery != oldBrewery {
+                    e.words = Self.words("\(e.beer.name) \(e.beer.brewery)")
+                }
                 e.seen += 1
                 beers[b.bid] = e
             } else {
@@ -99,8 +103,12 @@ actor LocalIndex {
                 if v.venueId != nil, let old = venues.removeValue(forKey: "f\(f)") { v.merge(old.venue) }
             }
             if var e = venues[v.id] {
+                let oldName = e.venue.name, oldCity = e.venue.city
                 v.merge(e.venue)
                 e.venue = v
+                if e.venue.name != oldName || e.venue.city != oldCity {
+                    e.words = Self.words("\(e.venue.name) \(e.venue.city ?? "")")
+                }
                 e.seen += 1
                 venues[v.id] = e
             } else {
@@ -180,6 +188,9 @@ actor LocalIndex {
     }
 
     func removeAll() {
+        saveTask?.cancel()
+        saveTask = nil
+        loaded = true
         beers = [:]; venues = [:]; venueIdByFoursquare = [:]
         try? FileManager.default.removeItem(at: url)
     }

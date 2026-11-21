@@ -1,6 +1,12 @@
 import Foundation
 import CryptoKit
 
+extension String {
+    var sha256Hex: String {
+        SHA256.hash(data: Data(utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
 /// Raw response bodies, keyed by request, in memory and on disk. Nothing is ever treated as
 /// too old to show: callers display whatever's here immediately and replace it when the
 /// network answers.
@@ -9,6 +15,7 @@ actor ResponseCache {
 
     private let dir: URL
     private let memory = NSCache<NSString, NSData>()
+    private var generation = 0
 
     init() {
         dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -17,9 +24,10 @@ actor ResponseCache {
         memory.totalCostLimit = 32 << 20
     }
 
+    func currentGeneration() -> Int { generation }
+
     private func file(_ key: String) -> URL {
-        let hash = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
-        return dir.appendingPathComponent(hash)
+        dir.appendingPathComponent(key.sha256Hex)
     }
 
     func data(for key: String) -> Data? {
@@ -29,7 +37,8 @@ actor ResponseCache {
         return d
     }
 
-    func store(_ data: Data, for key: String) {
+    func store(_ data: Data, for key: String, generation expected: Int? = nil) {
+        if let expected, expected != generation { return }
         memory.setObject(data as NSData, forKey: key as NSString, cost: data.count)
         try? data.write(to: file(key), options: .atomic)
     }
@@ -40,6 +49,7 @@ actor ResponseCache {
     }
 
     func removeAll() {
+        generation += 1
         memory.removeAllObjects()
         try? FileManager.default.removeItem(at: dir)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -56,6 +66,7 @@ func cacheThenNetwork<T: Decodable>(
     fetch: @escaping @Sendable () async throws -> Data,
     onCached: (T) -> Void
 ) async throws -> T {
+    let gen = await ResponseCache.shared.currentGeneration()
     let network = Task.detached(priority: .userInitiated) { try await fetch() }
     let cached: T? = await Task.detached(priority: .userInitiated) {
         guard let d = await ResponseCache.shared.data(for: key) else { return nil as T? }
@@ -67,7 +78,7 @@ func cacheThenNetwork<T: Decodable>(
         try await network.value
     } onCancel: { network.cancel() }
     let value = try await Task.detached { try decode(data) }.value
-    await ResponseCache.shared.store(data, for: key)
+    await ResponseCache.shared.store(data, for: key, generation: gen)
     return value
 }
 

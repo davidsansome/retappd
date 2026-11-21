@@ -1,15 +1,14 @@
 import SwiftUI
 import UIKit
-import CryptoKit
 
 /// Memory + disk image cache with request de-duplication and off-main decoding.
 final class ImagePipeline: @unchecked Sendable {
     static let shared = ImagePipeline()
 
-    private let memory = NSCache<NSURL, UIImage>()
+    private let memory = NSCache<NSString, UIImage>()
     private let dir: URL
     private let lock = NSLock()
-    private var inFlight: [URL: Task<UIImage?, Never>] = [:]
+    private var inFlight: [String: Task<UIImage?, Never>] = [:]
     private let session: URLSession
 
     init() {
@@ -23,39 +22,55 @@ final class ImagePipeline: @unchecked Sendable {
         session = URLSession(configuration: c)
     }
 
+    private func cacheKey(_ url: URL, maxPixel: CGFloat) -> String {
+        "\(url.absoluteString)#\(Int(maxPixel.rounded()))"
+    }
+
     /// Synchronous memory lookup so cached images render on the first frame.
-    func cached(_ url: URL) -> UIImage? { memory.object(forKey: url as NSURL) }
+    func cached(_ url: URL, maxPixel: CGFloat = 800) -> UIImage? {
+        memory.object(forKey: cacheKey(url, maxPixel: maxPixel) as NSString)
+    }
 
     private func file(_ url: URL) -> URL {
-        dir.appendingPathComponent(SHA256.hash(data: Data(url.absoluteString.utf8))
-            .map { String(format: "%02x", $0) }.joined())
+        dir.appendingPathComponent(url.absoluteString.sha256Hex)
     }
 
     func image(_ url: URL, maxPixel: CGFloat = 800) async -> UIImage? {
-        if let m = cached(url) { return m }
+        if let m = cached(url, maxPixel: maxPixel) { return m }
+        let key = cacheKey(url, maxPixel: maxPixel)
         let task: Task<UIImage?, Never> = lock.withLock {
-            if let t = inFlight[url] { return t }
+            if let t = inFlight[key] { return t }
             let t = Task.detached(priority: .userInitiated) { [self] () -> UIImage? in
+                defer { _ = lock.withLock { inFlight.removeValue(forKey: key) } }
                 let path = file(url)
-                var data = try? Data(contentsOf: path)
-                if data == nil, let (d, r) = try? await session.data(from: url),
-                   (r as? HTTPURLResponse)?.statusCode == 200 {
-                    data = d
-                    try? d.write(to: path, options: .atomic)
+                var img: UIImage?
+                if let diskData = try? Data(contentsOf: path) {
+                    if let decoded = Self.decode(diskData, maxPixel: maxPixel) {
+                        img = decoded
+                    } else {
+                        try? FileManager.default.removeItem(at: path)
+                    }
                 }
-                defer { _ = lock.withLock { inFlight.removeValue(forKey: url) } }
-                guard let data, let img = Self.decode(data, maxPixel: maxPixel) else { return nil }
-                memory.setObject(img, forKey: url as NSURL, cost: Int(img.size.width * img.size.height * img.scale * img.scale * 4))
+                if img == nil, let (d, r) = try? await session.data(from: url),
+                   (r as? HTTPURLResponse)?.statusCode == 200,
+                   let decoded = Self.decode(d, maxPixel: maxPixel) {
+                    try? d.write(to: path, options: .atomic)
+                    img = decoded
+                }
+                guard let img else { return nil }
+                memory.setObject(img, forKey: key as NSString, cost: Int(img.size.width * img.size.height * img.scale * img.scale * 4))
                 return img
             }
-            inFlight[url] = t
+            inFlight[key] = t
             return t
         }
         return await task.value
     }
 
-    func prefetch(_ urls: [URL]) {
-        for u in urls where cached(u) == nil { Task.detached(priority: .utility) { _ = await self.image(u) } }
+    func prefetch(_ urls: [URL], maxPixel: CGFloat = 800) {
+        for u in urls where cached(u, maxPixel: maxPixel) == nil {
+            Task.detached(priority: .utility) { _ = await self.image(u, maxPixel: maxPixel) }
+        }
     }
 
     private static func decode(_ data: Data, maxPixel: CGFloat) -> UIImage? {
@@ -78,7 +93,7 @@ struct CachedImage<Placeholder: View>: View {
     @State private var loaded: (url: URL, image: UIImage)?
 
     var body: some View {
-        let img = (loaded?.url == url ? loaded?.image : nil) ?? url.flatMap { ImagePipeline.shared.cached($0) }
+        let img = (loaded?.url == url ? loaded?.image : nil) ?? url.flatMap { ImagePipeline.shared.cached($0, maxPixel: maxPixel) }
         Group {
             if let img {
                 Image(uiImage: img).resizable()
