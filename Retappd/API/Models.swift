@@ -740,11 +740,18 @@ struct FriendRequestResult: Decodable {
 struct CheckinPage: Decodable {
     var checkins: [Checkin]
     var nextMaxId: Int?
+    /// Aggregate rating returned by beer check-in feeds (`rating.rating_score` / `rating.rating_count`),
+    /// notably friends' average rating when `type=friends`.
+    var ratingScore: Double?
+    var ratingCount: Int?
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
         checkins = c.items("checkins")
         nextMaxId = c.nested("pagination")?.int("max_id")
+        let r = c.nested("rating")
+        ratingScore = r?.double("rating_score").flatMap { $0 > 0 ? $0 : nil }
+        ratingCount = r?.int("rating_count")
     }
 }
 

@@ -122,8 +122,10 @@ row) for lists of many checkins at one place, grouped under recency labels
   checked in at, then a stats card (Check-ins, People, This month, Yours), a "Where" card (address to Google Maps, website), and
   `TaproomPageTabs` for Menu (sections as chips) and Check-ins (Everyone / Friends chips).
   A beer leads with its brewery (a link), name, style / ABV / IBU and a 96pt label carrying the
-  `HadCorner` if you've had it, then a card with everyone's rating beside yours, a stats card,
-  About (expandable), Flavours (passive chips) and recent check-ins as cards, with "Check in"
+  `HadCorner` if you've had it, then a card with everyone's rating beside yours (with a full-width
+  Friends average row underneath when friends have rated it), a stats card,
+  About (expandable), Flavours (passive chips) and recent check-ins as cards with an All / Friends
+  `TaproomSegmented` toggle, with "Check in"
   pinned at the bottom (hidden when the page was opened from inside the check-in screen). A
   brewery leads with its name over its type and location beside its logo, then ratings, stats, About,
   "Find them" link rows, and `TaproomPageTabs` for Beers (`BeerRow`s, "Show N more") and Check-ins.

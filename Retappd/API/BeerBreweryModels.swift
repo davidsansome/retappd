@@ -22,6 +22,10 @@ struct BeerInfo: Decodable {
     var stats: Stats?
     /// The signed-in user's own rating (`auth_rating`), nil if they haven't rated it.
     var yourRating: Double?
+    /// Average rating from the signed-in user's friends (`friends_ratings.rating_score`), nil if none.
+    var friendsRating: Double?
+    /// Number of friend ratings (`friends_ratings.rating_count`).
+    var friendsRatingCount: Int?
     var hasHad: Bool
     var isInWishlist: Bool?
     var isInProduction: Bool?
@@ -64,6 +68,9 @@ struct BeerInfo: Decodable {
                   people: $0.int("total_user_count"), yours: $0.int("user_count"))
         }
         yourRating = c.double("auth_rating").flatMap { $0 > 0 ? $0 : nil }
+        let friendsRatings = c.nested("friends_ratings")
+        friendsRating = friendsRatings?.double("rating_score").flatMap { $0 > 0 ? $0 : nil }
+        friendsRatingCount = friendsRatings?.int("rating_count")
         hasHad = c.bool("has_had") ?? ((stats?.yours ?? 0) > 0 || yourRating != nil)
         isInWishlist = c.bool("wish_list")
         isInProduction = c.bool("is_in_production")

@@ -2,6 +2,8 @@ import SwiftUI
 
 @Observable @MainActor
 final class BeerModel {
+    enum CheckinScope: Hashable { case all, friends }
+
     /// What we knew when the page opened, kept up to date from the full record as it loads.
     private(set) var beer: BeerLite
     private(set) var info: BeerInfo?
@@ -11,18 +13,63 @@ final class BeerModel {
     private(set) var loadError: String?
     /// True once the initial parallel `info` + `flavors` fetch has settled (or failed).
     private(set) var detailsLoaded = false
+    var checkinScope: CheckinScope = .all
     let checkins: CheckinListModel
+    let friendsCheckins: CheckinListModel
     private var firstLoad: Task<Void, Never>?
 
-    init(beer: BeerLite) {
+    init(
+        beer: BeerLite,
+        checkins: CheckinListModel? = nil,
+        friendsCheckins: CheckinListModel? = nil
+    ) {
         self.beer = beer
-        checkins = CheckinListModel(source: .beer(beer.bid))
+        self.checkins = checkins ?? CheckinListModel(source: .beer(beer.bid, friendsOnly: false))
+        self.friendsCheckins = friendsCheckins ?? CheckinListModel(source: .beer(beer.bid, friendsOnly: true))
     }
 
     var isLoadingDetails: Bool { info == nil && !detailsLoaded }
     var hadIt: Bool { HadBeers.shared.has(beer.bid, fallback: info?.hasHad ?? beer.hasHad) }
     var breweryId: Int? { info?.brewery.flatMap { $0.id > 0 ? $0.id : nil } ?? beer.breweryId }
     var breweryName: String { info?.brewery?.name ?? beer.brewery }
+
+    /// The active check-in list for the currently selected scope.
+    var activeCheckins: CheckinListModel {
+        checkinScope == .all ? checkins : friendsCheckins
+    }
+
+    /// Friends' average rating from `beer/info` (`friends_ratings`), falling back to the
+    /// aggregate rating returned by `beer/checkins?type=friends` if loaded.
+    var friendsRating: Double? {
+        if let r = info?.friendsRating, r > 0 { return r }
+        if let r = friendsCheckins.ratingScore, r > 0 { return r }
+        return nil
+    }
+
+    /// Number of friend ratings from `beer/info` (`friends_ratings`), falling back to
+    /// `beer/checkins?type=friends`.
+    var friendsRatingCount: Int? {
+        if let n = info?.friendsRatingCount, n > 0 { return n }
+        if let n = friendsCheckins.ratingCount, n > 0 { return n }
+        return nil
+    }
+
+    /// Formatted caption for the friends rating row ("1 rating" / "11 ratings").
+    var friendsRatingCaption: String? {
+        guard let n = friendsRatingCount, n > 0 else { return nil }
+        return n == 1 ? "1 rating" : "\(n.formatted()) ratings"
+    }
+
+    /// Refreshes the public check-ins, plus friends' check-ins if they are showing or already loaded.
+    func refreshCheckins() async {
+        async let all: Void = checkins.refresh()
+        if checkinScope == .friends || !friendsCheckins.items.isEmpty {
+            async let friends: Void = friendsCheckins.refresh()
+            _ = await (all, friends)
+        } else {
+            await all
+        }
+    }
 
     /// Loads the page. The first load runs in a task of its own, so leaving the page part way
     /// through doesn't leave it half loaded when it's shown again.
@@ -52,7 +99,7 @@ final class BeerModel {
         if info?.hasHad == true, yourRating == nil { await loadUserRating() }
     }
 
-    private func applyInfo(_ i: BeerInfo) {
+    func applyInfo(_ i: BeerInfo) {
         info = i
         yourRating = i.yourRating
         beer = i.lite
@@ -142,11 +189,15 @@ struct BeerView: View {
             }
         }
         .task { await model.load() }
-        .task { await model.checkins.loadIfNeeded() }
+        .task(id: model.checkinScope) {
+            let list = model.activeCheckins
+            // Not tied to this view: switching All/Friends mid-request would otherwise cancel it.
+            await Task { await list.loadIfNeeded() }.value
+        }
         .loadingShopPrices(beerID: model.beer.bid, into: $shopPrices)
         .refreshable {
             async let details: Void = model.load(force: true)
-            async let checkins: Void = model.checkins.refresh()
+            async let checkins: Void = model.refreshCheckins()
             async let prices = refreshShopPrices(beerID: model.beer.bid)
             _ = await (details, checkins)
             if case .updated(let refreshed) = await prices { shopPrices = refreshed }
@@ -230,7 +281,7 @@ struct BeerView: View {
 
     // MARK: Ratings
 
-    /// The global rating beside yours.
+    /// The global rating beside yours, with friends' average rating underneath when available.
     private var ratings: some View {
         TaproomRatingCard(
             leading: .init(
@@ -239,7 +290,8 @@ struct BeerView: View {
                 caption: model.beer.ratingCount.map { "\($0.formatted()) ratings" }
                     ?? (model.isLoadingDetails ? "1,234 ratings" : nil),
                 isLoading: model.beer.rating == nil && model.isLoadingDetails,
-                isCaptionLoading: model.beer.ratingCount == nil && model.isLoadingDetails
+                isCaptionLoading: model.beer.ratingCount == nil && model.isLoadingDetails,
+                accessibilityID: "beer.ratings.everyone"
             ),
             trailing: model.hadIt
                 ? .init(
@@ -247,15 +299,25 @@ struct BeerView: View {
                     rating: model.yourRating,
                     empty: "Not rated",
                     caption: yourCheckinsText,
-                    isLoading: model.yourRating == nil && model.isLoadingDetails
+                    isLoading: model.yourRating == nil && model.isLoadingDetails,
+                    accessibilityID: "beer.ratings.you"
                 )
                 : .init(
                     title: "You",
                     rating: nil,
                     empty: "Not had",
                     caption: "Check it in to rate it",
-                    isCaptionLoading: model.isLoadingDetails
+                    isCaptionLoading: model.isLoadingDetails,
+                    accessibilityID: "beer.ratings.you"
+                ),
+            footer: model.friendsRating.map { rating in
+                .init(
+                    title: "Friends",
+                    rating: rating,
+                    caption: model.friendsRatingCaption,
+                    accessibilityID: "beer.ratings.friends"
                 )
+            }
         )
     }
 
@@ -284,26 +346,40 @@ struct BeerView: View {
     // MARK: Check-ins
 
     @ViewBuilder private var recentCheckins: some View {
-        let list = model.checkins
+        let list = model.activeCheckins
         TaproomSection("Recent check-ins") {
-            // Lazy, so a row's onAppear fires as it scrolls into view and pages load one at a time.
-            LazyVStack(alignment: .leading, spacing: 12) {
-                ForEach(list.items) { c in
-                    NavigationLink(value: CheckinRoute(checkin: c, listID: listID)) {
-                        CheckinRow(checkin: c)
+            VStack(alignment: .leading, spacing: 12) {
+                TaproomSegmented(
+                    options: [(.all, "All"), (.friends, "Friends")],
+                    selection: $model.checkinScope,
+                    accessibilityID: { $0 == .all ? "beer.checkins.all" : "beer.checkins.friends" }
+                )
+
+                // Lazy, so a row's onAppear fires as it scrolls into view and pages load one at a time.
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    ForEach(list.items) { c in
+                        NavigationLink(value: CheckinRoute(checkin: c, listID: listID)) {
+                            CheckinRow(checkin: c)
+                        }
+                        .buttonStyle(CardLinkStyle())
+                        .onAppear { list.onAppear(c) }
                     }
-                    .buttonStyle(CardLinkStyle())
-                    .onAppear { list.onAppear(c) }
+                    if list.items.isEmpty && (list.isRefreshing || list.isLoadingMore) {
+                        ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
+                    } else if let error = list.error {
+                        ErrorRow(message: error) { Task { await list.refresh() } }
+                    } else if list.items.isEmpty {
+                        Text(model.checkinScope == .all
+                             ? "No one has checked in this beer yet."
+                             : "None of your friends have checked in this beer yet.")
+                            .font(.callout)
+                            .foregroundStyle(Taproom.muted)
+                            .accessibilityIdentifier("beer.checkins.empty")
+                    } else if list.isLoadingMore {
+                        ProgressView().frame(maxWidth: .infinity).padding(.vertical, 16)
+                    }
                 }
-                if list.items.isEmpty && (list.isRefreshing || list.isLoadingMore) {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
-                } else if let error = list.error {
-                    ErrorRow(message: error) { Task { await list.refresh() } }
-                } else if list.items.isEmpty {
-                    Text("No one has checked in this beer yet.").font(.callout).foregroundStyle(Taproom.muted)
-                } else if list.isLoadingMore {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 16)
-                }
+                .id(model.checkinScope)
             }
         }
     }
