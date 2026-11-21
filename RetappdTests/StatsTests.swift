@@ -189,4 +189,35 @@ final class StatsTests: XCTestCase {
         let old = StatsPeriod.custom(start: day(2024, 11, 12), end: day(2024, 11, 18), today: today, calendar: cal)
         XCTAssertTrue(old.caption(today: today, calendar: cal).contains("2024"))
     }
+
+    func testAllClampsFutureFirstCheckin() {
+        let today = day(2026, 11, 18)
+        let future = day(2026, 11, 20)
+        let p = StatsPeriod.make(.all, today: today, firstCheckin: future, calendar: cal)
+        XCTAssertEqual(p.start, today)
+        XCTAssertEqual(p.end, today)
+        XCTAssertGreaterThanOrEqual(p.dayCount(calendar: cal), 1)
+        XCTAssertEqual(p.dayCount(calendar: cal), 1)
+        XCTAssertFalse(p.buckets(calendar: cal).isEmpty)
+        XCTAssertEqual(p.buckets(calendar: cal).count, 1)
+    }
+
+    func testCustomCaptionsAlwaysShowDayPrecision() {
+        let today = day(2026, 11, 18)
+        let monthsSameYear = StatsPeriod.custom(start: day(2026, 3, 10), end: day(2026, 6, 20), today: today, calendar: cal)
+        XCTAssertEqual(monthsSameYear.granularity, .month)
+        let c1 = monthsSameYear.caption(today: today, calendar: cal)
+        XCTAssertTrue(c1.contains("10") && c1.contains("20"), c1)
+        XCTAssertFalse(c1.contains("2026"), c1)
+
+        let monthsCrossYear = StatsPeriod.custom(start: day(2025, 3, 10), end: day(2026, 6, 20), today: today, calendar: cal)
+        XCTAssertEqual(monthsCrossYear.granularity, .month)
+        let c2 = monthsCrossYear.caption(today: today, calendar: cal)
+        XCTAssertTrue(c2.contains("10") && c2.contains("20") && c2.contains("2025") && c2.contains("2026"), c2)
+
+        let years = StatsPeriod.custom(start: day(2019, 8, 5), end: day(2026, 2, 3), today: today, calendar: cal)
+        XCTAssertEqual(years.granularity, .year)
+        let c3 = years.caption(today: today, calendar: cal)
+        XCTAssertTrue(c3.contains("5") && c3.contains("3") && c3.contains("2019") && c3.contains("2026"), c3)
+    }
 }

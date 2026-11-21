@@ -10,7 +10,11 @@ struct SettingsView: View {
     @State private var loadError: String?
     @State private var saveError: String?
     @State private var confirmSignOut = false
-    @State private var notifications = NotificationService.shared
+    @State private var settingTasks: [PartialKeyPath<AccountSettings>: Task<Void, Never>] = [:]
+    @State private var settingGenerations: [PartialKeyPath<AccountSettings>: Int] = [:]
+    @State private var styleTasks: [Int: Task<Void, Never>] = [:]
+    @State private var styleGenerations: [Int: Int] = [:]
+    private let notifications = NotificationService.shared
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -69,7 +73,6 @@ struct SettingsView: View {
                     }
                     Button("Sign out", role: .destructive) { confirmSignOut = true }
                         .buttonStyle(TaproomOutlineButton())
-                        .foregroundStyle(.red)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 8)
@@ -80,8 +83,7 @@ struct SettingsView: View {
             .frame(maxWidth: .readableContentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .foregroundStyle(Taproom.ink)
-        .background(Taproom.background)
+        .taproomScreen()
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
@@ -190,12 +192,17 @@ struct SettingsView: View {
             get: { settings?[keyPath: key] ?? false },
             set: { on in
                 settings?[keyPath: key] = on
-                Task {
+                settingTasks[key]?.cancel()
+                let gen = (settingGenerations[key] ?? 0) + 1
+                settingGenerations[key] = gen
+                settingTasks[key] = Task {
                     do {
                         _ = try await UntappdAPI.shared.data(request(on))
+                        guard settingGenerations[key] == gen else { return }
                         if key == \.ratingBump { CheckInOptions.shared.setRatingBump(on) }
                         await invalidateCache()
                     } catch {
+                        guard settingGenerations[key] == gen, !error.isCancellation else { return }
                         settings?[keyPath: key] = !on
                         saveError = error.localizedDescription
                     }
@@ -209,13 +216,19 @@ struct SettingsView: View {
     private func styleChip(_ style: Binding<ParentStyleOptOut>) -> some View {
         let on = style.wrappedValue.isEnabled
         return Button {
-            style.wrappedValue.isEnabled = !on
+            let next = !on
+            style.wrappedValue.isEnabled = next
             let id = style.wrappedValue.id
-            Task {
+            styleTasks[id]?.cancel()
+            let gen = (styleGenerations[id] ?? 0) + 1
+            styleGenerations[id] = gen
+            styleTasks[id] = Task {
                 do {
-                    _ = try await UntappdAPI.shared.data(.setParentStyle(id, enabled: !on))
+                    _ = try await UntappdAPI.shared.data(.setParentStyle(id, enabled: next))
+                    guard styleGenerations[id] == gen else { return }
                     await invalidateCache()
                 } catch {
+                    guard styleGenerations[id] == gen, !error.isCancellation else { return }
                     if let i = styles.firstIndex(where: { $0.id == id }) { styles[i].isEnabled = on }
                     saveError = error.localizedDescription
                 }
@@ -241,7 +254,7 @@ struct SettingsView: View {
         do {
             settings = try await cacheThenNetwork(.userSettings, as: AccountSettings.self, onCached: { settings = $0 })
         } catch {
-            if settings == nil { loadError = error.localizedDescription }
+            if !error.isCancellation, settings == nil { loadError = error.localizedDescription }
         }
     }
 

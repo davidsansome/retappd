@@ -6,7 +6,7 @@ import SwiftUI
 struct FriendsListView: View {
     /// The signed-in user's username, so adding yourself can be refused.
     let username: String
-    @State private var options = CheckInOptions.shared
+    private let options = CheckInOptions.shared
     @State private var query = ""
     @State private var showingAdd = false
     @State private var confirmingRemoval: Friend?
@@ -40,10 +40,7 @@ struct FriendsListView: View {
                     TaproomSearchField(text: $query, prompt: "Search friends")
                 }
 
-                if options.friendships.isEmpty && !options.requests.isEmpty {
-                    Text("Accept a request to add your first friend")
-                        .font(.subheadline).foregroundStyle(Taproom.muted)
-                } else if options.friendships.isEmpty {
+                if options.friendships.isEmpty {
                     placeholder
                 } else if shown.isEmpty {
                     ContentUnavailableView.search(text: query).padding(.top, 24)
@@ -72,6 +69,8 @@ struct FriendsListView: View {
             }
             .padding(.horizontal, Taproom.margin)
             .padding(.bottom, 24)
+            .frame(maxWidth: .readableContentWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
         .taproomScreen()
@@ -143,6 +142,9 @@ struct FriendsListView: View {
             ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
         } else if let e = options.friendsError {
             ErrorRow(message: e) { Task { await options.reloadFriends() } }
+        } else if !options.requests.isEmpty {
+            Text("Accept a request to add your first friend")
+                .font(.subheadline).foregroundStyle(Taproom.muted)
         } else {
             ContentUnavailableView {
                 Label("No friends yet", systemImage: "person.2")
@@ -219,9 +221,10 @@ private struct FriendRow: View {
 struct AddFriendView: View {
     let username: String
     @Environment(\.dismiss) private var dismiss
-    @State private var options = CheckInOptions.shared
+    private let options = CheckInOptions.shared
     @State private var typed = ""
     @State private var phase = Phase.idle
+    @State private var lookupTask: Task<Void, Never>?
     @State private var sending = false
     @State private var sent: String?
     @State private var sendError: String?
@@ -262,6 +265,8 @@ struct AddFriendView: View {
                 }
                 .padding(.horizontal, Taproom.margin)
                 .padding(.bottom, 24)
+                .frame(maxWidth: .readableContentWidth, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
             .taproomScreen()
@@ -274,7 +279,17 @@ struct AddFriendView: View {
                         .labelStyle(.iconOnly).tint(Taproom.ink)
                 }
             }
-            .onChange(of: typed) { if phase != .looking { phase = .idle; sent = nil; sendError = nil } }
+            .onChange(of: typed) {
+                lookupTask?.cancel()
+                lookupTask = nil
+                phase = .idle
+                sent = nil
+                sendError = nil
+            }
+            .onDisappear {
+                lookupTask?.cancel()
+                lookupTask = nil
+            }
         }
     }
 
@@ -339,16 +354,20 @@ struct AddFriendView: View {
 
     private func lookUp() {
         guard let name = Friends.normalized(typed), phase != .looking else { return }
+        lookupTask?.cancel()
         phase = .looking
         sent = nil
         sendError = nil
-        Task {
+        lookupTask = Task {
             do {
                 let info = try await UntappdAPI.shared.fetch(.userInfo(name), as: UserInfo.self)
+                guard !Task.isCancelled, Friends.normalized(typed) == name else { return }
                 if let p = info.user, p.id != 0 { phase = .found(p) } else { phase = .missing(name) }
             } catch let e as APIError {
+                guard !Task.isCancelled, !e.isCancellation, Friends.normalized(typed) == name else { return }
                 phase = Friends.isNotFound(e) ? .missing(name) : .failed(e.localizedDescription)
             } catch {
+                guard !Task.isCancelled, !error.isCancellation, Friends.normalized(typed) == name else { return }
                 phase = .failed(error.localizedDescription)
             }
         }

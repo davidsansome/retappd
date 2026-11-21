@@ -14,12 +14,12 @@ struct LoginView: View {
         ScrollViewReader { proxy in
             form
                 // Keep the field you're typing in clear of the keyboard and the Sign in bar.
-                .onChange(of: focus) { _, f in
-                    guard let f else { return }
-                    Task {
-                        try? await Task.sleep(for: .milliseconds(300))  // let the keyboard arrive
+                .task(id: focus) {
+                    guard let f = focus else { return }
+                    do {
+                        try await Task.sleep(for: .milliseconds(300))  // let the keyboard arrive
                         withAnimation { proxy.scrollTo(f, anchor: .bottom) }
-                    }
+                    } catch {}
                 }
         }
         .onAppear { focus = .user }
@@ -71,7 +71,7 @@ struct LoginView: View {
                 .id(Field.pass)
 
                 if let error {
-                    Text(error).font(.footnote).foregroundStyle(.red)
+                    Text(error).font(.footnote).foregroundStyle(Taproom.destructive)
                 }
             }
             .padding(.horizontal, Taproom.margin)
@@ -85,7 +85,7 @@ struct LoginView: View {
                     if busy { ProgressView().tint(Taproom.background) } else { Text("Sign in") }
                 }
                 .buttonStyle(TaproomPrimaryButton())
-                .disabled(busy || username.isEmpty || password.isEmpty)
+                .disabled(busy || trimmedUsername.isEmpty || password.isEmpty)
                 Text("Your password goes straight to Untappd.")
                     .font(.caption).foregroundStyle(Taproom.muted)
             }
@@ -96,14 +96,19 @@ struct LoginView: View {
         .taproomScreen()
     }
 
+    private var trimmedUsername: String {
+        username.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func submit() {
-        guard !username.isEmpty, !password.isEmpty, !busy else { return }
+        let user = trimmedUsername
+        guard !user.isEmpty, !password.isEmpty, !busy else { return }
         busy = true
         error = nil
         Task {
             defer { busy = false }
             do {
-                try await auth.signIn(username: username.trimmingCharacters(in: .whitespaces), password: password)
+                try await auth.signIn(username: user, password: password)
             } catch {
                 self.error = error.localizedDescription
             }

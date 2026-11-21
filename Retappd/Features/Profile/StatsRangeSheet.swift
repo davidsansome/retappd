@@ -15,15 +15,20 @@ struct StatsRangeSheet: View {
     private enum Field { case start, end }
 
     init(start: Date, end: Date, earliest: Date, latest: Date, onDone: @escaping (Date, Date) -> Void) {
-        _start = State(initialValue: start)
-        _end = State(initialValue: end)
+        let cal = Calendar.current
+        let hi = cal.startOfDay(for: latest)
+        let lo = min(cal.startOfDay(for: earliest), hi)
+        let clampedStart = min(max(cal.startOfDay(for: start), lo), hi)
+        let clampedEnd = min(max(cal.startOfDay(for: end), clampedStart), hi)
+        _start = State(initialValue: clampedStart)
+        _end = State(initialValue: clampedEnd)
         self.earliest = earliest
         self.latest = latest
         self.onDone = onDone
     }
 
-    private var lo: Date { Calendar.current.startOfDay(for: earliest) }
     private var hi: Date { Calendar.current.startOfDay(for: latest) }
+    private var lo: Date { min(Calendar.current.startOfDay(for: earliest), hi) }
 
     var body: some View {
         NavigationStack {
@@ -34,7 +39,7 @@ struct StatsRangeSheet: View {
                         fieldChip("To", date: end, field: .end)
                     }
                     DatePicker("", selection: editing == .start ? startBinding : endBinding,
-                               in: editing == .start ? lo...hi : start...hi, displayedComponents: .date)
+                               in: editing == .start ? lo...hi : min(start, hi)...hi, displayedComponents: .date)
                         .datePickerStyle(.graphical)
                         .tint(Taproom.amber)
                         .labelsHidden()
@@ -47,6 +52,8 @@ struct StatsRangeSheet: View {
                 .padding(.horizontal, Taproom.margin)
                 .padding(.top, 8)
                 .padding(.bottom, 24)
+                .frame(maxWidth: .readableContentWidth, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
             .taproomScreen()
             .navigationTitle("Date range")
@@ -63,10 +70,16 @@ struct StatsRangeSheet: View {
     }
 
     private var startBinding: Binding<Date> {
-        Binding(get: { start }, set: { start = $0; if end < $0 { end = $0 } })
+        Binding(get: { start }, set: {
+            let d = min(max(Calendar.current.startOfDay(for: $0), lo), hi)
+            start = d
+            if end < d { end = d }
+        })
     }
     private var endBinding: Binding<Date> {
-        Binding(get: { end }, set: { end = max($0, start) })
+        Binding(get: { end }, set: {
+            end = min(max(Calendar.current.startOfDay(for: $0), start), hi)
+        })
     }
 
     private func fieldChip(_ title: String, date: Date, field: Field) -> some View {

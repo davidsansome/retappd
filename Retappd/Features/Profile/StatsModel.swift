@@ -102,7 +102,7 @@ struct StatsPeriod: Equatable {
             return custom(start: add(.day, 1, add(.month, -1, todayStart)), end: todayStart, today: today,
                           firstCheckin: firstCheckin, calendar: cal)
         case .all:
-            let start = cal.startOfDay(for: firstCheckin ?? allTimeStart)
+            let start = min(cal.startOfDay(for: firstCheckin ?? allTimeStart), todayStart)
             return StatsPeriod(range: range, offset: 0, start: start, end: todayStart, granularity: .year)
         }
     }
@@ -112,7 +112,7 @@ struct StatsPeriod: Equatable {
     /// Buckets: up to 62 days is days, up to 3 years (1096 days) months, longer years.
     static func custom(start: Date, end: Date, today: Date, firstCheckin: Date? = nil, calendar cal: Calendar) -> StatsPeriod {
         let todayStart = cal.startOfDay(for: today)
-        let floor = cal.startOfDay(for: firstCheckin ?? allTimeStart)
+        let floor = min(cal.startOfDay(for: firstCheckin ?? allTimeStart), todayStart)
         let e = min(max(cal.startOfDay(for: end), floor), todayStart)
         let s = min(max(cal.startOfDay(for: start), floor), e)
         let days = (cal.dateComponents([.day], from: s, to: e).day ?? 0) + 1
@@ -155,20 +155,20 @@ struct StatsPeriod: Equatable {
     }
 
     /// "NOV 12 – NOV 18" (with years unless both days are this year), "NOV 2025 – NOV 2026", "2013 – 2026", or just "2026" for a single year.
+    /// Custom ranges always use day precision so users see the exact dates they picked.
     func caption(today: Date = Date(), calendar cal: Calendar = .current) -> String {
-        let f = DateFormatter()
-        f.calendar = cal
-        f.timeZone = cal.timeZone
-        switch granularity {
-        case .day:
+        var style = Date.FormatStyle(calendar: cal, timeZone: cal.timeZone)
+        if range == .custom || granularity == .day {
             // Add the year when the days aren't both in this year.
             let year = cal.component(.year, from: today)
             let inYear = cal.component(.year, from: start) == year && cal.component(.year, from: end) == year
-            f.setLocalizedDateFormatFromTemplate(inYear ? "MMM d" : "MMM d yyyy")
-        case .month: f.setLocalizedDateFormatFromTemplate("MMM yyyy")
-        case .year: f.setLocalizedDateFormatFromTemplate("yyyy")
+            style = inYear ? style.month(.abbreviated).day() : style.month(.abbreviated).day().year()
+        } else if granularity == .month {
+            style = style.month(.abbreviated).year()
+        } else {
+            style = style.year()
         }
-        let (a, b) = (f.string(from: start), f.string(from: end))
+        let (a, b) = (start.formatted(style), end.formatted(style))
         return (a == b ? a : "\(a) – \(b)").uppercased()
     }
 

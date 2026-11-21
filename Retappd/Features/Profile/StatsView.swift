@@ -28,8 +28,7 @@ struct StatsView: View {
                 periodHeader
                 chartCard
                 if let error = model.error {
-                    Text(error).font(.footnote).foregroundStyle(Taproom.muted)
-                    Button("Try again") { model.load(force: true) }.buttonStyle(TaproomOutlineButton())
+                    ErrorRow(message: error) { model.load(force: true) }
                 }
                 if let s = model.stats {
                     TaproomSection("Check-in breakdown") { breakdown(s) }
@@ -39,6 +38,8 @@ struct StatsView: View {
             .padding(.horizontal, Taproom.margin)
             .padding(.top, 8)
             .padding(.bottom, 32)
+            .frame(maxWidth: .readableContentWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
         .taproomScreen()
         .navigationTitle("Statistics")
@@ -71,13 +72,14 @@ struct StatsView: View {
 
     /// The period stepper, then the totals; while scrubbing, the touched bucket's figures instead.
     private var periodHeader: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let caption = model.period.caption()
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 stepButton("chevron.left", label: "Previous period", enabled: model.canStepBack) { model.step(1); selected = nil }
                 Spacer()
                 Button { picking = true } label: {
                     HStack(spacing: 6) {
-                        Text(model.period.caption())
+                        Text(caption)
                             .font(.footnote.weight(.bold)).tracking(0.6)
                             .contentTransition(.numericText())
                             .lineLimit(1).minimumScaleFactor(0.7)
@@ -88,7 +90,7 @@ struct StatsView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(model.period.caption())
+                .accessibilityLabel(caption)
                 .accessibilityHint("Choose a date range")
                 .accessibilityAddTraits([.isHeader, .isButton])
                 Spacer()
@@ -203,15 +205,20 @@ struct StatsView: View {
                     AxisValueLabel(format: .dateTime.weekday(.abbreviated), centered: true).foregroundStyle(Taproom.muted).font(.caption2)
                 }
             case .day:
-                AxisMarks(values: .stride(by: .day, count: 7)) { _ in
+                AxisMarks(values: .stride(by: .day, count: max(1, (buckets.count + 4) / 5))) { _ in
                     AxisValueLabel(format: .dateTime.day().month(.abbreviated), centered: true).foregroundStyle(Taproom.muted).font(.caption2)
                 }
-            case .month:
+            case .month where buckets.count <= 12:
                 AxisMarks(values: .stride(by: .month)) { _ in
-                    AxisValueLabel(format: .dateTime.month(.narrow), centered: true).foregroundStyle(Taproom.muted).font(.caption2)
+                    AxisValueLabel(format: buckets.count <= 6 ? .dateTime.month(.abbreviated) : .dateTime.month(.narrow),
+                                   centered: true).foregroundStyle(Taproom.muted).font(.caption2)
+                }
+            case .month:
+                AxisMarks(values: .stride(by: .month, count: max(1, (buckets.count + 5) / 6))) { _ in
+                    AxisValueLabel(format: .dateTime.month(.abbreviated).year(.twoDigits), centered: true).foregroundStyle(Taproom.muted).font(.caption2)
                 }
             case .year:
-                AxisMarks(values: .stride(by: .year, count: max(1, buckets.count / 6))) { _ in
+                AxisMarks(values: .stride(by: .year, count: max(1, (buckets.count + 5) / 6))) { _ in
                     AxisValueLabel(format: .dateTime.year(), centered: true).foregroundStyle(Taproom.muted).font(.caption2)
                 }
             }
@@ -288,7 +295,7 @@ struct StatsView: View {
             ("New places", s.newVenues.formatted()),
             ("Places visited", s.totalVenues.formatted()),
             // Worked out here: the API rounds its own average to a whole number (0 for most people).
-            ("Check-ins per day", (Double(s.totalCheckins) / Double(model.period.dayCount(calendar: .current)))
+            ("Check-ins per day", (Double(s.totalCheckins) / Double(max(1, model.period.dayCount(calendar: .current))))
                 .formatted(.number.precision(.fractionLength(0...1)))),
             ("New beer ratio", "\(s.newBeersPercent)%"),
             ("New place ratio", "\(s.newVenuesPercent)%"),
