@@ -190,6 +190,7 @@ struct ProfileView: View {
 
             VStack(spacing: 10) {
                 if isAccountTab { statisticsEntry }
+                listsEntry
                 venuesEntry(username: resolvedUsername, displayName: resolvedDisplayName, isOwnProfile: isOwn)
             }
             .padding(.top, Taproom.sectionSpacing)
@@ -242,6 +243,31 @@ struct ProfileView: View {
         }
         .buttonStyle(CardLinkStyle())
         .accessibilityIdentifier("profile.venuesEntry")
+    }
+
+    /// Opens the user's Wish List and custom lists.
+    private var listsEntry: some View {
+        NavigationLink(
+            value: BeerBreweryRoute.userLists(
+                username: username,
+                displayName: isAccountTab ? nil : (info?.displayName ?? placeholder?.displayName)
+            )
+        ) {
+            HStack(spacing: 12) {
+                Image(systemName: "bookmark.fill").font(.title3).foregroundStyle(Taproom.amber).frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Lists").font(.body.weight(.heavy))
+                    Text(isAccountTab ? "Wish List and custom lists" : "Wish List and public lists")
+                        .font(.footnote).foregroundStyle(Taproom.muted)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(Taproom.muted)
+            }
+            .padding(.horizontal, 14).frame(minHeight: 60)
+            .taproomCard()
+        }
+        .buttonStyle(CardLinkStyle())
+        .accessibilityIdentifier("profile.listsEntry")
     }
 
     private var emptyText: String {

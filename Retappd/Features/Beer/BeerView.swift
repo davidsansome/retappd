@@ -10,6 +10,7 @@ final class BeerModel {
     private(set) var flavors: [FlavorTag] = []
     /// The user's own rating, from `beer/info`, or `beer/userrating` if that didn't have it.
     private(set) var yourRating: Double?
+    private(set) var isInWishlist = false
     private(set) var loadError: String?
     /// True once the initial parallel `info` + `flavors` fetch has settled (or failed).
     private(set) var detailsLoaded = false
@@ -102,7 +103,13 @@ final class BeerModel {
     func applyInfo(_ i: BeerInfo) {
         info = i
         yourRating = i.yourRating
+        if let wish = i.isInWishlist { isInWishlist = wish }
         beer = i.lite
+    }
+
+    func setWishlistStatus(_ inWishlist: Bool) {
+        isInWishlist = inWishlist
+        info?.isInWishlist = inWishlist
     }
 
     private func fetchInfo() async -> BeerInfo? {
@@ -132,6 +139,7 @@ final class BeerModel {
 struct BeerView: View {
     @State private var model: BeerModel
     @State private var checkInBeer: BeerLite?
+    @State private var showingListsSheet = false
     /// The beer's prices at shops, from Metabeer, when shop prices are on and a shop has it.
     @State private var shopPrices: MetabeerOffers?
     /// Tags this page's links, so its rows only show as selected for checkins it opened itself.
@@ -139,6 +147,7 @@ struct BeerView: View {
     @State private var containerWidth: CGFloat = 0
     @Environment(\.beerPageCanCheckIn) private var canCheckIn
     @Environment(DiscoverModel.self) private var discover
+    @Environment(AuthStore.self) private var auth
 
     init(beer: BeerLite) { _model = State(initialValue: BeerModel(beer: beer)) }
 
@@ -180,6 +189,27 @@ struct BeerView: View {
         .taproomScreen()
         .taproomScrollTitle(model.beer.name)
         .toolbarBackground(Taproom.background, for: .navigationBar)
+        .toolbar {
+            if auth.username != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingListsSheet = true } label: {
+                        Image(systemName: model.isInWishlist ? "bookmark.fill" : "bookmark")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(model.isInWishlist ? Taproom.amber : Taproom.ink)
+                    }
+                    .accessibilityLabel(model.isInWishlist ? "On Wish List" : "Add to Wish List or list")
+                    .accessibilityHint("Manage wishlist and custom lists for this beer")
+                    .accessibilityIdentifier("beer.listsButton")
+                }
+            }
+        }
+        .sheet(isPresented: $showingListsSheet) {
+            if let username = auth.username {
+                BeerListsSheet(beer: model.beer, username: username) { inWishlist in
+                    model.setWishlistStatus(inWishlist)
+                }
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if canCheckIn {
                 Button { checkInBeer = model.beer } label: { Label("Check in", systemImage: "plus") }

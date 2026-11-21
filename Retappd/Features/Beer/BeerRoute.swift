@@ -14,6 +14,8 @@ enum BeerBreweryRoute: Hashable {
     case beer(BeerLite)
     case brewery(BreweryPreview)
     case badge(Checkin.Badge)
+    case userLists(username: String, displayName: String?)
+    case customList(CustomList, ownerUsername: String)
 
     /// The route to a badge's page; nil when its `badge_id` isn't known (the status request needs it).
     static func badge(of badge: Checkin.Badge) -> BeerBreweryRoute? {
@@ -47,6 +49,8 @@ extension View {
             case .beer(let beer): BeerView(beer: beer)
             case .brewery(let brewery): BreweryView(brewery: brewery)
             case .badge(let badge): BadgeView(badge: badge)
+            case .userLists(let username, let displayName): UserListsView(username: username, displayName: displayName)
+            case .customList(let list, let ownerUsername): CustomListDetailView(list: list, ownerUsername: ownerUsername)
             }
         }
         .navigationDestination(for: ProfileCollectionRoute.self) { route in

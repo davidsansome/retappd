@@ -227,6 +227,101 @@ extension APIRequest {
         ])
     }
 
+    /// The user's Wish List and custom lists (`GET /v4/custom_lists/userlists/{username}`).
+    /// `API.md` only captured this with `bid` (which adds `is_in_list` to each list); verified
+    /// live on 2026-11-21 that `bid` is optional and the endpoint also works for other users'
+    /// usernames (returning their Wish List and public lists).
+    static func userLists(_ username: String, bid: Int? = nil, offset: Int = 0, limit: Int = 25) -> APIRequest {
+        var q: [String: String] = ["limit": "\(limit)"]
+        if let bid { q["bid"] = "\(bid)" }
+        if offset > 0 { q["offset"] = "\(offset)" }
+        return APIRequest(path: "/v4/custom_lists/userlists/\(username)", query: q)
+    }
+
+    /// Items in a Wish List or custom list (`GET /v4/custom_lists/view/{listId}`).
+    /// Not in `untappd-private-api/docs/API.md`; verified live on 2026-11-21: returns
+    /// `{total_count, list, count, items, pagination}` where each beer item carries
+    /// `list_item_id`, `item_id`, `item_type`, `beer`, and `brewery`.
+    static func customListDetail(_ listId: Int, offset: Int = 0, limit: Int = 25) -> APIRequest {
+        var q: [String: String] = ["limit": "\(limit)"]
+        if offset > 0 { q["offset"] = "\(offset)" }
+        return APIRequest(path: "/v4/custom_lists/view/\(listId)", query: q)
+    }
+
+    /// Detailed metadata for a single custom-list item (`GET /v4/custom_lists/viewitemenhanced/{id}`).
+    static func customListItem(_ listItemId: Int) -> APIRequest {
+        APIRequest(path: "/v4/custom_lists/viewitemenhanced/\(listItemId)")
+    }
+
+    /// Adds a beer to a custom list (`POST /v4/custom_lists/additemenhanced/{id}`).
+    static func addBeerToList(_ listId: Int, bid: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/custom_lists/additemenhanced/\(listId)", form: [
+            "item_id": "\(bid)",
+            "item_type": "beer",
+        ])
+    }
+
+    /// Removes a beer from a custom list (`POST /v4/custom_lists/removeitem/{id}`).
+    /// Not in `untappd-private-api/docs/API.md`; verified live on 2026-11-21: takes `bid` in the
+    /// form body and returns `{result: "success", item_id}`.
+    static func removeBeerFromList(_ listId: Int, bid: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/custom_lists/removeitem/\(listId)", form: [
+            "bid": "\(bid)",
+        ])
+    }
+
+    /// Updates an item's enhanced metadata within a custom list (`POST /v4/custom_lists/upsertitem/{id}`).
+    static func upsertListItem(
+        _ listItemId: Int,
+        quantity: Int = 1,
+        notes: String = "",
+        containerId: Int? = nil,
+        purchaseDate: String = "",
+        bottledDate: String = "",
+        bestByDate: String = "",
+        purchaseLocationId: String = "",
+        purchasePrice: String = ""
+    ) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/custom_lists/upsertitem/\(listItemId)", form: [
+            "best_by_date": bestByDate,
+            "bottled_date": bottledDate,
+            "container": containerId.map(String.init) ?? "",
+            "notes": notes,
+            "purchase_date": purchaseDate,
+            "purchase_location_id": purchaseLocationId,
+            "purchase_price": purchasePrice,
+            "quantity": "\(quantity)",
+        ])
+    }
+
+    /// Adds a beer to the signed-in user's Wish List (`POST /v4/user/wishlist/add`).
+    /// Not in `untappd-private-api/docs/API.md`; verified live on 2026-11-21: takes `bid`,
+    /// returns `{result: "success", action: "add", beer: ...}` and updates `beer/info`'s `wish_list`.
+    static func addToWishlist(_ bid: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/user/wishlist/add", form: ["bid": "\(bid)"])
+    }
+
+    /// Removes a beer from the signed-in user's Wish List (`POST /v4/user/wishlist/delete`).
+    /// Not in `untappd-private-api/docs/API.md`; verified live on 2026-11-21: takes `bid` and
+    /// returns `{result: "success", action: "remove", beer: ...}`.
+    static func removeFromWishlist(_ bid: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/user/wishlist/delete", form: ["bid": "\(bid)"])
+    }
+
+    /// Toggles wishlist notification subscription (`POST /v4/beer/subscribewish`).
+    static func subscribeWishlist(_ on: Bool) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/beer/subscribewish", form: ["toggle_option": on ? "on" : "off"])
+    }
+
+    /// Beers the account is subscribed to (`GET /v4/beer/subscribes`), including
+    /// `wish_list_subscribe_status`.
+    static func beerSubscribes() -> APIRequest {
+        APIRequest(path: "/v4/beer/subscribes", query: [
+            "breweries": "true", "brewery_id": "", "countries": "true", "country_id": "",
+            "q": "", "sort": "date", "styles": "true", "type_id": "",
+        ])
+    }
+
     static func userInfo(_ username: String) -> APIRequest {
         APIRequest(path: "/v4/user/info/\(username)", query: ["compact": "true"])
     }
