@@ -9,6 +9,7 @@ struct FriendsListView: View {
     private let options = CheckInOptions.shared
     @State private var query = ""
     @State private var showingAdd = false
+    @State private var showingQR = false
     @State private var confirmingRemoval: Friend?
     @State private var removeError: String?
     @State private var requestError: String?
@@ -77,13 +78,19 @@ struct FriendsListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Taproom.background, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button("Friend QR code", systemImage: "qrcode") { showingQR = true }
+                    .labelStyle(.iconOnly)
+                    .tint(Taproom.ink)
+                    .accessibilityIdentifier("friends.qrButton")
                 Button("Add friend", systemImage: "person.badge.plus") { showingAdd = true }
                     .labelStyle(.iconOnly)
                     .tint(Taproom.ink)
+                    .accessibilityIdentifier("friends.addButton")
             }
         }
         .sheet(isPresented: $showingAdd) { AddFriendView(username: username) }
+        .sheet(isPresented: $showingQR) { FriendQRCodeSheet(username: username) }
         .confirmationDialog(
             confirmingRemoval.map { "Remove @\($0.user.userName) as a friend?" } ?? "",
             isPresented: Binding(get: { confirmingRemoval != nil }, set: { if !$0 { confirmingRemoval = nil } }),
@@ -223,14 +230,10 @@ private struct FriendRow: View {
 struct AddFriendView: View {
     let username: String
     @Environment(\.dismiss) private var dismiss
-    private let options = CheckInOptions.shared
     @State private var typed = ""
     @State private var phase = Phase.idle
     @State private var lookupTask: Task<Void, Never>?
-    @State private var sending = false
-    @State private var sent: String?
-    @State private var sendError: String?
-    @State private var accepting = false
+    @State private var showingScanner = false
 
     enum Phase: Equatable {
         case idle
@@ -264,6 +267,17 @@ struct AddFriendView: View {
                         }
                     }
                     result
+                    if case .idle = phase {
+                        TaproomSection("Or scan a QR code") {
+                            Button {
+                                showingScanner = true
+                            } label: {
+                                Label("Scan a friend's QR code", systemImage: "qrcode.viewfinder")
+                            }
+                            .buttonStyle(TaproomOutlineButton())
+                            .accessibilityIdentifier("addFriend.scanQR")
+                        }
+                    }
                 }
                 .padding(.horizontal, Taproom.margin)
                 .padding(.bottom, 24)
@@ -281,12 +295,13 @@ struct AddFriendView: View {
                         .labelStyle(.iconOnly).tint(Taproom.ink)
                 }
             }
+            .sheet(isPresented: $showingScanner) {
+                FriendQRScannerSheet(username: username)
+            }
             .onChange(of: typed) {
                 lookupTask?.cancel()
                 lookupTask = nil
                 phase = .idle
-                sent = nil
-                sendError = nil
             }
             .onDisappear {
                 lookupTask?.cancel()
@@ -298,7 +313,7 @@ struct AddFriendView: View {
     @ViewBuilder private var result: some View {
         switch phase {
         case .idle:
-            Text("Untappd's API has no way to search for people, so type their exact username.")
+            Text("Untappd's API has no way to search for people, so type their exact username or scan their QR code.")
                 .font(.footnote).foregroundStyle(Taproom.muted)
         case .looking:
             ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
@@ -308,58 +323,15 @@ struct AddFriendView: View {
         case .failed(let message):
             ErrorRow(message: message, retry: lookUp)
         case .found(let profile):
-            card(profile)
+            AddFriendResultCard(profile: profile, me: username)
+                .id(profile.id)
         }
-    }
-
-    private func card(_ p: UserInfo.Profile) -> some View {
-        let status = Friends.status(of: p, me: username, friendIDs: Set(options.friendships.map(\.id)))
-        return VStack(spacing: 14) {
-            HStack(spacing: 14) {
-                Avatar(url: p.avatar, size: 64)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(p.displayName).font(.system(size: 20, weight: .heavy)).tracking(-0.3)
-                    Text(["@" + p.userName, p.location].compactMap { $0 }.joined(separator: " · "))
-                        .font(.subheadline).foregroundStyle(Taproom.muted)
-                }
-                Spacer(minLength: 0)
-            }
-            if let sent {
-                Label(sent, systemImage: "checkmark.circle.fill")
-                    .font(.headline).foregroundStyle(Taproom.ink)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-            } else if status.canAccept {
-                Text(status.message).font(.subheadline).foregroundStyle(Taproom.muted)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                Button { accept(p) } label: {
-                    if accepting { ProgressView().accessibilityLabel("Accepting") } else { Text("Accept") }
-                }
-                .buttonStyle(TaproomPrimaryButton())
-                .disabled(accepting)
-            } else if status != .canAdd {
-                Text(status.message).font(.subheadline).foregroundStyle(Taproom.muted)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-            } else {
-                Button { send(p) } label: {
-                    if sending { ProgressView() } else { Text("Add friend") }
-                }
-                .buttonStyle(TaproomPrimaryButton())
-                .disabled(sending)
-            }
-            if let sendError {
-                Text(sendError).font(.footnote).foregroundStyle(Taproom.muted).multilineTextAlignment(.center)
-            }
-        }
-        .padding(16)
-        .taproomCard()
     }
 
     private func lookUp() {
         guard let name = Friends.normalized(typed), phase != .looking else { return }
         lookupTask?.cancel()
         phase = .looking
-        sent = nil
-        sendError = nil
         lookupTask = Task {
             do {
                 let info = try await UntappdAPI.shared.fetch(.userInfo(name), as: UserInfo.self)
@@ -374,15 +346,70 @@ struct AddFriendView: View {
             }
         }
     }
+}
 
-    private func send(_ p: UserInfo.Profile) {
+/// Shows a looked-up user's card with the appropriate friendship action ("Add friend", "Accept",
+/// or their current relationship status). Shared by `AddFriendView` and `FriendQRScannerView`.
+struct AddFriendResultCard: View {
+    let profile: UserInfo.Profile
+    let me: String
+    private let options = CheckInOptions.shared
+    @State private var sending = false
+    @State private var sent: String?
+    @State private var sendError: String?
+    @State private var accepting = false
+
+    var body: some View {
+        let status = Friends.status(of: profile, me: me, friendIDs: Set(options.friendships.map(\.id)))
+        VStack(spacing: 14) {
+            HStack(spacing: 14) {
+                Avatar(url: profile.avatar, size: 64)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(profile.displayName).font(.system(size: 20, weight: .heavy)).tracking(-0.3)
+                    Text(["@" + profile.userName, profile.location].compactMap { $0 }.joined(separator: " · "))
+                        .font(.subheadline).foregroundStyle(Taproom.muted)
+                }
+                Spacer(minLength: 0)
+            }
+            if let sent {
+                Label(sent, systemImage: "checkmark.circle.fill")
+                    .font(.headline).foregroundStyle(Taproom.ink)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            } else if status.canAccept {
+                Text(status.message).font(.subheadline).foregroundStyle(Taproom.muted)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                Button { accept() } label: {
+                    if accepting { ProgressView().accessibilityLabel("Accepting") } else { Text("Accept") }
+                }
+                .buttonStyle(TaproomPrimaryButton())
+                .disabled(accepting)
+            } else if status != .canAdd {
+                Text(status.message).font(.subheadline).foregroundStyle(Taproom.muted)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            } else {
+                Button { send() } label: {
+                    if sending { ProgressView() } else { Text("Add friend") }
+                }
+                .buttonStyle(TaproomPrimaryButton())
+                .disabled(sending)
+            }
+            if let sendError {
+                Text(sendError).font(.footnote).foregroundStyle(Taproom.muted).multilineTextAlignment(.center)
+            }
+        }
+        .padding(16)
+        .taproomCard()
+    }
+
+    private func send() {
         sending = true
         sendError = nil
         Task {
             defer { sending = false }
             do {
-                let r = try await UntappdAPI.shared.fetch(.sendFriendRequest(p.id), as: FriendRequestResult.self)
+                let r = try await UntappdAPI.shared.fetch(.sendFriendRequest(profile.id), as: FriendRequestResult.self)
                 sent = r.confirmation
+                await ResponseCache.shared.remove(APIRequest.userInfo(profile.userName).cacheKey)
             } catch {
                 sendError = Friends.sendErrorMessage(error)
             }
@@ -391,13 +418,14 @@ struct AddFriendView: View {
 
     /// Accepts their request through the shared store, so they join the friends list at once
     /// (and the card then reads "You're already friends.").
-    private func accept(_ p: UserInfo.Profile) {
+    private func accept() {
         accepting = true
         sendError = nil
         Task {
             defer { accepting = false }
             do {
-                try await options.acceptRequest(Friend(user: p.asUser, location: p.location))
+                try await options.acceptRequest(Friend(user: profile.asUser, location: profile.location))
+                await ResponseCache.shared.remove(APIRequest.userInfo(profile.userName).cacheKey)
             } catch {
                 sendError = error.localizedDescription
             }

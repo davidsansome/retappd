@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import Vision
 import VisionKit
 
 /// Looks beers up by barcode, the way the official app does on a scan.
@@ -221,13 +222,14 @@ struct BarcodeSearchSheet: View {
     }
 }
 
-/// VisionKit's live barcode scanner. Calls `onCode` with each new barcode it reads.
-private struct BarcodeScanner: UIViewControllerRepresentable {
+/// VisionKit's live barcode / QR scanner. Calls `onCode` with each new code it reads.
+struct BarcodeScanner: UIViewControllerRepresentable {
+    var symbologies: [VNBarcodeSymbology] = [.ean13, .ean8, .upce]
     var onCode: (String) -> Void
 
     func makeUIViewController(context: Context) -> ContainerViewController {
         let scanner = DataScannerViewController(
-            recognizedDataTypes: [.barcode(symbologies: [.ean13, .ean8, .upce])],
+            recognizedDataTypes: [.barcode(symbologies: symbologies)],
             qualityLevel: .balanced,
             recognizesMultipleItems: false,
             isHighFrameRateTrackingEnabled: false,

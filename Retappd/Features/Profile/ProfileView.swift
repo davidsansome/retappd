@@ -12,6 +12,7 @@ struct ProfileView: View {
     var openSettings: () -> Void = {}
     @Environment(AuthStore.self) private var auth
     @State private var info: UserInfo.Profile?
+    @State private var showingQR = false
     @State private var friendActionInFlight = false
     @State private var confirmingRemoval: UserInfo.Profile?
     @State private var friendActionError: FriendActionError?
@@ -68,6 +69,7 @@ struct ProfileView: View {
             Button("OK") {}
         } message: { Text($0.message) }
         .sensoryFeedback(.success, trigger: friendActionFeedback)
+        .sheet(isPresented: $showingQR) { FriendQRCodeSheet(username: username, initialProfile: info) }
         .modifier(SettingsDestination(enabled: isAccountTab, username: username))
         .task(id: model.reloads) { await loadInfo() }
         .task(id: model.reloads) { if isAccountTab { await CheckInOptions.shared.loadRequests() } }
@@ -106,6 +108,17 @@ struct ProfileView: View {
                     .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity)
+            .overlay(alignment: .topLeading) {
+                if isAccountTab {
+                    Button { showingQR = true } label: {
+                        Image(systemName: "qrcode").font(.title3).frame(width: 44, height: 44)
+                    }
+                    .foregroundStyle(Taproom.ink)
+                    .accessibilityLabel("Friend QR code")
+                    .accessibilityIdentifier("profile.qrButton")
+                    .padding(.leading, -10)
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 if isAccountTab {
                     Button(action: openSettings) {
