@@ -77,34 +77,43 @@ struct BeerView: View {
     @State private var shopPrices: MetabeerOffers?
     /// Tags this page's links, so its rows only show as selected for checkins it opened itself.
     @State private var listID = UUID()
+    @State private var containerWidth: CGFloat = 0
     @Environment(\.beerPageCanCheckIn) private var canCheckIn
     @Environment(DiscoverModel.self) private var discover
 
     init(beer: BeerLite) { _model = State(initialValue: BeerModel(beer: beer)) }
 
+    private var isTwoColumn: Bool { containerWidth >= .twoColumnThreshold }
+
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
-                hero
-                if let shopPrices { ShopPriceChip(offers: shopPrices, beerName: model.beer.name) }
-                ratings
-                TaproomStatsCard(stats: [("Check-ins", model.info?.stats?.total), ("People", model.info?.stats?.people),
-                                         ("This month", model.info?.stats?.thisMonth)])
-                if let d = model.info?.description {
-                    TaproomSection("About") { ExpandableText(text: d) }
+            Group {
+                if isTwoColumn {
+                    HStack(alignment: .top, spacing: 24) {
+                        VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                            summaryContent
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        LazyVStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                            recentCheckins
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    LazyVStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                        summaryContent
+                        recentCheckins
+                    }
                 }
-                if !model.flavors.isEmpty { flavours }
-                if let e = model.loadError, model.info == nil {
-                    ErrorRow(message: e) { Task { await model.load(force: true) } }
-                }
-                recentCheckins
             }
             .padding(.horizontal, Taproom.margin)
             .padding(.top, 8)
             .padding(.bottom, 16)
-            .frame(maxWidth: .readableContentWidth, alignment: .leading)
+            .frame(maxWidth: isTwoColumn ? .wideContentWidth : .readableContentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
         .taproomScreen()
         .taproomScrollTitle(model.beer.name)
         .toolbarBackground(Taproom.background, for: .navigationBar)
@@ -126,7 +135,22 @@ struct BeerView: View {
             _ = await (details, checkins)
             if case .updated(let refreshed) = await prices { shopPrices = refreshed }
         }
-        .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
+        .checkInPresentation(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
+    }
+
+    @ViewBuilder private var summaryContent: some View {
+        hero
+        if let shopPrices { ShopPriceChip(offers: shopPrices, beerName: model.beer.name) }
+        ratings
+        TaproomStatsCard(stats: [("Check-ins", model.info?.stats?.total), ("People", model.info?.stats?.people),
+                                 ("This month", model.info?.stats?.thisMonth)])
+        if let d = model.info?.description {
+            TaproomSection("About") { ExpandableText(text: d) }
+        }
+        if !model.flavors.isEmpty { flavours }
+        if let e = model.loadError, model.info == nil {
+            ErrorRow(message: e) { Task { await model.load(force: true) } }
+        }
     }
 
     // MARK: Header

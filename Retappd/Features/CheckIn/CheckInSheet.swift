@@ -420,6 +420,7 @@ struct CheckInSheet: View {
             }
         }
         .buttonStyle(TaproomPrimaryButton())
+        .keyboardShortcut(.return, modifiers: .command)
         .disabled(busy)
         .taproomBottomBar()
     }
@@ -772,5 +773,33 @@ struct FriendPicker: View {
         .buttonStyle(TaproomRowStyle())
         .taproomRowDivider()
         .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+extension View {
+    /// Presents a check-in composer as a centered page-sized modal sheet on iPad (regular width)
+    /// and a full-screen cover on iPhone (compact width).
+    func checkInPresentation<Item: Identifiable, Content: View>(
+        item: Binding<Item?>,
+        @ViewBuilder content: @escaping (Item) -> Content
+    ) -> some View {
+        modifier(CheckInPresentation(item: item, content: content))
+    }
+}
+
+private struct CheckInPresentation<Item: Identifiable, SheetContent: View>: ViewModifier {
+    @Binding var item: Item?
+    @ViewBuilder let content: (Item) -> SheetContent
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    func body(content base: Content) -> some View {
+        if horizontalSizeClass == .regular {
+            base.sheet(item: $item) { value in
+                content(value)
+                    .presentationSizing(.page)
+            }
+        } else {
+            base.fullScreenCover(item: $item, content: content)
+        }
     }
 }

@@ -12,8 +12,51 @@ struct DiscoverView: View {
     @State private var scanning = false
     @State private var scannedBeer: BeerLite?
     @State private var handledScans = 0
+    @State private var containerWidth: CGFloat = 0
+    @State private var selectedVenue: Venue?
+
+    private var isSplit: Bool { containerWidth >= .twoColumnThreshold }
 
     var body: some View {
+        Group {
+            if isSplit {
+                HStack(spacing: 0) {
+                    listColumn
+                        .frame(width: min(380, max(320, containerWidth * 0.38)))
+                    Rectangle().fill(Taproom.border).frame(width: 1).ignoresSafeArea(edges: .vertical)
+                    detailColumn
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else {
+                listColumn
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
+        .taproomScreen()
+        .toolbar(.hidden, for: .navigationBar)
+        .task(id: query) { await model.search(query) }
+        .task { await model.refreshIfStale(location: location.location) }
+        // Venues, and the checkins and people on their pages.
+        .modifier(CheckinDestinations(enabled: true, me: model.me))
+        .checkInPresentation(item: $checkInBeer) { CheckInSheet(beer: $0, venue: model.here.first) }
+        .sheet(isPresented: $scanning, onDismiss: {
+            // Open the check-in once the scanner has gone, as only one modal shows at a time.
+            if let b = scannedBeer { scannedBeer = nil; checkInBeer = b }
+        }) {
+            BarcodeSearchSheet { scannedBeer = $0 }
+        }
+        .onAppear(perform: handleScanRequest)
+        .onChange(of: scanRequests) { handleScanRequest() }
+        .onChange(of: defaultSplitVenue?.id, initial: true) {
+            if selectedVenue == nil { selectedVenue = defaultSplitVenue }
+        }
+    }
+
+    private var defaultSplitVenue: Venue? {
+        model.here.first ?? model.nearby.first ?? model.recent.first
+    }
+
+    private var listColumn: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
                 if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -25,34 +68,42 @@ struct DiscoverView: View {
             .padding(.horizontal, Taproom.margin)
             .padding(.top, 8)
             .padding(.bottom, 16)
-            .frame(maxWidth: .readableContentWidth, alignment: .leading)
+            .frame(maxWidth: isSplit ? .infinity : .readableContentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.immediately)
-        .taproomScreen()
         .safeAreaInset(edge: .top, spacing: 0) {
             TaproomSearchField(text: $query, prompt: "Beers or venues", focusRequests: searchRequests)
-                .frame(maxWidth: .readableContentWidth)
+                .frame(maxWidth: isSplit ? .infinity : .readableContentWidth)
                 .padding(.horizontal, Taproom.margin)
                 .padding(.vertical, 6)
                 .frame(maxWidth: .infinity)
                 .background(Taproom.background)
         }
-        .toolbar(.hidden, for: .navigationBar)
-        .task(id: query) { await model.search(query) }
-        .task { await model.refreshIfStale(location: location.location) }
         .refreshable { await model.update(location: location.location, force: true) }
-        // Venues, and the checkins and people on their pages.
-        .modifier(CheckinDestinations(enabled: true, me: model.me))
-        .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: model.here.first) }
-        .sheet(isPresented: $scanning, onDismiss: {
-            // Open the check-in once the scanner has gone, as only one modal shows at a time.
-            if let b = scannedBeer { scannedBeer = nil; checkInBeer = b }
-        }) {
-            BarcodeSearchSheet { scannedBeer = $0 }
+    }
+
+    @ViewBuilder private var detailColumn: some View {
+        if let venue = selectedVenue ?? defaultSplitVenue {
+            VenueDetailView(venue: venue)
+                .id(venue.id)
+        } else {
+            VStack(spacing: 10) {
+                Image(systemName: "mappin.and.ellipse")
+                    .font(.system(size: 36, weight: .medium))
+                    .foregroundStyle(Taproom.muted)
+                Text("Select a venue")
+                    .font(.headline)
+                    .foregroundStyle(Taproom.ink)
+                Text("Pick a nearby place or search for a venue to see its menu and recent check-ins.")
+                    .font(.subheadline)
+                    .foregroundStyle(Taproom.muted)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 300)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Taproom.background)
         }
-        .onAppear(perform: handleScanRequest)
-        .onChange(of: scanRequests) { handleScanRequest() }
     }
 
     private func handleScanRequest() {
@@ -71,7 +122,7 @@ struct DiscoverView: View {
         }
 
         if let here = model.here.first {
-            NavigationLink(value: here) { HereCard(venue: here, origin: model.origin) }
+            venueLink(here) { HereCard(venue: here, origin: model.origin) }
                 .buttonStyle(CardLinkStyle())
             if model.here.count > 1 {
                 TaproomSection("Or maybe") { venueRows(Array(model.here.dropFirst())) }
@@ -82,7 +133,7 @@ struct DiscoverView: View {
             TaproomSection("Friends drinking nearby") {
                 VStack(spacing: 0) {
                     ForEach(model.friendsNearby) { a in
-                        NavigationLink(value: a.venue) { FriendActivityRow(activity: a) }
+                        venueLink(a.venue) { FriendActivityRow(activity: a) }
                             .buttonStyle(TaproomRowStyle())
                             .taproomRowDivider()
                     }
@@ -109,10 +160,25 @@ struct DiscoverView: View {
     private func venueRows<C: RandomAccessCollection>(_ venues: C) -> some View where C.Element == Venue {
         VStack(spacing: 0) {
             ForEach(venues) { v in
-                NavigationLink(value: v) { VenueRow(venue: v, origin: model.origin) }
-                    .buttonStyle(TaproomRowStyle())
-                    .taproomRowDivider()
+                let selected = isSplit && (selectedVenue ?? defaultSplitVenue)?.id == v.id
+                venueLink(v) {
+                    VenueRow(venue: v, origin: model.origin)
+                        .padding(.horizontal, selected ? 8 : 0)
+                        .background(selected ? Taproom.glassInside : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(TaproomRowStyle())
+                .taproomRowDivider()
             }
+        }
+    }
+
+    @ViewBuilder
+    private func venueLink<Label: View>(_ venue: Venue, @ViewBuilder label: () -> Label) -> some View {
+        if isSplit {
+            Button { selectedVenue = venue } label: { label() }
+        } else {
+            NavigationLink(value: venue) { label() }
         }
     }
 

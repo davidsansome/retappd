@@ -99,47 +99,43 @@ struct BreweryView: View {
     @State private var tab = Tab.beers
     /// Tags this page's links, so its rows only show as selected for checkins it opened itself.
     @State private var listID = UUID()
+    @State private var containerWidth: CGFloat = 0
 
     enum Tab: Hashable { case beers, checkins }
 
     init(brewery: BreweryPreview) { _model = State(initialValue: BreweryModel(brewery: brewery)) }
 
+    private var isTwoColumn: Bool { containerWidth >= .twoColumnThreshold }
+
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: Taproom.sectionSpacing, pinnedViews: [.sectionHeaders]) {
-                hero
-                ratings
-                TaproomStatsCard(stats: [("Beers", model.info?.beerCount), ("Check-ins", model.info?.stats?.total),
-                                         ("People", model.info?.stats?.people), ("Yours", model.info?.stats?.yours)])
-                if let d = model.info?.description {
-                    TaproomSection("About") { ExpandableText(text: d) }
-                }
-                links
-                if let e = model.loadError, model.info == nil {
-                    ErrorRow(message: e) { Task { await model.load(force: true) } }
-                }
-                Section {
-                    switch tab {
-                    case .beers: beersContent
-                    case .checkins:
-                        GroupedCheckinList(model: model.checkins, listID: listID,
-                                           emptyText: "No one has checked in a beer from here yet.")
+            Group {
+                if isTwoColumn {
+                    HStack(alignment: .top, spacing: 24) {
+                        VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                            summaryContent
+                        }
+                        .frame(minWidth: 300, maxWidth: 400, alignment: .leading)
+
+                        LazyVStack(alignment: .leading, spacing: Taproom.sectionSpacing, pinnedViews: [.sectionHeaders]) {
+                            tabsSection
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                } header: {
-                    TaproomPageTabs(tabs: [
-                        TaproomTab(value: Tab.beers, title: "Beers", systemImage: "list.bullet"),
-                        TaproomTab(value: Tab.checkins, title: "Check-ins", systemImage: "person.2"),
-                    ], selection: $tab)
-                    .padding(.bottom, 10)
-                    .background { Taproom.background.padding(.horizontal, -Taproom.margin) }
+                } else {
+                    LazyVStack(alignment: .leading, spacing: Taproom.sectionSpacing, pinnedViews: [.sectionHeaders]) {
+                        summaryContent
+                        tabsSection
+                    }
                 }
             }
             .padding(.horizontal, Taproom.margin)
             .padding(.top, 8)
             .padding(.bottom, 16)
-            .frame(maxWidth: .readableContentWidth, alignment: .leading)
+            .frame(maxWidth: isTwoColumn ? .wideContentWidth : .readableContentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
         .taproomScreen()
         .taproomScrollTitle(model.name)
         .toolbarBackground(Taproom.background, for: .navigationBar)
@@ -149,6 +145,38 @@ struct BreweryView: View {
             async let details: Void = model.load(force: true)
             async let checkins: Void = model.checkins.refresh()
             _ = await (details, checkins)
+        }
+    }
+
+    @ViewBuilder private var summaryContent: some View {
+        hero
+        ratings
+        TaproomStatsCard(stats: [("Beers", model.info?.beerCount), ("Check-ins", model.info?.stats?.total),
+                                 ("People", model.info?.stats?.people), ("Yours", model.info?.stats?.yours)])
+        if let d = model.info?.description {
+            TaproomSection("About") { ExpandableText(text: d) }
+        }
+        links
+        if let e = model.loadError, model.info == nil {
+            ErrorRow(message: e) { Task { await model.load(force: true) } }
+        }
+    }
+
+    private var tabsSection: some View {
+        Section {
+            switch tab {
+            case .beers: beersContent
+            case .checkins:
+                GroupedCheckinList(model: model.checkins, listID: listID,
+                                   emptyText: "No one has checked in a beer from here yet.")
+            }
+        } header: {
+            TaproomPageTabs(tabs: [
+                TaproomTab(value: Tab.beers, title: "Beers", systemImage: "list.bullet"),
+                TaproomTab(value: Tab.checkins, title: "Check-ins", systemImage: "person.2"),
+            ], selection: $tab)
+            .padding(.bottom, 10)
+            .background { Taproom.background.padding(.horizontal, -Taproom.margin) }
         }
     }
 

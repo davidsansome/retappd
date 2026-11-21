@@ -125,38 +125,48 @@ struct VenueDetailView: View {
     @State private var who = Who.everyone
     /// Tags this page's links, so its rows only show as selected for checkins it opened itself.
     @State private var listID = UUID()
+    @State private var containerWidth: CGFloat = 0
 
     enum VenueTab: Hashable { case menu, checkins }
     enum Who: Hashable { case everyone, friends }
 
     init(venue: Venue) { _model = State(initialValue: VenueModel(venue: venue)) }
 
+    private var isTwoColumn: Bool { containerWidth >= .twoColumnThreshold }
+
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: Taproom.sectionSpacing, pinnedViews: [.sectionHeaders]) {
-                hero
-                stats
-                whereCard
-                if model.venue.venueId != nil {
-                    Section {
-                        switch tab {
-                        case .menu: menuContent
-                        case .checkins: checkinsContent
+            Group {
+                if isTwoColumn {
+                    HStack(alignment: .top, spacing: 24) {
+                        VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                            hero
+                            stats
+                            whereCard
                         }
-                    } header: {
-                        tabsHeader
+                        .frame(minWidth: 300, maxWidth: 400, alignment: .leading)
+
+                        LazyVStack(alignment: .leading, spacing: Taproom.sectionSpacing, pinnedViews: [.sectionHeaders]) {
+                            venueBody
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 } else {
-                    Text("Untappd hasn't recorded beers here yet. Search for a beer to check in.")
-                        .font(.callout).foregroundStyle(Taproom.muted)
+                    LazyVStack(alignment: .leading, spacing: Taproom.sectionSpacing, pinnedViews: [.sectionHeaders]) {
+                        hero
+                        stats
+                        whereCard
+                        venueBody
+                    }
                 }
             }
             .padding(.horizontal, Taproom.margin)
             .padding(.top, 8)
             .padding(.bottom, 16)
-            .frame(maxWidth: .readableContentWidth, alignment: .leading)
+            .frame(maxWidth: isTwoColumn ? .wideContentWidth : .readableContentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
         .scrollDismissesKeyboard(.immediately)
         .taproomScreen()
         .taproomScrollTitle(model.venue.name, threshold: 110)
@@ -164,7 +174,23 @@ struct VenueDetailView: View {
         .task { await model.load() }
         .refreshable { await model.load(force: true) }
         .onChange(of: model.everyone?.items) { model.updateLastCheckinByBeer() }
-        .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: model.venue) }
+        .checkInPresentation(item: $checkInBeer) { CheckInSheet(beer: $0, venue: model.venue) }
+    }
+
+    @ViewBuilder private var venueBody: some View {
+        if model.venue.venueId != nil {
+            Section {
+                switch tab {
+                case .menu: menuContent
+                case .checkins: checkinsContent
+                }
+            } header: {
+                tabsHeader
+            }
+        } else {
+            Text("Untappd hasn't recorded beers here yet. Search for a beer to check in.")
+                .font(.callout).foregroundStyle(Taproom.muted)
+        }
     }
 
     private var tab: VenueTab {

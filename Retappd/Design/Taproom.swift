@@ -276,7 +276,8 @@ extension View {
     }
 
     /// Pins content (normally a TaproomPrimaryButton) in a bar at the bottom of the screen; use
-    /// inside `.safeAreaInset(edge: .bottom)`.
+    /// inside `.safeAreaInset(edge: .bottom)`. Constrains the content to `.readableContentWidth`
+    /// on wide screens while keeping the background bar edge to edge.
     func taproomBottomBar() -> some View {
         padding(.horizontal, Taproom.margin)
             .padding(.vertical, 8)
@@ -573,30 +574,16 @@ struct TaproomTabBar<Value: Hashable, Action: View>: View {
     let selection: Value
     let select: (Value) -> Void
     @ViewBuilder var action: Action
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var keyboardShown = false
 
     var body: some View {
         Group {
             if !keyboardShown {
-                ViewThatFits(in: .horizontal) {
-                    row(.full)
-                    row(.iconAction)
-                    row(.iconsOnly)
-                }
-                .padding(.horizontal, Taproom.margin)
-                .padding(.top, 8)
-                .padding(.bottom, 2)
-                // Frosted glass, like the system bars: the page scrolls on underneath it, blurred,
-                // with a wash of the page colour so it stays warm. Both the backdrop and top rule
-                // extend across bottom and horizontal safe areas (e.g. a trailing navigation rail)
-                // while the interactive buttons stay inside the safe area.
-                .background {
-                    Rectangle().fill(.ultraThinMaterial)
-                        .overlay(Taproom.background.opacity(0.55))
-                        .overlay(alignment: .top) {
-                            Rectangle().fill(Taproom.border.opacity(0.6)).frame(height: 0.5)
-                        }
-                        .ignoresSafeArea(edges: [.bottom, .horizontal])
+                if horizontalSizeClass == .regular {
+                    floatingBar
+                } else {
+                    compactBar
                 }
             }
         }
@@ -614,6 +601,51 @@ struct TaproomTabBar<Value: Hashable, Action: View>: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
             keyboardShown = false
+        }
+    }
+
+    /// On iPad / regular width: a centered floating pill, clear of the window resize grabber.
+    private var floatingBar: some View {
+        let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+        return ViewThatFits(in: .horizontal) {
+            row(.full)
+            row(.iconAction)
+            row(.iconsOnly)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .frame(maxWidth: 520)
+        .background {
+            shape.fill(.ultraThinMaterial)
+                .overlay(shape.fill(Taproom.background.opacity(0.65)))
+        }
+        .overlay { shape.strokeBorder(Taproom.border, lineWidth: 1) }
+        .shadow(color: .black.opacity(0.08), radius: 14, y: 4)
+        .padding(.horizontal, Taproom.margin)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var compactBar: some View {
+        ViewThatFits(in: .horizontal) {
+            row(.full)
+            row(.iconAction)
+            row(.iconsOnly)
+        }
+        .padding(.horizontal, Taproom.margin)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+        // Frosted glass, like the system bars: the page scrolls on underneath it, blurred,
+        // with a wash of the page colour so it stays warm. Both the backdrop and top rule
+        // extend across bottom and horizontal safe areas (e.g. a trailing navigation rail)
+        // while the interactive buttons stay inside the safe area.
+        .background {
+            Rectangle().fill(.ultraThinMaterial)
+                .overlay(Taproom.background.opacity(0.55))
+                .overlay(alignment: .top) {
+                    Rectangle().fill(Taproom.border.opacity(0.6)).frame(height: 0.5)
+                }
+                .ignoresSafeArea(edges: [.bottom, .horizontal])
         }
     }
 
@@ -703,6 +735,7 @@ struct TaproomStatRow: View {
 struct TaproomPageTabs<Value: Hashable>: View {
     let tabs: [TaproomTab<Value>]
     @Binding var selection: Value
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         HStack(spacing: 0) {
@@ -728,7 +761,8 @@ struct TaproomPageTabs<Value: Hashable>: View {
             }
         }
         .background(alignment: .bottom) {
-            Rectangle().fill(Taproom.border).frame(height: 1).padding(.horizontal, -Taproom.margin)
+            Rectangle().fill(Taproom.border).frame(height: 1)
+                .padding(.horizontal, horizontalSizeClass == .regular ? 0 : -Taproom.margin)
         }
         .sensoryFeedback(.selection, trigger: selection)
     }

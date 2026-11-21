@@ -125,6 +125,8 @@ struct VenuePicker: View {
             .padding(.horizontal, Taproom.margin)
             .padding(.top, 8)
             .padding(.bottom, 16)
+            .frame(maxWidth: .readableContentWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.immediately)
         .foregroundStyle(Taproom.ink)
@@ -140,9 +142,11 @@ struct VenuePicker: View {
                                        capitalization: .words)
                 }
             }
+            .frame(maxWidth: .readableContentWidth)
             .padding(.horizontal, Taproom.margin)
             .padding(.top, 6)
             .padding(.bottom, 8)
+            .frame(maxWidth: .infinity)
             .background(Taproom.background)
         }
         .task(id: ShopQuery(text: q, place: activePlace, hasLocation: location.location != nil)) { await search(q) }

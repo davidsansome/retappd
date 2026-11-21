@@ -15,32 +15,59 @@ struct StatsView: View {
     /// A press-and-drag on the chart is in progress, or just ended: its release isn't a tap.
     @GestureState private var scrubbing = false
     @State private var lastScrubEnd = Date.distantPast
+    @State private var containerWidth: CGFloat = 0
 
     init(username: String) {
         _model = State(initialValue: StatsModel(username: username))
     }
+
+    private var isTwoColumn: Bool { containerWidth >= .twoColumnThreshold }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
                 TaproomSegmented(options: StatsRange.allCases.map { ($0, $0.rawValue) },
                                  selection: Binding(get: { model.range }, set: { model.select($0); selected = nil }))
-                periodHeader
-                chartCard
-                if let error = model.error {
-                    ErrorRow(message: error) { model.load(force: true) }
-                }
-                if let s = model.stats {
-                    TaproomSection("Check-in breakdown") { breakdown(s) }
-                    if !s.topBeers.isEmpty { topBeers(s) }
+                    .frame(maxWidth: .readableContentWidth)
+                    .frame(maxWidth: .infinity)
+                if isTwoColumn {
+                    HStack(alignment: .top, spacing: 24) {
+                        VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                            periodHeader
+                            chartCard
+                            if let error = model.error {
+                                ErrorRow(message: error) { model.load(force: true) }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if let s = model.stats {
+                            VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                                TaproomSection("Check-in breakdown") { breakdown(s) }
+                                if !s.topBeers.isEmpty { topBeers(s) }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                } else {
+                    periodHeader
+                    chartCard
+                    if let error = model.error {
+                        ErrorRow(message: error) { model.load(force: true) }
+                    }
+                    if let s = model.stats {
+                        TaproomSection("Check-in breakdown") { breakdown(s) }
+                        if !s.topBeers.isEmpty { topBeers(s) }
+                    }
                 }
             }
             .padding(.horizontal, Taproom.margin)
             .padding(.top, 8)
             .padding(.bottom, 32)
-            .frame(maxWidth: .readableContentWidth, alignment: .leading)
+            .frame(maxWidth: isTwoColumn ? .wideContentWidth : .readableContentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
         .taproomScreen()
         .navigationTitle("Statistics")
         .navigationBarTitleDisplayMode(.inline)

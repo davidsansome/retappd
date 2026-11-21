@@ -110,6 +110,7 @@ struct RootTabs: View {
         }
         .environment(discover)
         .environment(unread)
+        .background { keyboardShortcuts }
         // Track location app-wide, so Discover is ready and check-ins can preselect the venue
         // you're at, even before the Discover tab is opened.
         .task { location.start() }
@@ -196,6 +197,30 @@ extension RootTabs {
         TaproomTab(value: Page.discover, title: "Discover", systemImage: "mappin.and.ellipse"),
         TaproomTab(value: Page.profile, title: "Me", systemImage: "person.crop.circle"),
     ]
+
+    private var keyboardShortcuts: some View {
+        Group {
+            Button("Activity") { select(.feed) }.keyboardShortcut("1", modifiers: .command)
+            Button("Discover") { select(.discover) }.keyboardShortcut("2", modifiers: .command)
+            Button("Me") { select(.profile) }.keyboardShortcut("3", modifiers: .command)
+            Button("Search") {
+                page = .discover
+                searchRequests += 1
+            }.keyboardShortcut("f", modifiers: .command)
+            Button("Refresh") {
+                Task {
+                    switch page {
+                    case .feed: await feed.refresh()
+                    case .discover: await discover.update(location: location.location, force: true)
+                    case .profile: await profile.refresh()
+                    }
+                }
+            }.keyboardShortcut("r", modifiers: .command)
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
+    }
 
     private var tabBar: some View {
         TaproomTabBar(tabs: Self.tabs, selection: page, select: select) {

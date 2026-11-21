@@ -1,8 +1,12 @@
 import SwiftUI
 
 extension CGFloat {
-    /// Widest a column of rows or photos gets on large screens.
+    /// Widest a single column of rows or photos gets on large screens.
     static let readableContentWidth: CGFloat = 700
+    /// Widest a two-column layout (feed grid, statistics, detail splits) gets on large screens.
+    static let wideContentWidth: CGFloat = 1080
+    /// Minimum container width before switching to a two-column iPad layout.
+    static let twoColumnThreshold: CGFloat = 800
 }
 
 extension View {

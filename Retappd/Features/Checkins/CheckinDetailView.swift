@@ -24,6 +24,8 @@ struct CheckinDetailView: View {
     @State private var shopPrices: MetabeerOffers?
     @FocusState private var composerFocused: Bool
     @Environment(DiscoverModel.self) private var discover
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var containerWidth: CGFloat = 0
     @Environment(AuthStore.self) private var auth
     @Environment(\.dismiss) private var dismiss
 
@@ -32,34 +34,56 @@ struct CheckinDetailView: View {
         self.me = me
     }
 
+    private var isEdgeToEdgePhoto: Bool { hasPhoto && horizontalSizeClass != .regular }
+    private var isSideBySide: Bool { hasPhoto && containerWidth >= 960 }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    photo
-                    VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
-                        beerHero
-                        if let shopPrices { ShopPriceChip(offers: shopPrices, beerName: checkin.beer?.name ?? "") }
-                        author
-                        details
-                        if !checkin.badges.isEmpty { badges }
-                        if checkin.toastCount > 0 { toasts }
-                        if !checkin.comments.isEmpty || !pending.isEmpty { comments }
-                        Color.clear.frame(height: 0).id(Self.bottomID)
+                if isSideBySide {
+                    HStack(alignment: .top, spacing: 28) {
+                        photo
+                            .frame(maxWidth: 440)
+                        detailsColumn
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .padding(.horizontal, Taproom.margin)
-                    .padding(.top, hasPhoto ? 20 : 8)
+                    .padding(.top, 12)
                     .padding(.bottom, 16)
-                    .frame(maxWidth: .readableContentWidth)
+                    .frame(maxWidth: .wideContentWidth, alignment: .leading)
                     .frame(maxWidth: .infinity)
-                    // The sheet of content overlaps the bottom of the photo.
-                    .background(Taproom.background, in: UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24))
-                    .padding(.top, hasPhoto ? -28 : 0)
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if hasPhoto {
+                            if isEdgeToEdgePhoto {
+                                photo
+                            } else {
+                                photo
+                                    .padding(.horizontal, Taproom.margin)
+                                    .padding(.top, 8)
+                                    .frame(maxWidth: .readableContentWidth)
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        detailsColumn
+                            .padding(.horizontal, Taproom.margin)
+                            .padding(.top, isEdgeToEdgePhoto ? 20 : 14)
+                            .padding(.bottom, 16)
+                            .frame(maxWidth: .readableContentWidth)
+                            .frame(maxWidth: .infinity)
+                            // On compact width the sheet of content overlaps the bottom of the edge-to-edge photo.
+                            .background(Taproom.background, in: UnevenRoundedRectangle(
+                                topLeadingRadius: isEdgeToEdgePhoto ? 24 : 0,
+                                topTrailingRadius: isEdgeToEdgePhoto ? 24 : 0
+                            ))
+                            .padding(.top, isEdgeToEdgePhoto ? -28 : 0)
+                    }
                 }
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
             .scrollDismissesKeyboard(.interactively)
-            // The photo runs up under the status and navigation bars.
-            .ignoresSafeArea(.container, edges: hasPhoto ? .top : [])
+            // On compact width the photo runs up under the status and navigation bars.
+            .ignoresSafeArea(.container, edges: isEdgeToEdgePhoto ? .top : [])
             .foregroundStyle(Taproom.ink)
             .background(Taproom.background)
             // Keep your newest comment in view as it's added and as it turns into "Not sent".
@@ -72,10 +96,10 @@ struct CheckinDetailView: View {
                 }
             }
         }
-        .navigationTitle(hasPhoto ? "" : "Checkin")
+        .navigationTitle(isEdgeToEdgePhoto ? "" : "Checkin")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Taproom.background, for: .navigationBar)
-        .toolbarBackgroundVisibility(hasPhoto ? .hidden : .automatic, for: .navigationBar)
+        .toolbarBackgroundVisibility(isEdgeToEdgePhoto ? .hidden : .automatic, for: .navigationBar)
         .toolbar {
             if let beer = checkin.beerLite {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -100,8 +124,8 @@ struct CheckinDetailView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
-        .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
-        .fullScreenCover(item: $editing) { CheckInSheet(editing: $0) }
+        .checkInPresentation(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
+        .checkInPresentation(item: $editing) { CheckInSheet(editing: $0) }
         .onReceive(NotificationCenter.default.publisher(for: .checkinEdited)) { n in
             if let c = n.object as? Checkin, c.id == checkin.id { checkin = c }
         }
@@ -363,21 +387,41 @@ struct CheckinDetailView: View {
 
     private var hasPhoto: Bool { checkin.photo.map { ($0.large ?? $0.medium ?? $0.small) != nil } ?? false }
 
-    /// The photo, square and edge to edge under the navigation bar; tap to see it full screen.
+    private var detailsColumn: some View {
+        VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+            beerHero
+            if let shopPrices { ShopPriceChip(offers: shopPrices, beerName: checkin.beer?.name ?? "") }
+            author
+            details
+            if !checkin.badges.isEmpty { badges }
+            if checkin.toastCount > 0 { toasts }
+            if !checkin.comments.isEmpty || !pending.isEmpty { comments }
+            Color.clear.frame(height: 0).id(Self.bottomID)
+        }
+    }
+
+    /// The photo: square and edge to edge under the navigation bar on iPhone, or a rounded card
+    /// with capped height on iPad; tap to see it full screen.
     @ViewBuilder private var photo: some View {
         if let p = checkin.photo, let url = p.large ?? p.medium ?? p.small {
+            let cornerRadius: CGFloat = isEdgeToEdgePhoto ? 0 : 20
             Button { showPhoto = true } label: {
                 Taproom.glassInside
-                    .aspectRatio(1, contentMode: .fit)
+                    .aspectRatio(isEdgeToEdgePhoto || isSideBySide ? 1 : 4 / 3, contentMode: .fit)
+                    .frame(maxHeight: isEdgeToEdgePhoto ? nil : (isSideBySide ? 460 : 420))
                     .overlay {
                         CachedImage(url: url, maxPixel: 1400) {
                             CachedImage(url: p.medium ?? p.small, maxPixel: 1000)
                         }
                         .aspectRatio(contentMode: .fill)
                     }
-                    .clipped()
-                    .frame(maxWidth: .readableContentWidth)
-                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    .overlay {
+                        if !isEdgeToEdgePhoto {
+                            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                                .strokeBorder(Taproom.border, lineWidth: 1)
+                        }
+                    }
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Photo")

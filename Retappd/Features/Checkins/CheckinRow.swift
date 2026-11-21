@@ -16,6 +16,7 @@ struct CheckinRow<MenuItems: View>: View {
     /// Whether to ask before deleting this checkin. The question points at the overflow menu.
     var confirmingDelete: Binding<Bool> = .constant(false)
     var delete: () -> Void = {}
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -30,9 +31,10 @@ struct CheckinRow<MenuItems: View>: View {
             .padding(14)
 
             if let p = checkin.photo, let url = p.medium ?? p.large ?? p.small {
-                // Full card width, 4:3, cropped from Untappd's square photo.
+                // Full card width, 4:3, cropped from Untappd's square photo; capped in height on iPad.
                 Taproom.glassInside
                     .aspectRatio(4 / 3, contentMode: .fit)
+                    .frame(maxHeight: horizontalSizeClass == .regular ? 340 : nil)
                     .overlay { CachedImage(url: url, maxPixel: 1000).aspectRatio(contentMode: .fill) }
                     .clipped()
                     .accessibilityLabel("Photo")

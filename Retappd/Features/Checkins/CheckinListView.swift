@@ -15,8 +15,11 @@ struct CheckinList<Header: View>: View {
     @State private var deleting: Checkin?
     /// Tags this list's links, so its rows only show as selected for checkins it opened itself.
     @State private var listID = UUID()
+    @State private var containerWidth: CGFloat = 0
     @Environment(DiscoverModel.self) private var discover
     @Environment(AuthStore.self) private var auth
+
+    private var isTwoColumn: Bool { containerWidth >= .twoColumnThreshold }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -29,33 +32,52 @@ struct CheckinList<Header: View>: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
                 header().id(Self.topID)
-                ForEach(model.items) { c in
-                    let mine = c.isBy(username: auth.username)
-                    NavigationLink(value: CheckinRoute(checkin: c, listID: listID)) {
-                        CheckinRow(checkin: c, showUser: showUser, showHad: !mine,
-                                   menu: CheckinMenuItems.hasItems(c, isMine: mine) ? { menuItems(c, isMine: mine) } : nil,
-                                   toast: showActions ? { toggleToast(c) } : nil,
-                                   confirmingDelete: isConfirmingDelete(c),
-                                   delete: { Task { await model.delete(c) } })
+                if isTwoColumn {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), spacing: 14, alignment: .top),
+                            GridItem(.flexible(), spacing: 14, alignment: .top),
+                        ],
+                        alignment: .leading,
+                        spacing: 14
+                    ) {
+                        rows
                     }
-                    .buttonStyle(CardLinkStyle())
-                    .id(c.id)
-                    .onAppear { model.onAppear(c) }
-                    .contextMenu { menuItems(c, isMine: mine) }
+                } else {
+                    rows
                 }
                 footer
             }
             .padding(.horizontal, Taproom.margin)
             .padding(.bottom, 16)
+            .frame(maxWidth: isTwoColumn ? .wideContentWidth : .readableContentWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
         .foregroundStyle(Taproom.ink)
         .background(Taproom.background)
-        .readableContentWidth()
         .refreshable { await model.refresh() }
         .task { await model.loadIfNeeded() }
         .modifier(CheckinDestinations(enabled: registersDestinations, me: model.me))
-        .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
-        .fullScreenCover(item: $editing) { CheckInSheet(editing: $0) }
+        .checkInPresentation(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
+        .checkInPresentation(item: $editing) { CheckInSheet(editing: $0) }
+    }
+
+    @ViewBuilder private var rows: some View {
+        ForEach(model.items) { c in
+            let mine = c.isBy(username: auth.username)
+            NavigationLink(value: CheckinRoute(checkin: c, listID: listID)) {
+                CheckinRow(checkin: c, showUser: showUser, showHad: !mine,
+                           menu: CheckinMenuItems.hasItems(c, isMine: mine) ? { menuItems(c, isMine: mine) } : nil,
+                           toast: showActions ? { toggleToast(c) } : nil,
+                           confirmingDelete: isConfirmingDelete(c),
+                           delete: { Task { await model.delete(c) } })
+            }
+            .buttonStyle(CardLinkStyle())
+            .id(c.id)
+            .onAppear { model.onAppear(c) }
+            .contextMenu { menuItems(c, isMine: mine) }
+        }
     }
 
     private func menuItems(_ c: Checkin, isMine: Bool) -> CheckinMenuItems {
