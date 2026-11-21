@@ -475,7 +475,7 @@ struct CheckinDetailView: View {
         let meta = [checkin.beer?.style, abv].compactMap { $0 }.joined(separator: " · ")
         let name = checkin.beer?.name ?? ""
         return HStack(alignment: .top, spacing: 12) {
-            BeerLabel(beer: checkin.beer?.labelHD ?? checkin.beer?.label, brewery: checkin.brewery?.label, size: 64)
+            BeerLabel(beer: checkin.beer?.label, beerHD: checkin.beer?.labelHD, brewery: checkin.brewery?.label, size: 64)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 if let brewery = checkin.brewery, !brewery.name.isEmpty {

@@ -22,7 +22,7 @@ final class BreweryModel {
     }
 
     var name: String { info?.name ?? brewery.name }
-    var label: URL? { info?.labelHD ?? info?.label ?? brewery.label }
+    var label: URL? { info?.label ?? brewery.label }
 
     var hasMoreBeers: Bool {
         guard !beersExhausted, !beers.isEmpty else { return false }
@@ -204,7 +204,7 @@ struct BreweryView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            BeerLabel(beer: nil, brewery: model.label, size: 72, cornerRadius: 18)
+            BeerLabel(beer: nil, brewery: model.label, breweryHD: model.info?.labelHD, size: 72, cornerRadius: 18)
         }
     }
 

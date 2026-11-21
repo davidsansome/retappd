@@ -178,7 +178,7 @@ struct BeerView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            BeerLabel(beer: model.info?.labelHD ?? model.beer.label, brewery: model.beer.breweryLabel, size: 96, cornerRadius: 16)
+            BeerLabel(beer: model.beer.label, beerHD: model.info?.labelHD, brewery: model.beer.breweryLabel, size: 96, cornerRadius: 16)
                 .overlay(alignment: .topTrailing) {
                     if model.hadIt { HadCorner(size: 30) }
                 }

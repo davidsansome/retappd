@@ -769,10 +769,13 @@ struct TaproomPageTabs<Value: Hashable>: View {
 }
 
 /// A beer's label: its own if it has one, else its brewery's logo, else the app icon. Untappd's
-/// stock "no label" badges count as having none.
+/// stock "no label" badges count as having none. When an HD URL is given, the lower-res URL of
+/// the same artwork stays visible while the HD image loads.
 struct BeerLabel: View {
     let beer: URL?
+    var beerHD: URL? = nil
     let brewery: URL?
+    var breweryHD: URL? = nil
     var size: CGFloat
     var cornerRadius: CGFloat = 12
 
@@ -782,15 +785,36 @@ struct BeerLabel: View {
         url.lastPathComponent.hasPrefix("badge-") && url.lastPathComponent.contains("default")
     }
 
-    private var url: URL? {
-        [beer, brewery].compactMap { $0 }.first { !Self.isPlaceholder($0) }
+    private static func real(_ url: URL?) -> URL? {
+        url.flatMap { isPlaceholder($0) ? nil : $0 }
+    }
+
+    static func resolve(beer: URL?, beerHD: URL? = nil, brewery: URL?, breweryHD: URL? = nil) -> (url: URL, fallback: URL?)? {
+        if let hd = real(beerHD) {
+            let low = real(beer)
+            return (hd, low == hd ? nil : low)
+        }
+        if let low = real(beer) { return (low, nil) }
+        if let hd = real(breweryHD) {
+            let low = real(brewery)
+            return (hd, low == hd ? nil : low)
+        }
+        if let low = real(brewery) { return (low, nil) }
+        return nil
     }
 
     var body: some View {
+        let resolved = Self.resolve(beer: beer, beerHD: beerHD, brewery: brewery, breweryHD: breweryHD)
         Group {
-            if let url {
+            if let resolved {
                 // A warm blank while it loads, rather than flashing the app icon.
-                CachedImage(url: url, maxPixel: size * 3)
+                CachedImage(url: resolved.url, maxPixel: size * 3) {
+                    if let fallback = resolved.fallback {
+                        CachedImage(url: fallback, maxPixel: size * 3)
+                    } else {
+                        Taproom.glassInside
+                    }
+                }
             } else {
                 Image("LabelPlaceholder").resizable()
             }
