@@ -310,6 +310,9 @@ final class VenueModel {
             if fetchMenuOverride == nil {
                 await LocalIndex.shared.add(beers: beers)
             }
+            if hasTruncatedSection && filter.hasServerFilter {
+                await syncServerFilterIfNeeded()
+            }
         } catch {
             // Unverified venues have no menu; that's expected.
             if !error.isCancellation, venue.isVerified && sections.isEmpty { menuError = error.localizedDescription }
@@ -403,12 +406,16 @@ struct VenueDetailView: View {
         .toolbarBackground(Taproom.background, for: .navigationBar)
         .task { await model.load() }
         .task(id: searchText) {
+            let previousTrimmed = model.filter.trimmedQuery
             model.setSearchQuery(searchText)
-            guard model.hasTruncatedSection, !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed != previousTrimmed, model.hasTruncatedSection, model.filter.hasServerFilter else {
                 return
             }
-            try? await Task.sleep(for: .milliseconds(300))
-            guard !Task.isCancelled else { return }
+            if !trimmed.isEmpty {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+            }
             await model.syncServerFilterIfNeeded()
         }
         .refreshable { await model.load(force: true) }

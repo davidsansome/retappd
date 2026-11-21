@@ -47,6 +47,8 @@ final class BreweryModel {
     /// Set once a page of beers adds nothing new, so "Show more" stops (the endpoint's paging
     /// isn't captured in the docs).
     private var beersExhausted = false
+    /// Tracks whether `beersError` came from pagination (`loadMoreBeers`) vs a first-page/filter reload.
+    private var beersErrorFromLoadMore = false
     /// Bumped on every filter reload so stale responses from earlier requests are ignored.
     private var beersGeneration = 0
     let checkins: CheckinListModel
@@ -191,11 +193,23 @@ final class BreweryModel {
             totalBeers = l.total
             beersExhausted = false
             beersError = nil
+            beersErrorFromLoadMore = false
             applyBeerListMetadata(l, for: activeFilter)
             Task.detached(priority: .utility) { await LocalIndex.shared.add(beers: l.beers) }
         } catch {
             guard gen == beersGeneration else { return }
-            if !error.isCancellation { beersError = error.localizedDescription }
+            if !error.isCancellation {
+                beersError = error.localizedDescription
+                beersErrorFromLoadMore = false
+            }
+        }
+    }
+
+    func retryBeers() async {
+        if beersErrorFromLoadMore && !beers.isEmpty {
+            await loadMoreBeers()
+        } else {
+            await loadFirstBeers(force: true)
         }
     }
 
@@ -220,10 +234,14 @@ final class BreweryModel {
             if new.isEmpty { beersExhausted = true }
             beers += new
             beersError = nil
+            beersErrorFromLoadMore = false
             Task.detached(priority: .utility) { await LocalIndex.shared.add(beers: new) }
         } catch {
             guard gen == beersGeneration else { return }
-            if !error.isCancellation { beersError = error.localizedDescription }
+            if !error.isCancellation {
+                beersError = error.localizedDescription
+                beersErrorFromLoadMore = true
+            }
         }
     }
 }
@@ -545,7 +563,7 @@ struct BreweryView: View {
                 ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
             } else if let e = model.beersError, model.beers.isEmpty {
                 ErrorRow(message: e) {
-                    Task { await model.load(force: true) }
+                    Task { await model.retryBeers() }
                 }
                 .padding(.top, 12)
             } else if model.beers.isEmpty {
@@ -572,7 +590,7 @@ struct BreweryView: View {
                     ProgressView().frame(maxWidth: .infinity).padding(.vertical, 16)
                 } else if let e = model.beersError {
                     ErrorRow(message: e) {
-                        Task { await model.loadMoreBeers() }
+                        Task { await model.retryBeers() }
                     }
                     .padding(.top, 12)
                 } else if model.hasMoreBeers {

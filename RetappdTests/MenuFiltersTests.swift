@@ -388,4 +388,125 @@ final class MenuFiltersTests: XCTestCase {
         await model.resetFilters()
         XCTAssertNil(model.filteredServerSections)
     }
+
+    @MainActor
+    func testVenueModelTruncatedClearSearchResyncsWithRemainingFilterAndRefresh() async {
+        final class Recorder: @unchecked Sendable {
+            var requests: [APIRequest] = []
+        }
+        let recorder = Recorder()
+        let b1 = BeerLite(bid: 10, name: "First Tap", brewery: "Co", style: "IPA", abv: 6.0, rating: 4.0)
+        let b2 = BeerLite(bid: 20, name: "Hidden Stout", brewery: "Co", style: "Stout", abv: 9.5, rating: 4.5)
+        let b3 = BeerLite(bid: 30, name: "Hidden IPA", brewery: "Co", style: "IPA", abv: 6.8, rating: 4.2)
+
+        let venue = Venue(venueId: 17058, name: "Big Shop", isVerified: true)
+        let model = VenueModel(
+            venue: venue,
+            fetchMenu: { req in
+                recorder.requests.append(req)
+                if req.form?["has_not_had_before"] == "true" {
+                    if req.form?["q"] == "Stout" {
+                        return MenuSections(sections: [
+                            MenuSections.Section(id: 99, name: "Filtered", items: [MenuSections.Item(id: 200, beer: b2)])
+                        ])
+                    }
+                    return MenuSections(sections: [
+                        MenuSections.Section(id: 99, name: "Filtered", items: [
+                            MenuSections.Item(id: 200, beer: b2),
+                            MenuSections.Item(id: 300, beer: b3),
+                        ])
+                    ])
+                }
+                return MenuSections(sections: [
+                    MenuSections.Section(id: 1, name: "Bottleshop", items: [MenuSections.Item(id: 100, beer: b1)],
+                                         totalCount: 180, lastPage: false)
+                ])
+            },
+            fetchMenuFilters: { _ in VenueMenuFilters() }
+        )
+
+        await model.load()
+        await model.toggleHasNotHadBefore()
+        XCTAssertEqual(model.filteredSections(hasHad: { _ in false }).first?.1.map(\.id), [200, 300])
+
+        // Search while hasNotHadBefore is active
+        model.setSearchQuery("Stout")
+        await model.syncServerFilterIfNeeded()
+        XCTAssertEqual(recorder.requests.last?.form?["q"], "Stout")
+        XCTAssertEqual(recorder.requests.last?.form?["has_not_had_before"], "true")
+        XCTAssertEqual(model.filteredSections(hasHad: { _ in false }).first?.1.map(\.id), [200])
+
+        // Clear search while hasNotHadBefore stays active -> must re-sync with q=""
+        model.setSearchQuery("")
+        await model.syncServerFilterIfNeeded()
+        XCTAssertEqual(recorder.requests.last?.form?["q"], "")
+        XCTAssertEqual(recorder.requests.last?.form?["has_not_had_before"], "true")
+        XCTAssertEqual(model.filteredSections(hasHad: { _ in false }).first?.1.map(\.id), [200, 300])
+
+        // Pull-to-refresh re-syncs filteredServerSections when truncated + server filter active
+        let beforeRefreshCount = recorder.requests.count
+        await model.load(force: true)
+        XCTAssertEqual(recorder.requests.count, beforeRefreshCount + 2)
+        XCTAssertEqual(recorder.requests.last?.form?["has_not_had_before"], "true")
+    }
+
+    @MainActor
+    func testBreweryModelRetryBeersDistinguishesReloadAndLoadMoreErrors() async {
+        final class State: @unchecked Sendable {
+            var requests: [APIRequest] = []
+            var failNext = false
+        }
+        let state = State()
+        let beer1 = BeerLite(bid: 1, name: "Hop Bomb", brewery: "Test", style: "IPA", abv: 6.5, rating: 4.1)
+        let beer2 = BeerLite(bid: 2, name: "Dark Star", brewery: "Test", style: "Stout", abv: 9.0, rating: 4.4)
+
+        let model = BreweryModel(
+            brewery: BreweryPreview(id: 42, name: "Test Brewery", label: nil),
+            fetchBeers: { req in
+                state.requests.append(req)
+                if state.failNext {
+                    state.failNext = false
+                    throw APIError.http(503)
+                }
+                if req.query["offset"] == "1" {
+                    return BreweryBeerList(beers: [beer2], total: 2)
+                }
+                if req.query["hasNotHadBefore"] == "true" {
+                    return BreweryBeerList(beers: [beer2], total: 1)
+                }
+                return BreweryBeerList(beers: [beer1], total: 2)
+            }
+        )
+
+        // Initial load succeeds with beer1 (total 2 -> hasMoreBeers == true)
+        await model.applyFilter(BreweryBeerFilter())
+        XCTAssertEqual(model.beers.map(\.bid), [1])
+        XCTAssertTrue(model.hasMoreBeers)
+
+        // Filter reload fails while beers is non-empty
+        state.failNext = true
+        await model.toggleHasNotHadBefore()
+        XCTAssertNotNil(model.beersError)
+        XCTAssertEqual(model.beers.map(\.bid), [1]) // retained previous list
+
+        // Retry must re-run first-page filter reload (no offset), NOT loadMoreBeers
+        await model.retryBeers()
+        XCTAssertNil(model.beersError)
+        XCTAssertNil(state.requests.last?.query["offset"])
+        XCTAssertEqual(state.requests.last?.query["hasNotHadBefore"], "true")
+        XCTAssertEqual(model.beers.map(\.bid), [2])
+
+        // Reset back to unfiltered (total 2), then fail loadMoreBeers
+        await model.resetFilters()
+        state.failNext = true
+        await model.loadMoreBeers()
+        XCTAssertNotNil(model.beersError)
+        XCTAssertEqual(model.beers.map(\.bid), [1])
+
+        // Retry must re-run loadMoreBeers (offset == 1)
+        await model.retryBeers()
+        XCTAssertNil(model.beersError)
+        XCTAssertEqual(state.requests.last?.query["offset"], "1")
+        XCTAssertEqual(model.beers.map(\.bid), [1, 2])
+    }
 }
