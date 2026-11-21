@@ -326,4 +326,23 @@ final class FriendRequestTests: XCTestCase {
         XCTAssertEqual(ProfileFriendCount.adjusted(0, changeAtStart: 0, changeNow: -2), 0)
         XCTAssertNil(ProfileFriendCount.adjusted(nil, changeAtStart: 0, changeNow: 1))
     }
+
+    func testProfileFriendMenuAction() throws {
+        func makeProfile(id: Int = 9, username: String = "other", relationship: String? = nil) throws -> UserInfo.Profile {
+            let rel = relationship.map { "\"relationship\":\"\($0)\"," } ?? ""
+            return try UntappdAPI.decode(UserInfo.self, from: Data("""
+            {"meta":{"code":200},"response":{"user":{"uid":\(id),\(rel)"user_name":"\(username)"}}}
+            """.utf8)).user!
+        }
+
+        XCTAssertNil(ProfileFriendMenu.action(for: try makeProfile(id: 0), me: "me", friendIDs: []))
+        XCTAssertNil(ProfileFriendMenu.action(for: try makeProfile(username: "Me"), me: "me", friendIDs: []))
+        XCTAssertEqual(ProfileFriendMenu.action(for: try makeProfile(relationship: "none"), me: "me", friendIDs: []), .add)
+        XCTAssertEqual(ProfileFriendMenu.action(for: try makeProfile(relationship: "friends"), me: "me", friendIDs: []), .remove)
+        XCTAssertEqual(ProfileFriendMenu.action(for: try makeProfile(id: 42, relationship: "none"), me: "me", friendIDs: [42]), .remove)
+        XCTAssertEqual(ProfileFriendMenu.action(for: try makeProfile(relationship: "pending_them"), me: "me", friendIDs: []), .requestSent)
+        XCTAssertEqual(ProfileFriendMenu.action(for: try makeProfile(relationship: "follow"), me: "me", friendIDs: []), .following)
+        XCTAssertEqual(ProfileFriendMenu.action(for: try makeProfile(relationship: "pending_you"), me: "me", friendIDs: []), .accept(canReject: true))
+        XCTAssertEqual(ProfileFriendMenu.action(for: try makeProfile(relationship: "ignore"), me: "me", friendIDs: []), .accept(canReject: false))
+    }
 }

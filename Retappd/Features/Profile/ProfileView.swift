@@ -10,7 +10,17 @@ struct ProfileView: View {
     /// Shown in the header until the full profile loads.
     var placeholder: User? = nil
     var openSettings: () -> Void = {}
+    @Environment(AuthStore.self) private var auth
     @State private var info: UserInfo.Profile?
+    @State private var friendActionInFlight = false
+    @State private var confirmingRemoval: UserInfo.Profile?
+    @State private var friendActionError: FriendActionError?
+    @State private var friendActionFeedback = 0
+
+    private struct FriendActionError {
+        let title: String
+        let message: String
+    }
 
     var body: some View {
         CheckinList(model: model, showUser: false, registersDestinations: isAccountTab, emptyText: emptyText) {
@@ -20,6 +30,44 @@ struct ProfileView: View {
         .toolbarBackground(Taproom.background, for: .navigationBar)
         .navigationTitle(isAccountTab ? "" : (info?.userName ?? username))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if !isAccountTab, let profile = info,
+               let action = ProfileFriendMenu.action(
+                   for: profile,
+                   me: auth.username ?? "",
+                   friendIDs: Set(CheckInOptions.shared.friendships.map(\.id))
+               ) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if friendActionInFlight {
+                        ProgressView()
+                            .accessibilityLabel("Updating friendship")
+                    } else {
+                        Menu("More", systemImage: "ellipsis") {
+                            friendMenuContent(for: action, profile: profile)
+                        }
+                        .tint(Taproom.ink)
+                        .accessibilityIdentifier("profile.overflowMenu")
+                    }
+                }
+            }
+        }
+        .confirmationDialog(
+            confirmingRemoval.map { "Remove @\($0.userName) as a friend?" } ?? "",
+            isPresented: Binding(get: { confirmingRemoval != nil }, set: { if !$0 { confirmingRemoval = nil } }),
+            titleVisibility: .visible, presenting: confirmingRemoval
+        ) { profile in
+            Button("Remove friend", role: .destructive) { removeFriend(profile) }
+        } message: { _ in
+            Text("They'll be taken off your friends list. You can send a new request later.")
+        }
+        .alert(
+            friendActionError?.title ?? "",
+            isPresented: Binding(get: { friendActionError != nil }, set: { if !$0 { friendActionError = nil } }),
+            presenting: friendActionError
+        ) { _ in
+            Button("OK") {}
+        } message: { Text($0.message) }
+        .sensoryFeedback(.success, trigger: friendActionFeedback)
         .modifier(SettingsDestination(enabled: isAccountTab, username: username))
         .task(id: model.reloads) { await loadInfo() }
         .task(id: model.reloads) { if isAccountTab { await CheckInOptions.shared.loadRequests() } }
@@ -152,6 +200,92 @@ struct ProfileView: View {
         .accessibilityElement(children: .combine)
     }
 
+    @ViewBuilder
+    private func friendMenuContent(for action: ProfileFriendMenu, profile: UserInfo.Profile) -> some View {
+        switch action {
+        case .add:
+            Button("Add friend", systemImage: "person.badge.plus") { addFriend(profile) }
+        case .remove:
+            Button("Remove friend", systemImage: "person.badge.minus", role: .destructive) { confirmingRemoval = profile }
+        case .requestSent:
+            Button("Friend request sent", systemImage: "clock") {}
+                .disabled(true)
+        case .following:
+            Button("Following", systemImage: "checkmark") {}
+                .disabled(true)
+        case .accept(let canReject):
+            Button("Accept friend request", systemImage: "person.badge.plus") { answerRequest(profile, accepting: true) }
+            if canReject {
+                Button("Reject friend request", systemImage: "person.badge.minus", role: .destructive) {
+                    answerRequest(profile, accepting: false)
+                }
+            }
+        }
+    }
+
+    private func addFriend(_ profile: UserInfo.Profile) {
+        friendActionInFlight = true
+        Task {
+            defer { friendActionInFlight = false }
+            do {
+                let result = try await UntappdAPI.shared.fetch(.sendFriendRequest(profile.id), as: FriendRequestResult.self)
+                info?.relationship = result.isFollow ? "follow" : "pending_them"
+                await ResponseCache.shared.remove(APIRequest.userInfo(username).cacheKey)
+                friendActionFeedback += 1
+            } catch {
+                friendActionError = FriendActionError(
+                    title: "Couldn't add friend",
+                    message: Friends.sendErrorMessage(error)
+                )
+            }
+        }
+    }
+
+    private func removeFriend(_ profile: UserInfo.Profile) {
+        friendActionInFlight = true
+        Task {
+            defer { friendActionInFlight = false }
+            do {
+                try await CheckInOptions.shared.removeFriend(Friend(user: profile.asUser, location: profile.location))
+                info?.relationship = "none"
+                if let total = info?.totalFriends { info?.totalFriends = max(0, total - 1) }
+                await ResponseCache.shared.remove(APIRequest.userInfo(username).cacheKey)
+                friendActionFeedback += 1
+            } catch {
+                friendActionError = FriendActionError(
+                    title: "Couldn't remove friend",
+                    message: "\(profile.displayName) is still your friend. \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    private func answerRequest(_ profile: UserInfo.Profile, accepting: Bool) {
+        friendActionInFlight = true
+        Task {
+            defer { friendActionInFlight = false }
+            let friend = Friend(user: profile.asUser, location: profile.location)
+            do {
+                if accepting {
+                    try await CheckInOptions.shared.acceptRequest(friend)
+                    info?.relationship = "friends"
+                    if let total = info?.totalFriends { info?.totalFriends = total + 1 }
+                } else {
+                    try await CheckInOptions.shared.rejectRequest(friend)
+                    info?.relationship = "ignore"
+                }
+                await ResponseCache.shared.remove(APIRequest.userInfo(username).cacheKey)
+                friendActionFeedback += 1
+            } catch {
+                let what = accepting ? "accept" : "reject"
+                friendActionError = FriendActionError(
+                    title: "Couldn't answer request",
+                    message: "Couldn't \(what) \(profile.displayName)'s request. \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
     private func loadInfo() async {
         // A fetch that began before a friend was removed or added doesn't know about it.
         let changeAtStart = CheckInOptions.shared.friendCountChange
@@ -163,6 +297,29 @@ struct ProfileView: View {
         }
         if let i = try? await cacheThenNetwork(.userInfo(username), as: UserInfo.self, onCached: { info = current($0.user) }) {
             info = current(i.user)
+        }
+    }
+}
+
+/// What the overflow menu on another user's profile offers, based on the friendship status.
+enum ProfileFriendMenu: Equatable {
+    case add
+    case remove
+    case requestSent
+    case following
+    /// They sent you a request (`canReject == true` while pending, `false` if already rejected).
+    case accept(canReject: Bool)
+
+    static func action(for profile: UserInfo.Profile, me: String, friendIDs: Set<Int>) -> Self? {
+        guard profile.id != 0 else { return nil }
+        switch Friends.status(of: profile, me: me, friendIDs: friendIDs) {
+        case .you: return nil
+        case .friends: return .remove
+        case .canAdd: return .add
+        case .requestSent: return .requestSent
+        case .following: return .following
+        case .requestReceived: return .accept(canReject: true)
+        case .requestRejected: return .accept(canReject: false)
         }
     }
 }

@@ -120,6 +120,7 @@ struct FriendsListView: View {
         Task {
             do {
                 if accepting { try await options.acceptRequest(request) } else { try await options.rejectRequest(request) }
+                await ResponseCache.shared.remove(APIRequest.userInfo(request.user.userName).cacheKey)
             } catch {
                 let what = accepting ? "accept" : "reject"
                 requestError = "Couldn't \(what) \(request.user.displayName)'s request. \(error.localizedDescription)"
@@ -131,6 +132,7 @@ struct FriendsListView: View {
         Task {
             do {
                 try await options.removeFriend(friend)
+                await ResponseCache.shared.remove(APIRequest.userInfo(friend.user.userName).cacheKey)
             } catch {
                 removeError = "\(friend.user.displayName) is still your friend. \(error.localizedDescription)"
             }
