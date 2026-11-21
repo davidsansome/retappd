@@ -356,6 +356,11 @@ struct ProfileView: View {
                     await CheckInOptions.shared.noteBlockedFriend(profile.id)
                 }
                 await ResponseCache.shared.remove(APIRequest.userInfo(username).cacheKey)
+                await ResponseCache.shared.remove(APIRequest.userSettings.cacheKey)
+                await ResponseCache.shared.remove(APIRequest.blockedUsers.cacheKey)
+                if nowBlocked {
+                    await ResponseCache.shared.remove(APIRequest.mutedUsers.cacheKey)
+                }
                 NotificationCenter.default.post(name: .userModerationChanged, object: nowBlocked ? profile.id : nil)
                 friendActionFeedback += 1
             } catch {
@@ -375,6 +380,8 @@ struct ProfileView: View {
                 _ = try await UntappdAPI.shared.data(.muteUser(profile.id, days: days))
                 info?.muteStatus = "mute"
                 await ResponseCache.shared.remove(APIRequest.userInfo(username).cacheKey)
+                await ResponseCache.shared.remove(APIRequest.userSettings.cacheKey)
+                await ResponseCache.shared.remove(APIRequest.mutedUsers.cacheKey)
                 NotificationCenter.default.post(name: .userModerationChanged, object: profile.id)
                 friendActionFeedback += 1
             } catch {
@@ -394,6 +401,8 @@ struct ProfileView: View {
                 _ = try await UntappdAPI.shared.data(.unmuteUser(profile.id))
                 info?.muteStatus = "unmute"
                 await ResponseCache.shared.remove(APIRequest.userInfo(username).cacheKey)
+                await ResponseCache.shared.remove(APIRequest.userSettings.cacheKey)
+                await ResponseCache.shared.remove(APIRequest.mutedUsers.cacheKey)
                 NotificationCenter.default.post(name: .userModerationChanged, object: nil)
                 friendActionFeedback += 1
             } catch {
@@ -482,6 +491,8 @@ private struct SettingsDestination: ViewModifier {
                 case .settings: SettingsView()
                 case .friends: FriendsListView(username: username)
                 case .statistics: StatsView(username: username)
+                case .blockedUsers: BlockedUsersView()
+                case .mutedUsers: MutedUsersView()
                 }
             }
         } else {

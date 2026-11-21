@@ -527,6 +527,15 @@ extension APIRequest {
         APIRequest(method: .post, path: "/v4/user/unmute/\(uid)", form: [:])
     }
 
+    /// Users the signed-in account has blocked. Not in `untappd-private-api/docs/API.md`;
+    /// verified live on 2026-11-21: returns `{count, items}` where each item has `created_at`
+    /// and `user`.
+    static let blockedUsers = APIRequest(path: "/v4/user/blockusers")
+
+    /// Friends the signed-in account has muted (`GET /v4/user/muteusers`): returns `{count, items}`
+    /// with `created_at`, `expire_date`, `mute_forever`, `period_of_time`, and `user`.
+    static let mutedUsers = APIRequest(path: "/v4/user/muteusers")
+
     /// The signed-in user's incoming friend requests (not the ones they sent): `count` and
     /// `items`, each `created_at` and a `user` (`uid` is what accept and reject take). Checked
     /// live on 2026-11-19. Nothing in the docs about paging; the test accounts never had more

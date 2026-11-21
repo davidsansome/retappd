@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum ProfileRoute: Hashable { case settings, friends, statistics }
+enum ProfileRoute: Hashable { case settings, friends, statistics, blockedUsers, mutedUsers }
 
 struct SettingsView: View {
     @AppStorage(Appearance.storageKey) private var appearance = Appearance.system
@@ -39,6 +39,12 @@ struct SettingsView: View {
                             toggle("Allow producer comments", \.allowsProducerComments) { .updateSetting("oc_privacy", !$0) }
                         }
                         caption("A private account's checkins are only visible to friends. Public toasts lets anyone toast your checkins, not only friends. Producer comments lets breweries comment on your checkins of their drinks.")
+                        switchCard {
+                            navRow("Blocked users", count: settings.blockedUsersCount, route: .blockedUsers)
+                                .accessibilityIdentifier("Settings.blockedUsers")
+                            navRow("Muted users", count: settings.mutedUsersCount, route: .mutedUsers)
+                                .accessibilityIdentifier("Settings.mutedUsers")
+                        }
                     }
 
                     TaproomSection("Checkins & badges") {
@@ -99,6 +105,9 @@ struct SettingsView: View {
         .toolbarBackground(Taproom.background, for: .navigationBar)
         .task { await load() }
         .refreshable { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .userModerationChanged)) { _ in
+            Task { await loadSettings() }
+        }
         .alert("Couldn't save", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
             Button("OK") {}
         } message: {
@@ -209,6 +218,26 @@ struct SettingsView: View {
             }
         }
         .taproomCard()
+    }
+
+    private func navRow(_ title: String, count: Int?, route: ProfileRoute) -> some View {
+        NavigationLink(value: route) {
+            HStack(spacing: 8) {
+                Text(title).foregroundStyle(Taproom.ink)
+                Spacer(minLength: 4)
+                if let count, count > 0 {
+                    Text(count.formatted())
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(Taproom.muted)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(Taproom.muted)
+            }
+            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func caption(_ text: String) -> some View {

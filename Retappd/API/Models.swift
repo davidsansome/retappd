@@ -1025,6 +1025,73 @@ struct BlockUserResult: Decodable {
     }
 }
 
+/// Response from `GET /v4/user/blockusers`.
+struct BlockedUsersResponse: Decodable {
+    var items: [BlockedUser]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        items = c.list("items")
+    }
+}
+
+struct BlockedUser: Decodable, Identifiable, Equatable {
+    var id: Int { user.id }
+    var user: User
+    var createdAt: Date?
+
+    init(user: User, createdAt: Date? = nil) {
+        self.user = user
+        self.createdAt = createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        guard let u = c.obj("user", User.self), u.id != 0 else { throw APIError.decoding }
+        user = u
+        createdAt = UntappdDate.parse(c.text("created_at"))
+    }
+}
+
+/// Response from `GET /v4/user/muteusers`.
+struct MutedUsersResponse: Decodable {
+    var items: [MutedUser]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        items = c.list("items")
+    }
+}
+
+struct MutedUser: Decodable, Identifiable, Equatable {
+    var id: Int { user.id }
+    var user: User
+    var createdAt: Date?
+    /// Non-nil only for timed mutes (the API sends the Unix epoch for `mute_forever: 1`).
+    var expireDate: Date?
+    var muteForever: Bool
+    var periodOfTime: Int
+
+    init(user: User, createdAt: Date? = nil, expireDate: Date? = nil, muteForever: Bool = true, periodOfTime: Int = 0) {
+        self.user = user
+        self.createdAt = createdAt
+        self.expireDate = expireDate
+        self.muteForever = muteForever
+        self.periodOfTime = periodOfTime
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        guard let u = c.obj("user", User.self), u.id != 0 else { throw APIError.decoding }
+        user = u
+        createdAt = UntappdDate.parse(c.text("created_at"))
+        muteForever = c.bool("mute_forever") ?? (c.int("period_of_time") == 0)
+        periodOfTime = c.int("period_of_time") ?? 0
+        let rawExpire = UntappdDate.parse(c.text("expire_date"))
+        expireDate = (!muteForever && (rawExpire?.timeIntervalSince1970 ?? 0) > 0) ? rawExpire : nil
+    }
+}
+
 /// `/v4/user/stats?v2=true`: totals for one date range. There is no per-day series in it.
 /// Field names are from `docs/openapi.yaml`; the schema types the averages as integers, so
 /// they're read as numbers here in case a fraction turns up. `average_beer_distinct` is not
@@ -1157,6 +1224,8 @@ struct AccountSettings: Decodable {
     /// An Untappd Insider (the API's older name is "supporter").
     var isInsider: Bool
     var emailAddress: String?
+    var blockedUsersCount: Int
+    var mutedUsersCount: Int
 
     var allowsProducerComments: Bool {
         get { !ocOptOut }
@@ -1175,6 +1244,8 @@ struct AccountSettings: Decodable {
         retroactiveBadges = u.bool("retro_status") ?? false
         isInsider = u.bool("is_supporter") ?? false
         emailAddress = s?.text("email_address")
+        blockedUsersCount = u.int("user_block_count") ?? 0
+        mutedUsersCount = u.int("user_mute_count") ?? 0
     }
 }
 
