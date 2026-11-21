@@ -793,7 +793,7 @@ struct TaproomRatingCard: View {
             if let rating = c.rating, rating > 0 {
                 TaproomRating(rating: rating, size: 34)
             } else {
-                Text(c.empty).font(.system(size: 22, weight: .heavy)).tracking(-0.4).foregroundStyle(Taproom.glassRim)
+                Text(c.empty).font(.system(size: 22, weight: .heavy)).tracking(-0.4).foregroundStyle(Taproom.muted)
                     .frame(minHeight: 34, alignment: .leading)
                     .accessibilityLabel("\(c.title): \(c.empty)")
             }
