@@ -38,13 +38,14 @@ struct BarcodeSearchSheet: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @State private var phase = Phase.scanning
     @State private var typed = ""
     @State private var cameraAllowed: Bool?
     @FocusState private var typing: Bool
 
     private var canScan: Bool {
-        DataScannerViewController.isSupported && cameraAllowed == true
+        DataScannerViewController.isSupported && DataScannerViewController.isAvailable && cameraAllowed == true
     }
 
     var body: some View {
@@ -127,6 +128,12 @@ struct BarcodeSearchSheet: View {
                 Text(cameraAllowed == false
                      ? "Camera access is off. Turn it on in Settings to scan barcodes."
                      : "This device can't scan barcodes.")
+            } actions: {
+                if cameraAllowed == false, let url = URL(string: UIApplication.openSettingsURLString) {
+                    Button("Open Settings") { openURL(url) }
+                        .buttonStyle(TaproomPrimaryButton())
+                        .frame(maxWidth: 280)
+                }
             }
         }
     }
@@ -218,28 +225,55 @@ struct BarcodeSearchSheet: View {
 private struct BarcodeScanner: UIViewControllerRepresentable {
     var onCode: (String) -> Void
 
-    func makeUIViewController(context: Context) -> DataScannerViewController {
-        let vc = DataScannerViewController(
+    func makeUIViewController(context: Context) -> ContainerViewController {
+        let scanner = DataScannerViewController(
             recognizedDataTypes: [.barcode(symbologies: [.ean13, .ean8, .upce])],
             qualityLevel: .balanced,
             recognizesMultipleItems: false,
             isHighFrameRateTrackingEnabled: false,
             isHighlightingEnabled: true
         )
-        vc.delegate = context.coordinator
-        try? vc.startScanning()
-        return vc
+        scanner.delegate = context.coordinator
+        return ContainerViewController(scanner: scanner)
     }
 
-    func updateUIViewController(_ vc: DataScannerViewController, context: Context) {
+    func updateUIViewController(_ vc: ContainerViewController, context: Context) {
         context.coordinator.onCode = onCode
+        if !vc.scanner.isScanning && vc.view.window != nil { try? vc.scanner.startScanning() }
     }
 
-    static func dismantleUIViewController(_ vc: DataScannerViewController, coordinator: Coordinator) {
-        vc.stopScanning()
+    static func dismantleUIViewController(_ vc: ContainerViewController, coordinator: Coordinator) {
+        vc.scanner.stopScanning()
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(onCode: onCode) }
+
+    /// Hosts `DataScannerViewController` (which isn't `open`) so scanning starts in `viewDidAppear`,
+    /// once the view controller is in the window hierarchy.
+    final class ContainerViewController: UIViewController {
+        let scanner: DataScannerViewController
+
+        init(scanner: DataScannerViewController) {
+            self.scanner = scanner
+            super.init(nibName: nil, bundle: nil)
+        }
+
+        @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+
+        override func viewDidLoad() {
+            super.viewDidLoad()
+            addChild(scanner)
+            scanner.view.frame = view.bounds
+            scanner.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            view.addSubview(scanner.view)
+            scanner.didMove(toParent: self)
+        }
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            if !scanner.isScanning { try? scanner.startScanning() }
+        }
+    }
 
     final class Coordinator: NSObject, DataScannerViewControllerDelegate {
         var onCode: (String) -> Void

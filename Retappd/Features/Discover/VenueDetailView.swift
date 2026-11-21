@@ -13,6 +13,8 @@ final class VenueModel {
     /// Checkins here by everyone, and by the user's friends. Nil until the venue's Untappd id is known.
     private(set) var everyone: CheckinListModel?
     private(set) var friends: CheckinListModel?
+    /// When each beer was last checked in here, cached from `everyone?.items`.
+    private(set) var lastCheckinByBeer: [Int: Date] = [:]
     private var firstLoad: Task<Void, Never>?
 
     init(venue: Venue) {
@@ -51,6 +53,7 @@ final class VenueModel {
         } else {
             await everyone.loadIfNeeded()
         }
+        updateLastCheckinByBeer()
     }
 
     private func makeLists() {
@@ -62,31 +65,23 @@ final class VenueModel {
     /// When the most recent checkin here was made, as far as the loaded checkins tell.
     var lastCheckin: Date? { everyone?.items.first?.createdAt }
 
-    /// When each beer was last checked in here, from the loaded checkins.
-    var lastCheckinByBeer: [Int: Date] {
+    /// Recomputes `lastCheckinByBeer` from the loaded checkins.
+    func updateLastCheckinByBeer() {
         var out: [Int: Date] = [:]
         for c in everyone?.items ?? [] {
             guard let bid = c.beer?.bid, let d = c.createdAt else { continue }
             if out[bid].map({ d > $0 }) ?? true { out[bid] = d }
         }
-        return out
+        lastCheckinByBeer = out
     }
 
     /// Opens the venue in Google Maps (the app if installed, else the web): by name and address
     /// when there is one, which finds the place itself, else by coordinates.
     var mapsURL: URL? {
-        let address = [venue.address, venue.city, venue.state, info?.country].compactMap { $0 }.filter { !$0.isEmpty }
-        let query: String
-        if !address.isEmpty {
-            query = ([venue.name] + address).joined(separator: ", ")
-        } else if let c = venue.coordinate {
-            query = "\(c.coordinate.latitude),\(c.coordinate.longitude)"
-        } else {
-            return nil
-        }
-        var u = URLComponents(string: "https://www.google.com/maps/search/")!
-        u.queryItems = [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "query", value: query)]
-        return u.url
+        ExternalLinks.mapsURL(name: venue.name, address: venue.address, city: venue.city,
+                              state: venue.state, country: info?.country,
+                              lat: venue.coordinate?.coordinate.latitude,
+                              lng: venue.coordinate?.coordinate.longitude)
     }
 
     private func loadMenu(_ id: Int) async {
@@ -100,7 +95,7 @@ final class VenueModel {
             await LocalIndex.shared.add(beers: beers)
         } catch {
             // Unverified venues have no menu; that's expected.
-            if venue.isVerified && sections.isEmpty { menuError = error.localizedDescription }
+            if !error.isCancellation, venue.isVerified && sections.isEmpty { menuError = error.localizedDescription }
         }
     }
 
@@ -130,8 +125,6 @@ struct VenueDetailView: View {
     @State private var who = Who.everyone
     /// Tags this page's links, so its rows only show as selected for checkins it opened itself.
     @State private var listID = UUID()
-    /// Whether the hero has scrolled away, so the venue's name goes in the navigation bar.
-    @State private var heroHidden = false
 
     enum VenueTab: Hashable { case menu, checkins }
     enum Who: Hashable { case everyone, friends }
@@ -165,16 +158,12 @@ struct VenueDetailView: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.immediately)
-        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 110 } action: { _, hidden in
-            withAnimation(.easeInOut(duration: 0.15)) { heroHidden = hidden }
-        }
-        .foregroundStyle(Taproom.ink)
-        .background(Taproom.background)
-        .navigationTitle(heroHidden ? model.venue.name : "")
-        .navigationBarTitleDisplayMode(.inline)
+        .taproomScreen()
+        .taproomScrollTitle(model.venue.name, threshold: 110)
         .toolbarBackground(Taproom.background, for: .navigationBar)
         .task { await model.load() }
         .refreshable { await model.load(force: true) }
+        .onChange(of: model.everyone?.items) { model.updateLastCheckinByBeer() }
         .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: model.venue) }
     }
 
@@ -252,7 +241,7 @@ struct VenueDetailView: View {
                     }
                     if let website {
                         TaproomLinkRow(url: website, icon: "globe", hint: "Website") {
-                            Text(Self.displayHost(website)).lineLimit(1)
+                            Text(ExternalLinks.displayHost(website)).lineLimit(1)
                         }
                         .accessibilityHint("Opens the venue's website")
                     }
@@ -260,15 +249,6 @@ struct VenueDetailView: View {
                 .taproomCard()
             }
         }
-    }
-
-    /// "coppertap.com.au/menu" for a website, without the scheme or a leading "www.".
-    static func displayHost(_ url: URL) -> String {
-        var s = url.absoluteString
-        for p in ["https://", "http://"] where s.lowercased().hasPrefix(p) { s.removeFirst(p.count) }
-        if s.lowercased().hasPrefix("www.") { s.removeFirst(4) }
-        while s.hasSuffix("/") { s.removeLast() }
-        return s
     }
 
     // MARK: Tabs
@@ -338,7 +318,7 @@ struct VenueDetailView: View {
         let last = model.lastCheckinByBeer
         if filter.isEmpty {
             if let s = currentSection {
-                beerRows(s.items.compactMap(\.beer), last: last)
+                beerRows(s.items.filter { $0.beer != nil }, last: last)
             } else if model.loadingMenu {
                 ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
             } else {
@@ -346,23 +326,27 @@ struct VenueDetailView: View {
                     .font(.callout).foregroundStyle(Taproom.muted)
             }
         } else {
-            let matches = model.sections.compactMap { s -> (MenuSections.Section, [BeerLite])? in
-                let beers = s.items.compactMap(\.beer).filter(matches)
-                return beers.isEmpty ? nil : (s, beers)
+            let matches = model.sections.compactMap { s -> (MenuSections.Section, [MenuSections.Item])? in
+                let items = s.items.filter { $0.beer.map(matches) == true }
+                return items.isEmpty ? nil : (s, items)
             }
             if matches.isEmpty {
                 Text("No beers on the menu match “\(filter)”.").font(.callout).foregroundStyle(Taproom.muted)
             }
-            ForEach(matches, id: \.0.id) { s, beers in
-                TaproomSection(s.title(venueName: model.venue.name)) { beerRows(beers, last: last) }
+            ForEach(matches, id: \.0.id) { s, items in
+                TaproomSection(s.title(venueName: model.venue.name)) { beerRows(items, last: last) }
             }
         }
     }
 
-    private func beerRows(_ beers: [BeerLite], last: [Int: Date]) -> some View {
-        VStack(spacing: 0) {
+    private func beerRows(_ items: [MenuSections.Item], last: [Int: Date]) -> some View {
+        let rows = items.enumerated().compactMap { offset, item -> (id: Int, beer: BeerLite)? in
+            guard let beer = item.beer else { return nil }
+            return (item.id != 0 ? item.id : -(offset + 1), beer)
+        }
+        return VStack(spacing: 0) {
             // Menu numbers hidden until we know where the real tap numbers come from.
-            ForEach(beers, id: \.bid) { b in
+            ForEach(rows, id: \.id) { _, b in
                 Button { checkInBeer = b } label: {
                     BeerRow(beer: b, detail: last[b.bid].map { "here \(RelativeTime.short($0))" })
                 }

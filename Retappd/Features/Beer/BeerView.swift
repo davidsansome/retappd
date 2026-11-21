@@ -49,9 +49,8 @@ final class BeerModel {
             apply(try await cacheThenNetwork(.beerInfo(beer.bid), as: BeerInfo.self, onCached: apply))
             loadError = nil
             Task.detached(priority: .utility) { [lite = beer] in await LocalIndex.shared.add(beers: [lite]) }
-        } catch is CancellationError {
         } catch {
-            if (error as? URLError)?.code != .cancelled { loadError = error.localizedDescription }
+            if !error.isCancellation { loadError = error.localizedDescription }
         }
     }
 
@@ -76,8 +75,6 @@ struct BeerView: View {
     @State private var checkInBeer: BeerLite?
     /// Tags this page's links, so its rows only show as selected for checkins it opened itself.
     @State private var listID = UUID()
-    /// Whether the hero has scrolled away, so the beer's name goes in the navigation bar.
-    @State private var heroHidden = false
     @Environment(\.beerPageCanCheckIn) private var canCheckIn
     @Environment(DiscoverModel.self) private var discover
 
@@ -105,13 +102,8 @@ struct BeerView: View {
             .frame(maxWidth: .readableContentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 90 } action: { _, hidden in
-            withAnimation(.easeInOut(duration: 0.15)) { heroHidden = hidden }
-        }
-        .foregroundStyle(Taproom.ink)
-        .background(Taproom.background)
-        .navigationTitle(heroHidden ? model.beer.name : "")
-        .navigationBarTitleDisplayMode(.inline)
+        .taproomScreen()
+        .taproomScrollTitle(model.beer.name)
         .toolbarBackground(Taproom.background, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if canCheckIn {
@@ -124,8 +116,9 @@ struct BeerView: View {
         .task { await model.load() }
         .task { await model.checkins.loadIfNeeded() }
         .refreshable {
-            await model.load(force: true)
-            await model.checkins.refresh()
+            async let details: Void = model.load(force: true)
+            async let checkins: Void = model.checkins.refresh()
+            _ = await (details, checkins)
         }
         .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
     }
@@ -157,8 +150,9 @@ struct BeerView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             BeerLabel(beer: model.info?.labelHD ?? model.beer.label, brewery: model.beer.breweryLabel, size: 96, cornerRadius: 16)
                 .overlay(alignment: .topTrailing) {
-                    if model.hadIt { HadCorner(size: 30).clipShape(RoundedRectangle(cornerRadius: 16)) }
+                    if model.hadIt { HadCorner(size: 30) }
                 }
+                .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
 
@@ -211,7 +205,7 @@ struct BeerView: View {
             if let rating, rating > 0 {
                 TaproomRating(rating: rating, size: 34)
             } else {
-                Text(empty).font(.system(size: 22, weight: .heavy)).tracking(-0.4).foregroundStyle(Taproom.glassRim)
+                Text(empty).font(.system(size: 22, weight: .heavy)).tracking(-0.4).foregroundStyle(Taproom.muted)
                     .frame(minHeight: 34, alignment: .leading)
                     .accessibilityLabel("\(title): \(empty)")
             }
@@ -254,7 +248,7 @@ struct BeerView: View {
                 }
                 if list.items.isEmpty && (list.isRefreshing || list.isLoadingMore) {
                     ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
-                } else if let error = list.error, list.items.isEmpty {
+                } else if let error = list.error {
                     ErrorRow(message: error) { Task { await list.refresh() } }
                 } else if list.items.isEmpty {
                     Text("No one has checked in this beer yet.").font(.callout).foregroundStyle(Taproom.muted)

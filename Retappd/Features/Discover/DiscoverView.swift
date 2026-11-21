@@ -16,7 +16,7 @@ struct DiscoverView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
-                if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     nearbyContent
                 } else {
                     searchContent
@@ -29,8 +29,7 @@ struct DiscoverView: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.immediately)
-        .foregroundStyle(Taproom.ink)
-        .background(Taproom.background)
+        .taproomScreen()
         .safeAreaInset(edge: .top, spacing: 0) {
             TaproomSearchField(text: $query, prompt: "Beers or venues", focusRequests: searchRequests)
                 .frame(maxWidth: .readableContentWidth)
@@ -236,7 +235,7 @@ struct FriendActivityRow: View {
             }
             ForEach(activity.checkins.prefix(3)) { c in
                 HStack(spacing: 8) {
-                    CachedImage(url: c.user?.avatar, maxPixel: 60).frame(width: 22, height: 22).clipShape(Circle())
+                    Avatar(url: c.user?.avatar, size: 22)
                     (Text(c.user?.shortName ?? "").bold() + Text(" · \(c.beer?.name ?? "")"))
                         .font(.caption).lineLimit(1)
                     Spacer(minLength: 4)
@@ -322,7 +321,7 @@ struct VerifiedBadge: View {
 enum Distance {
     static func string(_ metres: Double) -> String {
         let m = Measurement(value: metres, unit: UnitLength.meters)
-        if metres < 1000 {
+        if Locale.current.measurementSystem == .metric && metres < 1000 {
             return m.formatted(.measurement(width: .abbreviated, usage: .road, numberFormatStyle: .number.precision(.fractionLength(0))))
         }
         return m.formatted(.measurement(width: .abbreviated, usage: .road, numberFormatStyle: .number.precision(.fractionLength(0...1))))

@@ -60,7 +60,7 @@ final class BadgeModel {
             apply(try await cacheThenNetwork(.badgeStatus([id]), as: BadgeStatusList.self, onCached: apply))
             loadError = nil
         } catch {
-            if !Self.isCancellation(error) { loadError = error.localizedDescription }
+            if !error.isCancellation { loadError = error.localizedDescription }
         }
     }
 
@@ -78,7 +78,7 @@ final class BadgeModel {
                                              onCached: apply))
             friendsError = nil
         } catch {
-            if !Self.isCancellation(error) { friendsError = error.localizedDescription }
+            if !error.isCancellation { friendsError = error.localizedDescription }
         }
     }
 
@@ -94,7 +94,7 @@ final class BadgeModel {
             hasMoreFriends = page.count >= Self.pageSize && !page.items.isEmpty
             friendsError = nil
         } catch {
-            if !Self.isCancellation(error) { friendsError = error.localizedDescription }
+            if !error.isCancellation { friendsError = error.localizedDescription }
         }
     }
 
@@ -102,10 +102,6 @@ final class BadgeModel {
     private static func unique(_ entries: [FriendBadgeList.Entry]) -> [FriendBadgeList.Entry] {
         var seen = Set<String>()
         return entries.filter { seen.insert($0.id).inserted }
-    }
-
-    private static func isCancellation(_ error: Error) -> Bool {
-        error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 }
 
@@ -195,23 +191,23 @@ struct BadgeView: View {
 
     @ViewBuilder private var youValue: some View {
         if let s = model.status {
-            if !model.isLevelBadge {
-                Text("Earned")
-                    .font(.system(size: 36, weight: .heavy)).tracking(-0.8)
-            } else {
+            if model.isLevelBadge, s.level > 0 {
                 Text("Level \(s.level.formatted())")
                     .font(.system(size: 36, weight: .heavy).monospacedDigit())
                     .tracking(-0.8)
+            } else {
+                Text("Earned")
+                    .font(.system(size: 36, weight: .heavy)).tracking(-0.8)
             }
         } else if model.loaded {
             Text("Not earned yet")
                 .font(.system(size: 26, weight: .heavy)).tracking(-0.4)
-                .foregroundStyle(Taproom.glassRim)
+                .foregroundStyle(Taproom.muted)
         } else if model.loadError == nil {
             ProgressView().frame(minHeight: 44, alignment: .leading)
         } else {
             Text("Couldn't load").font(.system(size: 26, weight: .heavy)).tracking(-0.4)
-                .foregroundStyle(Taproom.glassRim)
+                .foregroundStyle(Taproom.muted)
         }
     }
 

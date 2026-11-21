@@ -49,9 +49,8 @@ final class BreweryModel {
         do {
             apply(try await cacheThenNetwork(.breweryInfo(brewery.id), as: BreweryInfo.self, onCached: apply))
             loadError = nil
-        } catch is CancellationError {
         } catch {
-            if (error as? URLError)?.code != .cancelled { loadError = error.localizedDescription }
+            if !error.isCancellation { loadError = error.localizedDescription }
         }
     }
 
@@ -71,9 +70,8 @@ final class BreweryModel {
             beersExhausted = false
             beersError = nil
             Task.detached(priority: .utility) { await LocalIndex.shared.add(beers: l.beers) }
-        } catch is CancellationError {
         } catch {
-            if (error as? URLError)?.code != .cancelled { beersError = error.localizedDescription }
+            if !error.isCancellation { beersError = error.localizedDescription }
         }
     }
 
@@ -90,7 +88,7 @@ final class BreweryModel {
             beersError = nil
             Task.detached(priority: .utility) { await LocalIndex.shared.add(beers: new) }
         } catch {
-            beersError = error.localizedDescription
+            if !error.isCancellation { beersError = error.localizedDescription }
         }
     }
 }
@@ -101,7 +99,6 @@ struct BreweryView: View {
     @State private var tab = Tab.beers
     /// Tags this page's links, so its rows only show as selected for checkins it opened itself.
     @State private var listID = UUID()
-    @State private var heroHidden = false
 
     enum Tab: Hashable { case beers, checkins }
 
@@ -143,19 +140,15 @@ struct BreweryView: View {
             .frame(maxWidth: .readableContentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 90 } action: { _, hidden in
-            withAnimation(.easeInOut(duration: 0.15)) { heroHidden = hidden }
-        }
-        .foregroundStyle(Taproom.ink)
-        .background(Taproom.background)
-        .navigationTitle(heroHidden ? model.name : "")
-        .navigationBarTitleDisplayMode(.inline)
+        .taproomScreen()
+        .taproomScrollTitle(model.name)
         .toolbarBackground(Taproom.background, for: .navigationBar)
         .task { await model.load() }
         .task { await model.checkins.loadIfNeeded() }
         .refreshable {
-            await model.load(force: true)
-            await model.checkins.refresh()
+            async let details: Void = model.load(force: true)
+            async let checkins: Void = model.checkins.refresh()
+            _ = await (details, checkins)
         }
     }
 
@@ -188,31 +181,15 @@ struct BreweryView: View {
     }
 
     @ViewBuilder private var ratings: some View {
-        if let r = model.info?.rating {
-            HStack(alignment: .top, spacing: 0) {
-                column("Everyone", caption: model.info?.ratingCount.map { "\($0.formatted()) ratings" }) {
-                    TaproomRating(rating: r, size: 34)
+        if let r = model.info?.rating, r > 0 {
+            TaproomRatingCard(
+                leading: .init(title: "Everyone", rating: r,
+                               caption: model.info?.ratingCount.map { "\($0.formatted()) ratings" }),
+                trailing: model.info?.yourAverage.flatMap { $0 > 0 ? $0 : nil }.map {
+                    .init(title: "Your average", rating: $0, caption: "across the beers you've had")
                 }
-                if let mine = model.info?.yourAverage {
-                    Rectangle().fill(Taproom.border).frame(width: 1)
-                    column("Your average", caption: "across the beers you've had") {
-                        TaproomRating(rating: mine, size: 34)
-                    }
-                }
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .taproomCard()
+            )
         }
-    }
-
-    private func column<Content: View>(_ title: String, caption: String?, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(Taproom.muted)
-            content()
-            if let caption { Text(caption).font(.caption).foregroundStyle(Taproom.muted) }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: Links
@@ -228,7 +205,7 @@ struct BreweryView: View {
     private var linkItems: [Link] {
         guard let i = model.info else { return [] }
         var out: [Link] = []
-        if let u = i.website { out.append(Link(url: u, icon: "globe", hint: "Website", text: VenueDetailView.displayHost(u))) }
+        if let u = i.website { out.append(Link(url: u, icon: "globe", hint: "Website", text: ExternalLinks.displayHost(u))) }
         if let u = i.instagram { out.append(Link(url: u, icon: "camera", hint: "Instagram", text: Self.handle(u))) }
         if let u = i.twitter { out.append(Link(url: u, icon: "at", hint: "X", text: Self.handle(u))) }
         if let u = i.facebook { out.append(Link(url: u, icon: "person.2", hint: "Facebook", text: Self.handle(u))) }
@@ -239,16 +216,14 @@ struct BreweryView: View {
 
     private var mapsURL: URL? {
         guard let i = model.info else { return nil }
-        let parts = [i.name, i.address, i.city, i.state, i.country].compactMap { $0 }.filter { !$0.isEmpty }
-        guard i.address != nil || i.city != nil else { return nil }
-        var u = URLComponents(string: "https://www.google.com/maps/search/")!
-        u.queryItems = [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "query", value: parts.joined(separator: ", "))]
-        return u.url
+        return ExternalLinks.mapsURL(name: i.name, address: i.address, city: i.city, state: i.state, country: i.country)
     }
 
-    /// "@handle" from the last part of a social link.
+    /// "@handle" from the last part of a social link, or the bare host if there's no path.
     private static func handle(_ url: URL) -> String {
-        let last = url.pathComponents.last(where: { $0 != "/" }) ?? VenueDetailView.displayHost(url)
+        guard let last = url.pathComponents.last(where: { $0 != "/" && !$0.isEmpty }) else {
+            return ExternalLinks.displayHost(url)
+        }
         return last.hasPrefix("@") ? last : "@\(last)"
     }
 

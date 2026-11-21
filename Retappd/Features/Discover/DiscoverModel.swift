@@ -35,6 +35,8 @@ final class DiscoverModel {
     private var lastQueried: CLLocation?
     private var prefetchedMenus = Set<Int>()
     private var isStale = false
+    private var loadGeneration = 0
+    private var searchGeneration = 0
     private let username: String
 
     init(username: String) { self.username = username }
@@ -60,8 +62,10 @@ final class DiscoverModel {
         lastQueried = loc
         origin = loc
         recompute()  // re-sort what we already have for the new position straight away
+        loadGeneration += 1
+        let generation = loadGeneration
         isLoading = true
-        defer { isLoading = false }
+        defer { if loadGeneration == generation { isLoading = false } }
         let (lat, lng) = (loc.coordinate.latitude, loc.coordinate.longitude)
 
         // The friends feed is usually already cached by the Feed tab.
@@ -95,7 +99,7 @@ final class DiscoverModel {
             around = resolved
             recompute()
         } catch {
-            if around == nil && map == nil { self.error = error.localizedDescription }
+            if !error.isCancellation, around == nil && map == nil { self.error = error.localizedDescription }
         }
     }
 
@@ -114,7 +118,7 @@ final class DiscoverModel {
             recompute()
             await LocalIndex.shared.add(venues: r.venues)
         } catch {
-            if map == nil && around == nil { self.error = error.localizedDescription }
+            if !error.isCancellation, map == nil && around == nil { self.error = error.localizedDescription }
         }
     }
 
@@ -212,27 +216,34 @@ final class DiscoverModel {
     /// Local results synchronously-ish, then network results (themselves cache-first).
     func search(_ raw: String) async {
         let q = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { beerResults = []; venueResults = []; return }
+        searchGeneration += 1
+        let generation = searchGeneration
+        guard !q.isEmpty else {
+            beerResults = []
+            venueResults = []
+            isSearching = false
+            return
+        }
         let loc = origin
 
         let localBeers = await LocalIndex.shared.searchBeers(q)
         let localVenues = await LocalIndex.shared.searchVenues(q, near: loc)
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, searchGeneration == generation else { return }
         beerResults = localBeers
         venueResults = localVenues
 
         // Debounce network work while typing; cancelled by the next keystroke.
         try? await Task.sleep(for: .milliseconds(200))
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, searchGeneration == generation else { return }
         isSearching = true
-        defer { isSearching = false }
+        defer { if searchGeneration == generation { isSearching = false } }
 
-        async let b: Void = searchBeersRemote(q, local: localBeers)
-        async let v: Void = searchVenuesRemote(q, loc: loc, local: localVenues)
+        async let b: Void = searchBeersRemote(q, local: localBeers, generation: generation)
+        async let v: Void = searchVenuesRemote(q, loc: loc, local: localVenues, generation: generation)
         _ = await (b, v)
     }
 
-    private func searchBeersRemote(_ q: String, local: [BeerLite]) async {
+    private func searchBeersRemote(_ q: String, local: [BeerLite], generation: Int) async {
         // Algolia also matches aliases and collaborators, so results that literally contain every
         // query word in their name or brewery go first (stable, so Algolia's order breaks ties).
         // Algolia is a public index with no per-user data, so its hits never carry `has_had`.
@@ -254,14 +265,16 @@ final class DiscoverModel {
                 key: Algolia.cacheKey(beerQuery: q),
                 decode: { try JSONDecoder().decode(AlgoliaBeerHits.self, from: $0).hits },
                 fetch: { try await Algolia.searchBeers(q) },
-                onCached: { if !Task.isCancelled { beerResults = merge($0) } })
-            guard !Task.isCancelled else { return }
+                onCached: { if !Task.isCancelled && searchGeneration == generation { beerResults = merge($0) } })
+            guard !Task.isCancelled, searchGeneration == generation else { return }
             beerResults = merge(r)
             await LocalIndex.shared.add(beers: r)
-        } catch {}
+        } catch {
+            if !error.isCancellation { /* remote search failures fall back to local results */ }
+        }
     }
 
-    private func searchVenuesRemote(_ q: String, loc: CLLocation?, local: [Venue]) async {
+    private func searchVenuesRemote(_ q: String, loc: CLLocation?, local: [Venue], generation: Int) async {
         guard let loc else { return }
         let merge = { (remote: [Venue]) -> [Venue] in
             let keys = Set(remote.map { $0.foursquareId ?? $0.id })
@@ -274,11 +287,14 @@ final class DiscoverModel {
             let r = try await cacheThenNetwork(
                 .venuesAround(lat: loc.coordinate.latitude, lng: loc.coordinate.longitude, query: q),
                 as: VenueAround.self, key: key,
-                onCached: { c in if !Task.isCancelled { venueResults = merge((c.recent.filter { LocalIndex.matches(query: q, text: $0.name) } + c.nearby).filter { !$0.isCustom }) } })
-            guard !Task.isCancelled else { return }
+                onCached: { c in if !Task.isCancelled && searchGeneration == generation { venueResults = merge((c.recent.filter { LocalIndex.matches(query: q, text: $0.name) } + c.nearby).filter { !$0.isCustom }) } })
+            guard !Task.isCancelled, searchGeneration == generation else { return }
             let all = await resolveAll((r.recent.filter { LocalIndex.matches(query: q, text: $0.name) } + r.nearby).filter { !$0.isCustom })
+            guard !Task.isCancelled, searchGeneration == generation else { return }
             venueResults = merge(all)
             await LocalIndex.shared.add(venues: all)
-        } catch {}
+        } catch {
+            if !error.isCancellation { /* remote search failures fall back to local results */ }
+        }
     }
 }
