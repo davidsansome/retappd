@@ -16,6 +16,8 @@ struct SettingsView: View {
     @State private var settingGenerations: [PartialKeyPath<AccountSettings>: Int] = [:]
     @State private var styleTasks: [Int: Task<Void, Never>] = [:]
     @State private var styleGenerations: [Int: Int] = [:]
+    private static let privacyPolicyURL = URL(string: "https://github.com/davidsansome/retappd/blob/main/PRIVACY.md")!
+
     private let notifications = NotificationService.shared
     @Environment(\.openURL) private var openURL
 
@@ -76,6 +78,10 @@ struct SettingsView: View {
                     }
                     Button("Sign out", role: .destructive) { confirmSignOut = true }
                         .buttonStyle(TaproomOutlineButton())
+                    Link("Privacy Policy", destination: Self.privacyPolicyURL)
+                        .font(.caption)
+                        .foregroundStyle(Taproom.muted)
+                        .padding(.top, 4)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 8)
