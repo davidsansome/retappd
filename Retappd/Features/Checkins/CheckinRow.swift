@@ -43,7 +43,7 @@ struct CheckinRow<MenuItems: View>: View {
                 purchasedAt(shop)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .overlay(alignment: .top) { if checkin.photo == nil { divider } }
+                    .overlay(alignment: .top) { if !hasPhoto { divider } }
             }
 
             if hasFooter {
@@ -51,7 +51,7 @@ struct CheckinRow<MenuItems: View>: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .overlay(alignment: .top) {
-                        if checkin.photo == nil || (checkin.retailVenue != nil && toastPartner != .purchase) { divider }
+                        if !hasPhoto || (checkin.retailVenue != nil && toastPartner != .purchase) { divider }
                     }
             }
 
@@ -76,6 +76,8 @@ struct CheckinRow<MenuItems: View>: View {
             if hadCorner { HadCorner() }
         }
     }
+
+    private var hasPhoto: Bool { checkin.photo.flatMap { $0.medium ?? $0.large ?? $0.small } != nil }
 
     private var hadCorner: Bool { showHad && checkin.beer.map({ HadBeers.shared.has($0.bid, fallback: $0.hasHad) }) == true }
 
@@ -556,7 +558,7 @@ struct TightLabel: LabelStyle {
 }
 
 enum RelativeTime {
-    private static let relative: RelativeDateTimeFormatter = {
+    @MainActor private static let relative: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .full
         return f
@@ -605,7 +607,14 @@ enum RelativeTime {
     static func string(_ date: Date, now: Date = .now) -> String {
         let age = now.timeIntervalSince(date)
         if age < 60 { return "just now" }
-        if age < 86_400 { return relative.localizedString(for: date, relativeTo: now) }
+        if age < 86_400 {
+            if Thread.isMainThread {
+                return MainActor.assumeIsolated { relative.localizedString(for: date, relativeTo: now) }
+            }
+            let f = RelativeDateTimeFormatter()
+            f.unitsStyle = .full
+            return f.localizedString(for: date, relativeTo: now)
+        }
         let sameYear = Calendar.current.isDate(date, equalTo: now, toGranularity: .year)
         return date.formatted(sameYear
             ? .dateTime.day().month(.abbreviated).hour().minute()

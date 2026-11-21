@@ -8,14 +8,15 @@ struct PhotoEditor: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var image: UIImage
+    @State private var didMutate = false
     @State private var zoom: CGFloat = 1
     @State private var pinch: CGFloat = 1
     @State private var offset: CGSize = .zero
     @State private var drag: CGSize = .zero
-    @State private var available: CGSize = UIScreen.main.bounds.size
+    @State private var available: CGSize = .zero
 
     init(image: UIImage, onDone: @escaping (UIImage) -> Void) {
-        _image = State(initialValue: PhotoEdit.upright(image))
+        _image = State(initialValue: image)
         self.onDone = onDone
     }
 
@@ -49,6 +50,16 @@ struct PhotoEditor: View {
         }
         .tint(Taproom.amber)
         .preferredColorScheme(.dark)
+        .task {
+            guard image.imageOrientation != .up || image.scale != 1 else { return }
+            let source = image
+            let normalized = await Task.detached(priority: .userInitiated) {
+                PhotoEdit.upright(source)
+            }.value
+            if !Task.isCancelled && !didMutate {
+                image = normalized
+            }
+        }
     }
 
     private func cropView(frame: CGSize) -> some View {
@@ -91,21 +102,28 @@ struct PhotoEditor: View {
     }
 
     private func rotate() {
-        image = PhotoEdit.rotated(image)
+        didMutate = true
+        image = PhotoEdit.rotated(PhotoEdit.upright(image))
         zoom = 1; offset = .zero
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     private func finish() {
+        let upright = PhotoEdit.upright(image)
         // The frame has the image's aspect ratio, so the visible region is the image divided by the zoom,
         // centred and shifted by the offset (expressed as a fraction of the frame).
-        let frame = PhotoEdit.frame(for: image.size, in: available)
+        let frame = PhotoEdit.frame(for: upright.size, in: available)
+        guard frame.width > 0, frame.height > 0 else {
+            onDone(upright)
+            dismiss()
+            return
+        }
         let o = clamp(offset, zoom: zoom, frame: frame)
-        let size = image.size
+        let size = upright.size
         let w = size.width / zoom, h = size.height / zoom
         let x = (size.width - w) / 2 - o.width / frame.width * size.width / zoom
         let y = (size.height - h) / 2 - o.height / frame.height * size.height / zoom
-        onDone(PhotoEdit.cropped(image, to: CGRect(x: x, y: y, width: w, height: h)))
+        onDone(PhotoEdit.cropped(upright, to: CGRect(x: x, y: y, width: w, height: h)))
         dismiss()
     }
 }
@@ -119,16 +137,16 @@ enum PhotoEdit {
 
     /// Redraws the image with its orientation baked in, at 1 pixel per point.
     static func upright(_ image: UIImage) -> UIImage {
-        render(CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)) {
-            image.draw(in: CGRect(origin: .zero, size: $0))
+        if image.imageOrientation == .up && image.scale == 1 { return image }
+        return render(CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)) { size, _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
         }
     }
 
     /// A quarter turn clockwise.
     static func rotated(_ image: UIImage) -> UIImage {
         let w = image.size.width, h = image.size.height
-        return render(CGSize(width: h, height: w)) { _ in
-            let ctx = UIGraphicsGetCurrentContext()!
+        return render(CGSize(width: h, height: w)) { _, ctx in
             ctx.translateBy(x: h, y: 0)
             ctx.rotate(by: .pi / 2)
             image.draw(in: CGRect(x: 0, y: 0, width: w, height: h))
@@ -138,12 +156,14 @@ enum PhotoEdit {
     static func cropped(_ image: UIImage, to rect: CGRect) -> UIImage {
         let r = rect.integral.intersection(CGRect(origin: .zero, size: image.size))
         guard r.width >= 1, r.height >= 1 else { return image }
-        return render(r.size) { _ in image.draw(at: CGPoint(x: -r.origin.x, y: -r.origin.y)) }
+        return render(r.size) { _, _ in image.draw(at: CGPoint(x: -r.origin.x, y: -r.origin.y)) }
     }
 
-    private static func render(_ size: CGSize, _ draw: @escaping (CGSize) -> Void) -> UIImage {
+    private static func render(_ size: CGSize, _ draw: @escaping (CGSize, CGContext) -> Void) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in draw(size) }
+        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            draw(size, ctx.cgContext)
+        }
     }
 }

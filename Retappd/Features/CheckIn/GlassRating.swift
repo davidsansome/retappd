@@ -60,6 +60,10 @@ private struct Bubbles: View {
             running = true
             if !emitting { fadeOut() }
         }
+        .onDisappear {
+            stopTask?.cancel()
+            running = false
+        }
     }
 
     /// Starts the fade (after any burst has had its moment), then stops the animation once
@@ -230,6 +234,7 @@ struct GlassRating: View {
             .highPriorityGesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { v in
+                        guard h > 0 else { return }
                         rating = snap(Double((h - v.location.y) / (h * maxFill)) * 5)
                         if !pouring { pouring = true }
                         if touchStart == nil { touchStart = .now }
@@ -246,6 +251,7 @@ struct GlassRating: View {
             // A quick tap can finish before the drag gesture starts, so it's caught here too.
             .simultaneousGesture(
                 SpatialTapGesture().onEnded { v in
+                    guard h > 0 else { return }
                     rating = snap(Double((h - v.location.y) / (h * maxFill)) * 5)
                     burst()
                 }
@@ -265,9 +271,13 @@ struct GlassRating: View {
         }
     }
 
-    private func snap(_ raw: Double) -> Double {
+    static func snap(_ raw: Double, step: Double) -> Double {
         let snapped = (min(max(raw, 0), 5) / step).rounded() * step
         return (snapped * 100).rounded() / 100
+    }
+
+    private func snap(_ raw: Double) -> Double {
+        Self.snap(raw, step: step)
     }
 
     /// One decimal place in 0.1 steps, two in quarter steps.

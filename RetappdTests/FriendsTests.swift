@@ -512,4 +512,65 @@ final class FriendsTests: XCTestCase {
             XCTAssertNil(data, key)
         }
     }
+
+    @MainActor
+    func testResetForSignOutClearsStateAndIgnoresInFlightLoad() async throws {
+        let all = (1...3).map { makeFriend($0) }
+        let request = makeFriend(99)
+        let gate = Gate()
+        var gateNext = false
+
+        let store = CheckInOptions(
+            recentlyTagged: [all[0].user],
+            cachedPage: { _, _ in throw FriendPager.CacheMiss() },
+            networkPage: { offset, limit in
+                if gateNext { try await gate.wait() }
+                return FriendPage(friends: Array(all.dropFirst(offset).prefix(limit)), found: all.count)
+            },
+            sendRemoval: { _ in },
+            clearFriendCaches: {},
+            fetchRequests: { _ in [request] },
+            sendAnswer: { _, _ in },
+            clearRequestsCache: {}
+        )
+
+        await store.reloadFriends()
+        await store.loadRequests()
+        try await store.removeFriend(all[1])
+        XCTAssertEqual(store.friends.count, 2)
+        XCTAssertEqual(store.requests.count, 1)
+        XCTAssertEqual(store.friendRemovals, 1)
+        XCTAssertEqual(store.friendCountChange, -1)
+
+        // Start a reload that stays in flight across sign-out.
+        gateNext = true
+        let inFlight = Task { await store.reloadFriends() }
+        await gate.untilWaiting()
+
+        store.resetForSignOut()
+
+        XCTAssertTrue(store.friends.isEmpty)
+        XCTAssertTrue(store.friendships.isEmpty)
+        XCTAssertTrue(store.recentlyTagged.isEmpty)
+        XCTAssertTrue(store.recentVenues.isEmpty)
+        XCTAssertTrue(store.recentShops.isEmpty)
+        XCTAssertTrue(store.requests.isEmpty)
+        XCTAssertNil(store.friendsError)
+        XCTAssertEqual(store.friendRemovals, 0)
+        XCTAssertEqual(store.friendCountChange, 0)
+        XCTAssertFalse(store.loadingFriends)
+
+        // Even when the cancelled/stale load finishes, it must not leak old friends back in.
+        gate.release()
+        await inFlight.value
+
+        XCTAssertTrue(store.friends.isEmpty)
+        XCTAssertTrue(store.friendships.isEmpty)
+        XCTAssertNil(store.friendsError)
+
+        // A new account signing in can load friends again.
+        gateNext = false
+        await store.reloadFriends()
+        XCTAssertEqual(store.friends.map(\.id), [1, 2, 3])
+    }
 }

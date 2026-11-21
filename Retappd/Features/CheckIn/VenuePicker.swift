@@ -146,8 +146,8 @@ struct VenuePicker: View {
             .background(Taproom.background)
         }
         .task(id: ShopQuery(text: q, place: activePlace, hasLocation: location.location != nil)) { await search(q) }
-        .task(id: ShopQuery(text: "", place: activePlace, hasLocation: location.location != nil)) {
-            if kind == .shop { await loadShops() }
+        .task(id: ShopQuery(text: q.isEmpty ? "" : "searching", place: activePlace, hasLocation: location.location != nil)) {
+            if kind == .shop, q.isEmpty { await loadShops() }
         }
     }
 
@@ -249,10 +249,10 @@ struct VenuePicker: View {
         guard !Task.isCancelled else { return }
         results = local
         guard let loc = location.location else { return }
-        try? await Task.sleep(for: .milliseconds(250))  // debounce while typing
-        guard !Task.isCancelled else { return }
         searching = true
         defer { searching = false }
+        try? await Task.sleep(for: .milliseconds(250))  // debounce while typing
+        guard !Task.isCancelled else { return }
         let req = APIRequest.venuesAround(lat: loc.coordinate.latitude, lng: loc.coordinate.longitude, query: q)
         guard let r = try? await UntappdAPI.shared.fetch(req, as: VenueAround.self), !Task.isCancelled else { return }
         let remote = (r.recent.filter { LocalIndex.matches(query: q, text: $0.name) } + r.nearby)
@@ -272,10 +272,10 @@ struct VenuePicker: View {
         let mine = place == nil ? recent.filter { LocalIndex.matches(query: q, text: $0.name) } : []
         results = ShopPlace.sortedByDistance(mine, from: origin)
         guard let c = searchCoordinate else { return }
-        try? await Task.sleep(for: .milliseconds(place == nil ? 250 : 400))  // debounce while typing
-        guard !Task.isCancelled else { return }
         searching = true
         defer { searching = false }
+        try? await Task.sleep(for: .milliseconds(place == nil ? 250 : 400))  // debounce while typing
+        guard !Task.isCancelled else { return }
         let req = APIRequest.retailVenuesAround(lat: c.lat, lng: c.lng, query: q, location: place)
         guard let r = try? await UntappdAPI.shared.fetch(req, as: VenueAround.self), !Task.isCancelled else { return }
         noteResolved(r, place: place)

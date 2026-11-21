@@ -142,6 +142,30 @@ final class CheckInOptions {
         answeredIDs = [:]
     }
 
+    /// Resets all per-account state at sign-out and abandons any in-flight loads so a subsequent
+    /// sign-in can't see the previous account's friends, venues, shops, or requests.
+    func resetForSignOut() {
+        loadTask?.cancel()
+        loadTask = nil
+        loadingFriends = false
+        loadGeneration += 1
+        loadedFriends = false
+        loadedRecent = false
+        friends = []
+        friendships = []
+        recentlyTagged = []
+        recentVenues = []
+        recentShops = []
+        friendsError = nil
+        removingIDs = []
+        removedIDs = [:]
+        addedFriends = [:]
+        friendRemovals = 0
+        friendCountChange = 0
+        friendListChanges = 0
+        clearRequests()
+    }
+
     private func visibleRequests(_ list: [Friend]) -> [Friend] {
         var seen = hiddenRequestIDs
         return list.filter { seen.insert($0.id).inserted }
@@ -311,7 +335,11 @@ final class CheckInOptions {
         guard !loadedServing else { return }
         loadedServing = true
         let apply = { (s: ServingTypes) in self.servingTypes = s.items.sorted { $0.position < $1.position } }
-        if let s = try? await cacheThenNetwork(.servingTypes, as: ServingTypes.self, onCached: apply) { apply(s) }
+        if let s = try? await cacheThenNetwork(.servingTypes, as: ServingTypes.self, onCached: apply) {
+            apply(s)
+        } else if servingTypes.isEmpty {
+            loadedServing = false  // try again next time
+        }
     }
 
     func loadFriends() async {
@@ -326,11 +354,16 @@ final class CheckInOptions {
 
     private func loadRecentIfNeeded() async {
         guard !loadedRecent else { return }
+        let generation = loadGeneration
         loadedRecent = true
         if let r = try? await cacheThenNetwork(.recentlyTagged, as: UserList.self,
-                                               onCached: { recentlyTagged = dedupe($0.users) }) {
+                                               onCached: {
+                                                   guard generation == self.loadGeneration else { return }
+                                                   recentlyTagged = dedupe($0.users)
+                                               }) {
+            guard generation == loadGeneration else { return }
             recentlyTagged = dedupe(r.users)
-        } else if recentlyTagged.isEmpty {
+        } else if generation == loadGeneration && recentlyTagged.isEmpty {
             loadedRecent = false
         }
     }
@@ -349,7 +382,7 @@ final class CheckInOptions {
         let task = Task { await fetchAllPages() }
         loadTask = task
         await task.value
-        loadTask = nil
+        if loadTask == task { loadTask = nil }
     }
 
     private func fetchAllPages() async {
@@ -359,6 +392,7 @@ final class CheckInOptions {
         friendsError = nil
         if friendships.isEmpty {
             let cached = await FriendPager.fetchAll(fetch: cachedPage)
+            guard generation == loadGeneration, !Task.isCancelled else { return }
             if !cached.friends.isEmpty {
                 setFriendships(cached.friends)
             }
@@ -367,8 +401,10 @@ final class CheckInOptions {
         // `addedFriends` itself, and if an accept fails they must not return via this copy.
         let baseline = friendships.filter { addedFriends[$0.id] == nil }
         let result = await FriendPager.fetchAll(fetch: networkPage) { partial in
+            guard generation == self.loadGeneration, !Task.isCancelled else { return }
             self.setFriendships(partial + baseline)
         }
+        guard generation == loadGeneration, !Task.isCancelled else { return }
         let complete = result.isComplete
             && (result.found.map { result.friends.count >= $0 } ?? (!result.friends.isEmpty || baseline.isEmpty))
         if complete {

@@ -22,6 +22,7 @@ struct CheckInSheet: View {
     /// The flavours people tag this beer with most, most used first.
     @State private var beerFlavors: [FlavorTag] = []
     @State private var photo: UIImage?
+    @State private var photoLoadTask: Task<Void, Never>?
     @State private var editingPhoto = false
     @State private var libraryItem: PhotosPickerItem?
     @State private var showingCamera = false
@@ -105,7 +106,12 @@ struct CheckInSheet: View {
             .navigationDestination(isPresented: $showingVenuePicker) { VenuePicker(selection: pickedVenue) }
             .navigationDestination(isPresented: $showingShopPicker) { VenuePicker(selection: pickedShop, kind: .shop) }
             .fullScreenCover(isPresented: $showingCamera) {
-                CameraPicker { photo = $0 }.ignoresSafeArea()
+                CameraPicker {
+                    photoLoadTask?.cancel()
+                    photoLoadTask = nil
+                    error = nil
+                    photo = $0
+                }.ignoresSafeArea()
             }
             .fullScreenCover(isPresented: $editingPhoto) {
                 if let current = photo { PhotoEditor(image: current) { photo = $0 } }
@@ -207,6 +213,9 @@ struct CheckInSheet: View {
                 Text("Photo added").font(.subheadline.weight(.medium))
                 Spacer(minLength: 0)
                 Button {
+                    photoLoadTask?.cancel()
+                    photoLoadTask = nil
+                    error = nil
                     self.photo = nil
                     libraryItem = nil
                 } label: {
@@ -463,9 +472,14 @@ struct CheckInSheet: View {
     // MARK: Actions
 
     private func loadLibraryPhoto(_ item: PhotosPickerItem?) {
+        photoLoadTask?.cancel()
+        photoLoadTask = nil
         guard let item else { return }
-        Task {
-            if let data = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: data) {
+        error = nil
+        photoLoadTask = Task {
+            let data = try? await item.loadTransferable(type: Data.self)
+            guard !Task.isCancelled else { return }
+            if let data, let img = UIImage(data: data) {
                 photo = img
             } else {
                 error = "Couldn't load that photo."
@@ -475,9 +489,12 @@ struct CheckInSheet: View {
 
     /// Attaches the most recent image in the photo library.
     private func useLastPhoto() {
-        Task {
+        photoLoadTask?.cancel()
+        error = nil
+        photoLoadTask = Task {
             var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
             if status == .notDetermined { status = await PHPhotoLibrary.requestAuthorization(for: .readWrite) }
+            guard !Task.isCancelled else { return }
             guard status == .authorized || status == .limited else {
                 error = "Allow photo access in Settings to use your last photo."
                 return
@@ -498,6 +515,7 @@ struct CheckInSheet: View {
                     cont.resume(returning: data)
                 }
             }
+            guard !Task.isCancelled else { return }
             if let data, let img = UIImage(data: data) {
                 photo = img
             } else {
@@ -513,7 +531,7 @@ struct CheckInSheet: View {
         guard let r = try? await UntappdAPI.shared.fetch(.userRating(beer.bid), as: UserBeerRating.self),
               let last = r.rating, rating == 0 else { return }
         let step = options.ratingStep
-        withAnimation { rating = min(max((last / step).rounded() * step, step), 5) }
+        withAnimation { rating = max(GlassRating.snap(last, step: step), step) }
     }
 
     private func loadBeerFlavors() async {
@@ -698,6 +716,7 @@ struct FriendPicker: View {
         .searchable(text: $filter, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search friends")
         .navigationTitle(selected.isEmpty ? "Tag friends" : "\(selected.count) tagged")
         .navigationBarTitleDisplayMode(.inline)
+        .tint(Taproom.amber)
         .task { await options.loadFriends() }
     }
 
@@ -709,13 +728,13 @@ struct FriendPicker: View {
             HStack(spacing: 12) {
                 Avatar(url: u.avatar, size: 34)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(u.displayName).foregroundStyle(.primary)
-                    Text("@\(u.userName)").font(.caption).foregroundStyle(.secondary)
+                    Text(u.displayName).foregroundStyle(Taproom.ink)
+                    Text("@\(u.userName)").font(.caption).foregroundStyle(Taproom.muted)
                 }
                 Spacer()
                 Image(systemName: on ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
-                    .foregroundStyle(on ? Color.orange : Color(.tertiaryLabel))
+                    .foregroundStyle(on ? Taproom.amber : Taproom.border)
             }
             .contentShape(Rectangle())
         }

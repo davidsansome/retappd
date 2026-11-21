@@ -46,6 +46,7 @@ final class CheckinListModel {
     private(set) var isLoadingMore = false
     private(set) var reachedEnd = false
     private(set) var error: String?
+    private(set) var moreError: String?
     /// Bumped at the start of each `reload()`, so views can reload anything they show alongside.
     private(set) var reloads = 0
     /// Bumped by `reload()`. The list scrolls back to the top whenever it changes.
@@ -53,8 +54,34 @@ final class CheckinListModel {
     private var nextMaxId: Int?
     private var hasLoaded = false
     private var isStale = false
+    private var generation = 0
+    private var toastingIDs: Set<Int> = []
 
-    init(source: Source) { self.source = source }
+    typealias FirstPageFetch = @MainActor (_ onCached: (CheckinPage) -> Void) async throws -> CheckinPage
+    typealias MorePageFetch = @MainActor (APIRequest) async throws -> Data
+    typealias ToastToggle = @MainActor (Int) async throws -> Void
+
+    @ObservationIgnored private let fetchFirstPage: FirstPageFetch
+    @ObservationIgnored private let fetchMoreData: MorePageFetch
+    @ObservationIgnored private let sendToastToggle: ToastToggle
+
+    init(
+        source: Source,
+        fetchFirstPage: FirstPageFetch? = nil,
+        fetchMoreData: MorePageFetch? = nil,
+        sendToastToggle: ToastToggle? = nil
+    ) {
+        self.source = source
+        self.fetchFirstPage = fetchFirstPage ?? { onCached in
+            try await cacheThenNetwork(source.request(), as: CheckinPage.self, onCached: onCached)
+        }
+        self.fetchMoreData = fetchMoreData ?? { req in
+            try await UntappdAPI.shared.data(req)
+        }
+        self.sendToastToggle = sendToastToggle ?? { id in
+            _ = try await UntappdAPI.shared.data(.toggleToast(id))
+        }
+    }
 
     /// Call when the list appears: loads it the first time, and reloads it if it was invalidated.
     func loadIfNeeded() async {
@@ -85,18 +112,18 @@ final class CheckinListModel {
 
     func refresh() async {
         guard !isRefreshing else { return }
+        generation += 1
         isRefreshing = true
         defer { isRefreshing = false }
         do {
-            let page = try await cacheThenNetwork(source.request(), as: CheckinPage.self) { cached in
+            let page = try await fetchFirstPage { cached in
                 if items.isEmpty { apply(cached, replacing: true) }
             }
             merge(fresh: page)
             error = nil
-        } catch is CancellationError {
-            retryIfEmpty()
+            moreError = nil
         } catch {
-            if (error as? URLError)?.code == .cancelled {
+            if error.isCancellation {
                 retryIfEmpty()
             } else {
                 self.error = error.localizedDescription
@@ -125,45 +152,56 @@ final class CheckinListModel {
 
     /// Call when a row appears; fetches the next page as the user nears the bottom.
     func onAppear(_ c: Checkin) {
+        guard moreError == nil else { return }
         guard let idx = items.firstIndex(where: { $0.id == c.id }), idx >= items.count - 6 else { return }
         Task { await loadMore() }
     }
 
     func loadMore() async {
         guard !isLoadingMore, !reachedEnd, let maxId = nextMaxId else { return }
+        let mine = generation
         isLoadingMore = true
         defer { isLoadingMore = false }
         let req = source.request(maxId: maxId)
         do {
-            let data = try await UntappdAPI.shared.data(req)
+            let data = try await fetchMoreData(req)
             let page = try UntappdAPI.decode(CheckinPage.self, from: data)
             Task.detached { await ResponseCache.shared.store(data, for: req.cacheKey) }
+            guard mine == generation else { return }
             let known = Set(items.map(\.id))
             let new = page.checkins.filter { !known.contains($0.id) }
             items += new
             ingest(new)
             if new.isEmpty || page.nextMaxId == nil || page.nextMaxId == maxId { reachedEnd = true }
             nextMaxId = page.nextMaxId
-            error = nil
+            moreError = nil
         } catch {
-            self.error = error.localizedDescription
+            guard mine == generation else { return }
+            if !error.isCancellation {
+                self.moreError = error.localizedDescription
+            }
         }
     }
 
-    /// Optimistically toggles the user's toast, reverting if the server refuses.
+    /// Optimistically toggles the user's toast, reverting only toast fields if the server refuses.
     func toggleToast(_ c: Checkin) async {
-        guard let i = items.firstIndex(where: { $0.id == c.id }) else { return }
-        let before = items[i]
-        items[i].youToasted.toggle()
-        items[i].toastCount = max(0, items[i].toastCount + (items[i].youToasted ? 1 : -1))
-        if let me {
-            items[i].toasters.removeAll { $0.id == me.id }
-            if items[i].youToasted { items[i].toasters.append(me) }
-        }
+        guard !toastingIDs.contains(c.id), let i = items.firstIndex(where: { $0.id == c.id }) else { return }
+        toastingIDs.insert(c.id)
+        defer { toastingIDs.remove(c.id) }
+        let wasToasted = items[i].youToasted
+        let oldCount = items[i].toastCount
+        let oldToasters = items[i].toasters
+        items[i].applyToastToggle(me: me)
         do {
-            _ = try await UntappdAPI.shared.data(.toggleToast(c.id))
+            try await sendToastToggle(c.id)
+            await ResponseCache.shared.remove(APIRequest.checkinView(c.id).cacheKey)
+            if let j = items.firstIndex(where: { $0.id == c.id }) {
+                NotificationCenter.default.post(name: .checkinEdited, object: items[j])
+            }
         } catch {
-            if let j = items.firstIndex(where: { $0.id == c.id }) { items[j] = before }
+            if let j = items.firstIndex(where: { $0.id == c.id }) {
+                items[j].revertToast(toasted: wasToasted, count: oldCount, toasters: oldToasters)
+            }
             self.error = "Couldn't toast: \(error.localizedDescription)"
         }
     }

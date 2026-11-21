@@ -95,16 +95,19 @@ struct CheckinList<Header: View>: View {
             }
         } else if model.isLoadingMore {
             ProgressView().frame(maxWidth: .infinity).padding(.vertical, 12)
-        } else if let e = model.error {
+        } else if let e = model.moreError {
             ErrorRow(message: e) { Task { await model.loadMore() } }
+        } else if let e = model.error {
+            ErrorRow(message: e) { Task { await model.refresh() } }
         }
     }
 }
 
 extension CheckinList where Header == EmptyView {
     init(model: CheckinListModel, showUser: Bool = true, showActions: Bool = false,
-         emptyText: String = "No checkins yet.") {
-        self.init(model: model, showUser: showUser, showActions: showActions, emptyText: emptyText) { EmptyView() }
+         registersDestinations: Bool = true, emptyText: String = "No checkins yet.") {
+        self.init(model: model, showUser: showUser, showActions: showActions,
+                  registersDestinations: registersDestinations, emptyText: emptyText) { EmptyView() }
     }
 }
 

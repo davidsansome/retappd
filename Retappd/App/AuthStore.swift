@@ -76,7 +76,7 @@ final class AuthStore {
         UserDefaults.standard.removeObject(forKey: "username")
         UntappdAPI.shared.token = nil
         UntappdAPI.shared.onUnreadCounts = nil
-        CheckInOptions.shared.clearRequests()
+        CheckInOptions.shared.resetForSignOut()
         token = nil
         username = nil
         Task {

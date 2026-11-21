@@ -11,6 +11,7 @@ struct CheckinDetailView: View {
     @State private var editing: Checkin?
     @State private var confirmDelete = false
     @State private var deleting = false
+    @State private var isToasting = false
     @State private var draft = ""
     @State private var pending: [PendingComment] = []
     @State private var confirmDeleteComment: Checkin.Comment?
@@ -59,7 +60,7 @@ struct CheckinDetailView: View {
             .foregroundStyle(Taproom.ink)
             .background(Taproom.background)
             // Keep your newest comment in view as it's added and as it turns into "Not sent".
-            .onChange(of: pending.map { "\($0.id)\($0.failed)" }) { old, new in
+            .onChange(of: pending) { old, new in
                 guard new.count >= old.count, !new.isEmpty else { return }
                 // Wait a beat so the row is laid out (and the keyboard settled) before scrolling to it.
                 Task {
@@ -225,18 +226,19 @@ struct CheckinDetailView: View {
     /// Toasts or un-toasts straight away, putting it back if the server refuses, and tells the
     /// lists so their copies match.
     private func toggleToast() async {
-        let before = checkin
-        checkin.youToasted.toggle()
-        checkin.toastCount = max(0, checkin.toastCount + (checkin.youToasted ? 1 : -1))
-        if let me {
-            checkin.toasters.removeAll { $0.id == me.id }
-            if checkin.youToasted { checkin.toasters.append(me) }
-        }
+        guard !isToasting else { return }
+        isToasting = true
+        defer { isToasting = false }
+        let wasToasted = checkin.youToasted
+        let oldCount = checkin.toastCount
+        let oldToasters = checkin.toasters
+        checkin.applyToastToggle(me: me)
         do {
             _ = try await UntappdAPI.shared.data(.toggleToast(checkin.id))
+            await ResponseCache.shared.remove(APIRequest.checkinView(checkin.id).cacheKey)
             NotificationCenter.default.post(name: .checkinEdited, object: checkin)
         } catch {
-            checkin = before
+            checkin.revertToast(toasted: wasToasted, count: oldCount, toasters: oldToasters)
             self.error = "Couldn't toast: \(error.localizedDescription)"
         }
     }
@@ -268,18 +270,22 @@ struct CheckinDetailView: View {
             pending.removeAll { $0.id == id }
             checkin.comments = r.comments
             checkin.commentCount = r.totalCount
+            await ResponseCache.shared.remove(APIRequest.checkinView(checkin.id).cacheKey)
+            NotificationCenter.default.post(name: .checkinEdited, object: checkin)
         } catch {
             if let j = pending.firstIndex(where: { $0.id == id }) { pending[j].failed = true }
         }
     }
 
     private func edit(_ p: PendingComment) {
+        if editingComment != nil { cancelEditing() }
         pending.removeAll { $0.id == p.id }
         draft = p.text
         composerFocused = true
     }
 
     private func reply(to user: User) {
+        if editingComment != nil { cancelEditing() }
         let mention = "@\(user.userName) "
         if !draft.hasPrefix(mention) { draft = mention + draft }
         composerFocused = true
@@ -318,6 +324,8 @@ struct CheckinDetailView: View {
             if let new = r.comment, let j = checkin.comments.firstIndex(where: { $0.id == c.id }) {
                 checkin.comments[j] = new
             }
+            await ResponseCache.shared.remove(APIRequest.checkinView(checkin.id).cacheKey)
+            NotificationCenter.default.post(name: .checkinEdited, object: checkin)
         } catch {
             if let j = checkin.comments.firstIndex(where: { $0.id == c.id }) { checkin.comments[j] = c }
             self.error = "Couldn't save the comment: \(error.localizedDescription)"
@@ -333,6 +341,8 @@ struct CheckinDetailView: View {
             let r = try await UntappdAPI.shared.fetch(.deleteComment(c.id), as: CommentList.self)
             checkin.comments = r.comments
             checkin.commentCount = r.totalCount
+            await ResponseCache.shared.remove(APIRequest.checkinView(checkin.id).cacheKey)
+            NotificationCenter.default.post(name: .checkinEdited, object: checkin)
         } catch {
             checkin.comments.insert(c, at: min(i, checkin.comments.count))
             checkin.commentCount += 1
@@ -558,7 +568,7 @@ struct CheckinDetailView: View {
 }
 
 /// A comment the user has written that the server hasn't accepted yet.
-private struct PendingComment: Identifiable {
+private struct PendingComment: Identifiable, Equatable {
     let id = UUID()
     var text: String
     var failed = false
