@@ -74,4 +74,49 @@ final class ToastPartnerTests: XCTestCase {
             }
         }
     }
+
+    func testKeyboardVisibilityRejectsSpuriousFrames() {
+        let portrait = CGRect(x: 0, y: 0, width: 669, height: 951)
+        // Real on-screen keyboard overlapping the bottom of the window.
+        XCTAssertTrue(TaproomKeyboard.isVisible(
+            endFrame: CGRect(x: 0, y: 660, width: 669, height: 291),
+            in: portrait,
+            isLocal: true,
+            hasFirstResponder: true
+        ))
+        // Missing isLocal key still counts as visible when overlapping with a first responder.
+        XCTAssertTrue(TaproomKeyboard.isVisible(
+            endFrame: CGRect(x: 0, y: 660, width: 669, height: 291),
+            in: portrait,
+            isLocal: nil,
+            hasFirstResponder: true
+        ))
+        // Zero-height or nil end frame (common during rotation).
+        XCTAssertFalse(TaproomKeyboard.isVisible(endFrame: nil, in: portrait, isLocal: true))
+        XCTAssertFalse(TaproomKeyboard.isVisible(endFrame: .zero, in: portrait, isLocal: true))
+        XCTAssertFalse(TaproomKeyboard.isVisible(
+            endFrame: CGRect(x: 0, y: 951, width: 669, height: 0),
+            in: portrait,
+            isLocal: true
+        ))
+        // Off-screen below the window bottom edge.
+        XCTAssertFalse(TaproomKeyboard.isVisible(
+            endFrame: CGRect(x: 0, y: 951, width: 669, height: 291),
+            in: portrait,
+            isLocal: true
+        ))
+        // Non-local keyboard (another app / split view).
+        XCTAssertFalse(TaproomKeyboard.isVisible(
+            endFrame: CGRect(x: 0, y: 660, width: 669, height: 291),
+            in: portrait,
+            isLocal: false
+        ))
+        // Spurious notification during rotation when no text input is first responder.
+        XCTAssertFalse(TaproomKeyboard.isVisible(
+            endFrame: CGRect(x: 0, y: 669, width: 951, height: 200),
+            in: portrait,
+            isLocal: true,
+            hasFirstResponder: false
+        ))
+    }
 }

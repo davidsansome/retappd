@@ -86,6 +86,8 @@ struct CheckInSheet: View {
                 .padding(.horizontal, Taproom.margin)
                 .padding(.top, 8)
                 .padding(.bottom, 16)
+                .frame(maxWidth: .readableContentWidth, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
             .foregroundStyle(Taproom.ink)
@@ -283,9 +285,11 @@ struct CheckInSheet: View {
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
+            .padding(.horizontal, Taproom.margin)
             .padding(.vertical, 1)
         }
-        .scrollClipDisabled()
+        .padding(.horizontal, -Taproom.margin)
+        .clipped()
     }
 
     private var venueChips: some View {
@@ -702,22 +706,48 @@ struct FriendPicker: View {
         let recent = User.filter(options.recentlyTagged, matching: filter)
         let all = User.filter(options.allFriends, matching: filter)
         let rest = filter.isEmpty ? all : all.filter { !recentIds.contains($0.id) }
-        List {
-            if !recent.isEmpty {
-                Section("Recently tagged") { ForEach(recent) { row($0) } }
-            }
-            Section(recent.isEmpty ? "Friends" : "All friends") {
-                ForEach(rest) { row($0) }
-                if options.loadingFriends {
-                    ProgressView().frame(maxWidth: .infinity)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                if !recent.isEmpty {
+                    TaproomSection("Recently tagged") { rows(recent) }
+                }
+                TaproomSection(recent.isEmpty ? "Friends" : "All friends") {
+                    rows(rest)
+                    if options.loadingFriends {
+                        ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
+                    } else if recent.isEmpty && rest.isEmpty {
+                        Text(filter.isEmpty ? "No friends yet." : "No friends found.")
+                            .foregroundStyle(Taproom.muted)
+                    }
                 }
             }
+            .padding(.horizontal, Taproom.margin)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .readableContentWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
-        .searchable(text: $filter, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search friends")
+        .scrollDismissesKeyboard(.immediately)
+        .taproomScreen()
         .navigationTitle(selected.isEmpty ? "Tag friends" : "\(selected.count) tagged")
         .navigationBarTitleDisplayMode(.inline)
-        .tint(Taproom.amber)
+        .toolbarBackground(Taproom.background, for: .navigationBar)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            TaproomSearchField(text: $filter, prompt: "Search friends")
+                .padding(.horizontal, Taproom.margin)
+                .padding(.top, 6)
+                .padding(.bottom, 8)
+                .frame(maxWidth: .readableContentWidth)
+                .frame(maxWidth: .infinity)
+                .background(Taproom.background)
+        }
         .task { await options.loadFriends() }
+    }
+
+    private func rows(_ users: [User]) -> some View {
+        LazyVStack(spacing: 0) {
+            ForEach(users) { row($0) }
+        }
     }
 
     private func row(_ u: User) -> some View {
@@ -736,9 +766,11 @@ struct FriendPicker: View {
                     .font(.title3)
                     .foregroundStyle(on ? Taproom.amber : Taproom.border)
             }
-            .contentShape(Rectangle())
+            .padding(.vertical, 10)
+            .frame(minHeight: 44)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TaproomRowStyle())
+        .taproomRowDivider()
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 }

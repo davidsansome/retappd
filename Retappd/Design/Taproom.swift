@@ -280,7 +280,9 @@ extension View {
     func taproomBottomBar() -> some View {
         padding(.horizontal, Taproom.margin)
             .padding(.vertical, 8)
-            .background(Taproom.background)
+            .frame(maxWidth: .readableContentWidth)
+            .frame(maxWidth: .infinity)
+            .background(Taproom.background, ignoresSafeAreaEdges: [.bottom, .horizontal])
     }
 
     /// The screen background and ink colour, and amber as the tint.
@@ -512,6 +514,55 @@ struct TaproomBarAction: View {
     }
 }
 
+/// Determines whether a UIKit keyboard notification represents a visible on-screen keyboard
+/// overlapping the app window (ignoring zero-height, off-screen, non-local, or no-responder
+/// notifications that UIKit can emit during rotation or window-size transitions).
+enum TaproomKeyboard {
+    static func isVisible(
+        endFrame: CGRect?,
+        in windowBounds: CGRect,
+        isLocal: Bool?,
+        hasFirstResponder: Bool = true
+    ) -> Bool {
+        if isLocal == false || !hasFirstResponder { return false }
+        guard let endFrame, !endFrame.isNull, !endFrame.isEmpty, endFrame.height > 0, !windowBounds.isEmpty else {
+            return false
+        }
+        let overlap = endFrame.intersection(windowBounds)
+        return !overlap.isNull && overlap.height > 1
+    }
+
+    @MainActor
+    static func isVisible(for notification: Notification) -> Bool {
+        let userInfo = notification.userInfo
+        let isLocal = userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? Bool
+        let rawEndFrame = userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+        guard let rawEndFrame, let window = activeKeyWindow else { return false }
+        let localEndFrame = window.convert(rawEndFrame, from: nil)
+        return isVisible(
+            endFrame: localEndFrame,
+            in: window.bounds,
+            isLocal: isLocal,
+            hasFirstResponder: window.hasFirstResponder
+        )
+    }
+
+    @MainActor
+    private static var activeKeyWindow: UIWindow? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let active = scenes.filter { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }
+        return active.flatMap(\.windows).first(where: \.isKeyWindow)
+            ?? scenes.flatMap(\.windows).first(where: \.isKeyWindow)
+    }
+}
+
+private extension UIView {
+    var hasFirstResponder: Bool {
+        if isFirstResponder { return true }
+        return subviews.contains(where: \.hasFirstResponder)
+    }
+}
+
 /// The app's bottom bar: the tabs on the left and one context action (Search, Scan…) as a dark
 /// button on the right, within thumb reach. It belongs at the bottom of each tab's root screen,
 /// so it slides away with the root when something is pushed, and it steps aside for the keyboard.
@@ -536,19 +587,32 @@ struct TaproomTabBar<Value: Hashable, Action: View>: View {
                 .padding(.top, 8)
                 .padding(.bottom, 2)
                 // Frosted glass, like the system bars: the page scrolls on underneath it, blurred,
-                // with a wash of the page colour so it stays warm.
+                // with a wash of the page colour so it stays warm. Both the backdrop and top rule
+                // extend across bottom and horizontal safe areas (e.g. a trailing navigation rail)
+                // while the interactive buttons stay inside the safe area.
                 .background {
                     Rectangle().fill(.ultraThinMaterial)
                         .overlay(Taproom.background.opacity(0.55))
-                        .ignoresSafeArea(edges: .bottom)
+                        .overlay(alignment: .top) {
+                            Rectangle().fill(Taproom.border.opacity(0.6)).frame(height: 0.5)
+                        }
+                        .ignoresSafeArea(edges: [.bottom, .horizontal])
                 }
-                .overlay(alignment: .top) { Rectangle().fill(Taproom.border.opacity(0.6)).frame(height: 0.5) }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-            keyboardShown = true
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
+            keyboardShown = TaproomKeyboard.isVisible(for: notification)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+            keyboardShown = TaproomKeyboard.isVisible(for: notification)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidChangeFrameNotification)) { notification in
+            keyboardShown = TaproomKeyboard.isVisible(for: notification)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardShown = false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
             keyboardShown = false
         }
     }

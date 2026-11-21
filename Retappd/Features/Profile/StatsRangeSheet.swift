@@ -33,7 +33,7 @@ struct StatsRangeSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 8) {
                         fieldChip("From", date: start, field: .start)
                         fieldChip("To", date: end, field: .end)
@@ -43,15 +43,16 @@ struct StatsRangeSheet: View {
                         .datePickerStyle(.graphical)
                         .tint(Taproom.amber)
                         .labelsHidden()
-                        .padding(8)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
                         .taproomCard()
                         .id(editing)
                     Text("From your first check-in to today. A range of up to about two months shows days, up to three years months, longer years.")
                         .font(.caption).foregroundStyle(Taproom.muted)
                 }
                 .padding(.horizontal, Taproom.margin)
-                .padding(.top, 8)
-                .padding(.bottom, 24)
+                .padding(.top, 4)
+                .padding(.bottom, 12)
                 .frame(maxWidth: .readableContentWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
@@ -92,8 +93,8 @@ struct StatsRangeSheet: View {
                     .font(.body.weight(.heavy))
                     .foregroundStyle(on ? Taproom.onAmber : Taproom.ink)
             }
+            .padding(.horizontal, 14).padding(.vertical, 4)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .padding(.horizontal, 14).padding(.vertical, 6)
             .background(on ? Taproom.amber : Taproom.card, in: RoundedRectangle(cornerRadius: 12))
             .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(on ? Taproom.amber : Taproom.border, lineWidth: 1) }
             .contentShape(RoundedRectangle(cornerRadius: 12))
