@@ -108,7 +108,7 @@ struct BeerView: View {
                 }
             }
             .padding(.horizontal, Taproom.margin)
-            .padding(.top, 8)
+            .padding(.top, 12)
             .padding(.bottom, 16)
             .frame(maxWidth: isTwoColumn ? .wideContentWidth : .readableContentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
@@ -186,6 +186,10 @@ struct BeerView: View {
         }
     }
 
+    /// Vertical hit-target extension above and below the brewery link so a `.subheadline` line
+    /// reaches at least 44pt tall without pushing the beer name down.
+    static let breweryTapExtend: CGFloat = 14
+
     @ViewBuilder private var brewery: some View {
         let name = model.breweryName
         if !name.isEmpty {
@@ -193,8 +197,12 @@ struct BeerView: View {
                 NavigationLink(value: BeerBreweryRoute.brewery(id: id, name: name, label: model.beer.breweryLabel)) {
                     TaproomLinkLabel(name, font: .subheadline, chevronSize: 10)
                         .foregroundStyle(Taproom.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(TaproomLinkStyle())
+                .buttonStyle(TaproomLinkStyle(extend: Self.breweryTapExtend))
+                // Sit above the selectable beer-name Text below so its downward tap target isn't swallowed.
+                .zIndex(1)
+                .accessibilityIdentifier("beer.breweryLink")
                 .accessibilityHint("Opens the brewery's page")
                 .accessibilityAddTraits(.isLink)
             } else {
