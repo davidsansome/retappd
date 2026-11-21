@@ -87,18 +87,56 @@ struct TaproomChip: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.subheadline.weight(.medium))
+            .taproomChipLabel(on: on, leading: leading, dashed: dashed)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+extension View {
+    /// Capsule chip styling matching `TaproomChip`, for `Menu` labels (e.g. Sort and Style pickers)
+    /// where SwiftUI ignores a `ButtonStyle` on the outer menu.
+    func taproomChipLabel(on: Bool, leading: CGFloat = 12, trailing: CGFloat = 12, dashed: Bool = false) -> some View {
+        font(.subheadline.weight(.medium))
             .foregroundStyle(on ? Taproom.onAmber : Taproom.ink)
             .padding(.leading, leading)
-            .padding(.trailing, 12)
+            .padding(.trailing, trailing)
             .frame(minHeight: 34)
             .background(on ? Taproom.amber : dashed ? Color.clear : Taproom.card, in: Capsule())
             .overlay {
                 Capsule().strokeBorder(on ? Taproom.amber : dashed ? Taproom.muted : Taproom.border,
                                        style: StrokeStyle(lineWidth: 1, dash: dashed ? [4, 3] : []))
             }
-            .opacity(configuration.isPressed ? 0.7 : 1)
             .contentShape(Capsule())
+    }
+}
+
+/// Empty state shown when search or filter chips hide every item in a list, with a "Clear filters" action.
+struct TaproomEmptyFilterView: View {
+    var title = "No matching beers"
+    var message = "Try adjusting your search or filters."
+    var clearButtonIdentifier: String? = nil
+    let onClear: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.title2)
+                .foregroundStyle(Taproom.muted)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.headline)
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(Taproom.muted)
+                .multilineTextAlignment(.center)
+            Button("Clear filters", action: onClear)
+                .buttonStyle(TaproomOutlineButton())
+                .frame(maxWidth: 220)
+                .padding(.top, 4)
+                .accessibilityIdentifier(clearButtonIdentifier ?? "")
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
     }
 }
 
@@ -445,6 +483,7 @@ struct TaproomSearchField: View {
     /// The leading icon, e.g. `location` for a "where" field.
     var systemImage = "magnifyingglass"
     var capitalization: TextInputAutocapitalization = .never
+    var fieldIdentifier: String? = nil
     @FocusState private var focused: Bool
     @State private var handledRequests = 0
 
@@ -457,6 +496,7 @@ struct TaproomSearchField: View {
                     .submitLabel(.search)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(capitalization)
+                    .accessibilityIdentifier(fieldIdentifier ?? "")
                 if !text.isEmpty {
                     Button("Clear", systemImage: "xmark.circle.fill") { text = "" }
                         .labelStyle(.iconOnly).foregroundStyle(Taproom.muted)

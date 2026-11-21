@@ -166,6 +166,56 @@ struct BreweryInfo: Decodable {
 struct BreweryBeerList: Decodable {
     var beers: [BeerLite]
     var total: Int?
+    var totalUnfiltered: Int?
+    var styles: [StyleOption]
+    var sortingOptions: [SortOption]
+    var activeSortKey: String?
+
+    struct StyleOption: Decodable, Identifiable, Hashable, Sendable {
+        var id: Int
+        var name: String
+        var count: Int
+
+        init(id: Int, name: String, count: Int) {
+            self.id = id
+            self.name = name
+            self.count = count
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            id = c.int("type_id") ?? 0
+            name = c.text("type_name") ?? ""
+            count = c.int("total_count") ?? 0
+        }
+    }
+
+    struct SortOption: Decodable, Identifiable, Hashable, Sendable {
+        var id: String { key }
+        var key: String
+        var name: String
+
+        static let defaultKey = "most_popular"
+
+        /// Fallback options shown before the first response arrives (or if `sorting_options` is omitted).
+        static let defaults: [SortOption] = [
+            SortOption(key: "most_popular", name: "Most Popular"),
+            SortOption(key: "highest_rated", name: "Highest Rated"),
+            SortOption(key: "beer_name_asc", name: "Beer Name (A to Z)"),
+            SortOption(key: "newest", name: "Newest"),
+        ]
+
+        init(key: String, name: String) {
+            self.key = key
+            self.name = name
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            key = c.text("sort_key") ?? ""
+            name = c.text("sort_name") ?? ""
+        }
+    }
 
     private struct Item: Decodable {
         var beer: BeerLite?
@@ -181,9 +231,29 @@ struct BreweryBeerList: Decodable {
         }
     }
 
+    init(
+        beers: [BeerLite],
+        total: Int? = nil,
+        totalUnfiltered: Int? = nil,
+        styles: [StyleOption] = [],
+        sortingOptions: [SortOption] = [],
+        activeSortKey: String? = nil
+    ) {
+        self.beers = beers
+        self.total = total
+        self.totalUnfiltered = totalUnfiltered
+        self.styles = styles
+        self.sortingOptions = sortingOptions
+        self.activeSortKey = activeSortKey
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
         beers = c.items("beers", Item.self).compactMap(\.beer)
         total = c.int("total_count_filtered") ?? c.int("total_count")
+        totalUnfiltered = c.int("total_count")
+        styles = c.items("styles", StyleOption.self).filter { $0.id != 0 && !$0.name.isEmpty }
+        sortingOptions = c.list("sorting_options").filter { !$0.key.isEmpty && !$0.name.isEmpty }
+        activeSortKey = c.text("sort_key") ?? c.text("sort")
     }
 }

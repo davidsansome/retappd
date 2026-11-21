@@ -1,31 +1,81 @@
 import SwiftUI
 
+/// Active search, filter, and sort state for a brewery's beer list.
+struct BreweryBeerFilter: Equatable, Sendable {
+    var query: String = ""
+    var hasNotHadBefore: Bool = false
+    var sortKey: String = BreweryBeerList.SortOption.defaultKey
+    var styleId: Int? = nil
+
+    var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var isActive: Bool {
+        !trimmedQuery.isEmpty || hasNotHadBefore || sortKey != BreweryBeerList.SortOption.defaultKey || styleId != nil
+    }
+
+    func request(breweryId: Int, offset: Int = 0) -> APIRequest {
+        .breweryBeers(
+            breweryId,
+            offset: offset,
+            query: trimmedQuery,
+            hasNotHadBefore: hasNotHadBefore,
+            sort: sortKey,
+            styleId: styleId
+        )
+    }
+}
+
 @Observable @MainActor
 final class BreweryModel {
     let brewery: BreweryPreview
     private(set) var info: BreweryInfo?
     private(set) var beers: [BeerLite] = []
-    /// How many beers the brewery has, as the beer list reports it.
+    /// How many beers match the current filter, as the beer list reports it.
     private(set) var totalBeers: Int?
     private(set) var loadingBeers = false
+    private(set) var loadingMoreBeers = false
     private(set) var beersError: String?
     private(set) var loadError: String?
     /// True once the initial `brewery/info` request has settled (or failed).
     private(set) var infoLoaded = false
+    /// Active search, "haven't had", sort, and style filters.
+    private(set) var filter = BreweryBeerFilter()
+    /// Styles available at this brewery, populated from the unfiltered beer list response.
+    private(set) var availableStyles: [BreweryBeerList.StyleOption] = []
+    /// Sort options supported by the server (falls back to `SortOption.defaults` before first load).
+    private(set) var sortingOptions: [BreweryBeerList.SortOption] = BreweryBeerList.SortOption.defaults
     /// Set once a page of beers adds nothing new, so "Show more" stops (the endpoint's paging
     /// isn't captured in the docs).
     private var beersExhausted = false
+    /// Bumped on every filter reload so stale responses from earlier requests are ignored.
+    private var beersGeneration = 0
     let checkins: CheckinListModel
     private var firstLoad: Task<Void, Never>?
+    @ObservationIgnored private let fetchBeersOverride: (@Sendable (APIRequest) async throws -> BreweryBeerList)?
 
-    init(brewery: BreweryPreview) {
+    init(
+        brewery: BreweryPreview,
+        fetchBeers: (@Sendable (APIRequest) async throws -> BreweryBeerList)? = nil
+    ) {
         self.brewery = brewery
+        self.fetchBeersOverride = fetchBeers
         checkins = CheckinListModel(source: .brewery(brewery.id))
     }
 
     var isLoadingInfo: Bool { info == nil && !infoLoaded }
     var name: String { info?.name ?? brewery.name }
     var label: URL? { info?.label ?? brewery.label }
+
+    var activeSortName: String {
+        sortingOptions.first { $0.key == filter.sortKey }?.name
+            ?? BreweryBeerList.SortOption.defaults.first { $0.key == filter.sortKey }?.name
+            ?? "Sort"
+    }
+
+    var activeStyleName: String? {
+        guard let id = filter.styleId else { return nil }
+        return availableStyles.first { $0.id == id }?.name
+    }
 
     var hasMoreBeers: Bool {
         guard !beersExhausted, !beers.isEmpty else { return false }
@@ -39,6 +89,48 @@ final class BreweryModel {
         }
         if firstLoad == nil { firstLoad = Task { await fetch(force: false) } }
         await firstLoad?.value
+    }
+
+    func setSearchQuery(_ query: String) async {
+        var next = filter
+        next.query = query
+        guard next.trimmedQuery != filter.trimmedQuery else {
+            filter.query = query
+            return
+        }
+        await applyFilter(next)
+    }
+
+    func toggleHasNotHadBefore() async {
+        var next = filter
+        next.hasNotHadBefore.toggle()
+        await applyFilter(next)
+    }
+
+    func setSortKey(_ key: String) async {
+        guard filter.sortKey != key else { return }
+        var next = filter
+        next.sortKey = key
+        await applyFilter(next)
+    }
+
+    func setStyleId(_ id: Int?) async {
+        guard filter.styleId != id else { return }
+        var next = filter
+        next.styleId = id
+        await applyFilter(next)
+    }
+
+    func resetFilters() async {
+        let fresh = BreweryBeerFilter()
+        guard filter != fresh else { return }
+        await applyFilter(fresh)
+    }
+
+    func applyFilter(_ next: BreweryBeerFilter) async {
+        filter = next
+        beersExhausted = false
+        await loadFirstBeers(force: true)
     }
 
     private func fetch(force: Bool) async {
@@ -58,33 +150,71 @@ final class BreweryModel {
         }
     }
 
-    private func loadFirstBeers(force: Bool) async {
-        let apply = { (l: BreweryBeerList) in
-            if self.beers.isEmpty || force {
-                self.beers = l.beers
-                self.totalBeers = l.total
-            }
+    private func applyBeerListMetadata(_ list: BreweryBeerList, for usedFilter: BreweryBeerFilter) {
+        if !list.sortingOptions.isEmpty {
+            sortingOptions = list.sortingOptions
         }
+        if !list.styles.isEmpty && (availableStyles.isEmpty || usedFilter.styleId == nil) {
+            availableStyles = list.styles
+        }
+    }
+
+    private func loadFirstBeers(force: Bool) async {
+        beersGeneration += 1
+        let gen = beersGeneration
+        let activeFilter = filter
+        let request = activeFilter.request(breweryId: brewery.id, offset: 0)
         loadingBeers = true
-        defer { loadingBeers = false }
+        loadingMoreBeers = false
+        defer {
+            if gen == beersGeneration { loadingBeers = false }
+        }
         do {
-            let l = try await cacheThenNetwork(.breweryBeers(brewery.id), as: BreweryBeerList.self, onCached: apply)
+            let l: BreweryBeerList
+            if let override = fetchBeersOverride {
+                l = try await override(request)
+            } else if !activeFilter.isActive {
+                let applyCached = { (cached: BreweryBeerList) in
+                    guard gen == self.beersGeneration else { return }
+                    if self.beers.isEmpty || force {
+                        self.beers = cached.beers
+                        self.totalBeers = cached.total
+                        self.applyBeerListMetadata(cached, for: activeFilter)
+                    }
+                }
+                l = try await cacheThenNetwork(request, as: BreweryBeerList.self, onCached: applyCached)
+            } else {
+                l = try await UntappdAPI.shared.fetch(request, as: BreweryBeerList.self)
+            }
+            guard gen == beersGeneration else { return }
             beers = l.beers
             totalBeers = l.total
             beersExhausted = false
             beersError = nil
+            applyBeerListMetadata(l, for: activeFilter)
             Task.detached(priority: .utility) { await LocalIndex.shared.add(beers: l.beers) }
         } catch {
+            guard gen == beersGeneration else { return }
             if !error.isCancellation { beersError = error.localizedDescription }
         }
     }
 
     func loadMoreBeers() async {
-        guard !loadingBeers, hasMoreBeers else { return }
-        loadingBeers = true
-        defer { loadingBeers = false }
+        guard !loadingBeers, !loadingMoreBeers, hasMoreBeers else { return }
+        let gen = beersGeneration
+        let request = filter.request(breweryId: brewery.id, offset: beers.count)
+        loadingMoreBeers = true
+        defer {
+            if gen == beersGeneration { loadingMoreBeers = false }
+        }
         do {
-            let l = try await UntappdAPI.shared.fetch(.breweryBeers(brewery.id, offset: beers.count), as: BreweryBeerList.self)
+            let l: BreweryBeerList
+            if let override = fetchBeersOverride {
+                l = try await override(request)
+            } else {
+                l = try await UntappdAPI.shared.fetch(request, as: BreweryBeerList.self)
+            }
+            guard gen == beersGeneration else { return }
             let known = Set(beers.map(\.bid))
             let new = l.beers.filter { !known.contains($0.bid) }
             if new.isEmpty { beersExhausted = true }
@@ -92,6 +222,7 @@ final class BreweryModel {
             beersError = nil
             Task.detached(priority: .utility) { await LocalIndex.shared.add(beers: new) }
         } catch {
+            guard gen == beersGeneration else { return }
             if !error.isCancellation { beersError = error.localizedDescription }
         }
     }
@@ -101,6 +232,7 @@ final class BreweryModel {
 struct BreweryView: View {
     @State private var model: BreweryModel
     @State private var tab = Tab.beers
+    @State private var searchText = ""
     /// Tags this page's links, so its rows only show as selected for checkins it opened itself.
     @State private var listID = UUID()
     @State private var containerWidth: CGFloat = 0
@@ -144,11 +276,21 @@ struct BreweryView: View {
             .frame(maxWidth: .infinity)
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
+        .scrollDismissesKeyboard(.interactively)
         .taproomScreen()
         .taproomScrollTitle(model.name)
         .toolbarBackground(Taproom.background, for: .navigationBar)
         .task { await model.load() }
         .task { await model.checkins.loadIfNeeded() }
+        .task(id: searchText) {
+            let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed != model.filter.trimmedQuery else { return }
+            if !trimmed.isEmpty {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+            }
+            await model.setSearchQuery(searchText)
+        }
         .refreshable {
             async let details: Void = model.load(force: true)
             async let checkins: Void = model.checkins.refresh()
@@ -297,31 +439,150 @@ struct BreweryView: View {
 
     // MARK: Beers
 
-    @ViewBuilder private var beersContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(model.beers) { b in
-                NavigationLink(value: BeerBreweryRoute.beer(b)) { BeerRow(beer: b) }
-                    .buttonStyle(TaproomRowStyle())
-                    .taproomRowDivider()
-            }
-            if model.loadingBeers {
-                ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
-            } else if let e = model.beersError {
-                ErrorRow(message: e) {
-                    Task {
-                        if model.beers.isEmpty { await model.load(force: true) } else { await model.loadMoreBeers() }
+    private var beersFilterBar: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TaproomSearchField(text: $searchText, prompt: "Search beers", fieldIdentifier: "brewery.beers.search")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    Button {
+                        Task { await model.toggleHasNotHadBefore() }
+                    } label: {
+                        HStack(spacing: 5) {
+                            if model.filter.hasNotHadBefore {
+                                Image(systemName: "checkmark").font(.caption.weight(.bold))
+                            }
+                            Text("Haven't had")
+                        }
+                    }
+                    .buttonStyle(TaproomChip(on: model.filter.hasNotHadBefore))
+                    .accessibilityAddTraits(model.filter.hasNotHadBefore ? .isSelected : [])
+                    .accessibilityIdentifier("brewery.beers.haventHad")
+
+                    Menu {
+                        ForEach(model.sortingOptions) { option in
+                            Button {
+                                Task { await model.setSortKey(option.key) }
+                            } label: {
+                                if model.filter.sortKey == option.key {
+                                    Label(option.name, systemImage: "checkmark")
+                                } else {
+                                    Text(option.name)
+                                }
+                            }
+                        }
+                    } label: {
+                        let nonDefault = model.filter.sortKey != BreweryBeerList.SortOption.defaultKey
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.up.arrow.down").font(.caption.weight(.semibold))
+                            Text(model.activeSortName).lineLimit(1)
+                            Image(systemName: "chevron.down").font(.caption2.weight(.bold))
+                        }
+                        .taproomChipLabel(on: nonDefault)
+                    }
+                    .accessibilityLabel("Sort beers, \(model.activeSortName)")
+                    .accessibilityIdentifier("brewery.beers.sort")
+
+                    if !model.availableStyles.isEmpty {
+                        Menu {
+                            Button {
+                                Task { await model.setStyleId(nil) }
+                            } label: {
+                                if model.filter.styleId == nil {
+                                    Label("All styles", systemImage: "checkmark")
+                                } else {
+                                    Text("All styles")
+                                }
+                            }
+                            Divider()
+                            ForEach(model.availableStyles) { style in
+                                Button {
+                                    Task { await model.setStyleId(style.id) }
+                                } label: {
+                                    let title = style.count > 0 ? "\(style.name) (\(style.count))" : style.name
+                                    if model.filter.styleId == style.id {
+                                        Label(title, systemImage: "checkmark")
+                                    } else {
+                                        Text(title)
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text(model.activeStyleName ?? "Style").lineLimit(1)
+                                Image(systemName: "chevron.down").font(.caption2.weight(.bold))
+                            }
+                            .taproomChipLabel(on: model.filter.styleId != nil)
+                        }
+                        .accessibilityLabel(model.activeStyleName.map { "Style, \($0)" } ?? "Filter by style")
+                        .accessibilityIdentifier("brewery.beers.style")
+                    }
+
+                    if model.filter.isActive {
+                        Button {
+                            searchText = ""
+                            Task { await model.resetFilters() }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "xmark").font(.caption.weight(.bold))
+                                Text("Clear")
+                            }
+                        }
+                        .buttonStyle(TaproomChip(on: false, dashed: true))
+                        .accessibilityIdentifier("brewery.beers.clearFiltersChip")
                     }
                 }
-                    .padding(.top, 12)
-            } else if model.beers.isEmpty {
-                Text("No beers listed for this brewery.").font(.callout).foregroundStyle(Taproom.muted)
-            } else if model.hasMoreBeers {
-                let left = (model.totalBeers ?? 0) - model.beers.count
-                Button { Task { await model.loadMoreBeers() } } label: {
-                    Text(left > 0 ? "Show \(left.formatted()) more" : "Show more").frame(maxWidth: .infinity)
+            }
+            .scrollClipDisabled()
+            .sensoryFeedback(.selection, trigger: model.filter)
+        }
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder private var beersContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            beersFilterBar
+            if model.loadingBeers && model.beers.isEmpty {
+                ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
+            } else if let e = model.beersError, model.beers.isEmpty {
+                ErrorRow(message: e) {
+                    Task { await model.load(force: true) }
                 }
-                .buttonStyle(TaproomOutlineButton())
-                .padding(.top, 14)
+                .padding(.top, 12)
+            } else if model.beers.isEmpty {
+                if model.filter.isActive {
+                    TaproomEmptyFilterView(clearButtonIdentifier: "brewery.beers.clearFilters") {
+                        searchText = ""
+                        Task { await model.resetFilters() }
+                    }
+                } else {
+                    Text("No beers listed for this brewery.").font(.callout).foregroundStyle(Taproom.muted)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(model.beers) { b in
+                        NavigationLink(value: BeerBreweryRoute.beer(b)) { BeerRow(beer: b) }
+                            .buttonStyle(TaproomRowStyle())
+                            .taproomRowDivider()
+                    }
+                }
+                .opacity(model.loadingBeers ? 0.5 : 1)
+                .animation(.easeInOut(duration: 0.15), value: model.loadingBeers)
+
+                if model.loadingMoreBeers {
+                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 16)
+                } else if let e = model.beersError {
+                    ErrorRow(message: e) {
+                        Task { await model.loadMoreBeers() }
+                    }
+                    .padding(.top, 12)
+                } else if model.hasMoreBeers {
+                    let left = (model.totalBeers ?? 0) - model.beers.count
+                    Button { Task { await model.loadMoreBeers() } } label: {
+                        Text(left > 0 ? "Show \(left.formatted()) more" : "Show more").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(TaproomOutlineButton())
+                    .padding(.top, 14)
+                }
             }
         }
     }

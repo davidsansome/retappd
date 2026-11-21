@@ -447,12 +447,41 @@ extension APIRequest {
         return APIRequest(path: "/v4/venue/checkins/\(venueId)", query: q)
     }
 
-    static func venueMenu(_ venueId: Int, limit: Int = 100) -> APIRequest {
+    /// A venue's digital beer menu sections and items. Non-empty `sort` values weren't captured in
+    /// `untappd-private-api`, so callers default to `""` and apply client-side sorting when needed.
+    static func venueMenu(
+        _ venueId: Int,
+        limit: Int = 100,
+        query: String = "",
+        hasNotHadBefore: Bool = false,
+        sort: String = "",
+        styles: [String] = [],
+        servingStyles: [String] = [],
+        brewery: String = "",
+        countries: [String] = [],
+        menuId: Int? = nil,
+        flattenWhenFiltering: Bool = true
+    ) -> APIRequest {
         APIRequest(method: .post, path: "/v4/menus/sections", form: [
-            "brewery": "", "countries": "", "flatten_when_filtering": "true", "has_not_had_before": "false",
-            "limit": "\(limit)", "menu_id": "", "q": "", "serving_styles": "", "sort": "", "styles": "",
-            "types": "", "untappd_community_awards": "false", "venue_id": "\(venueId)",
+            "brewery": brewery,
+            "countries": countries.joined(separator: ","),
+            "flatten_when_filtering": flattenWhenFiltering ? "true" : "false",
+            "has_not_had_before": hasNotHadBefore ? "true" : "false",
+            "limit": "\(limit)",
+            "menu_id": menuId.map(String.init) ?? "",
+            "q": query,
+            "serving_styles": servingStyles.joined(separator: ","),
+            "sort": sort,
+            "styles": styles.joined(separator: ","),
+            "types": "",
+            "untappd_community_awards": "false",
+            "venue_id": "\(venueId)",
         ])
+    }
+
+    /// Available filter options (styles, breweries, countries, menus) for a venue's digital menu.
+    static func venueMenuFilters(_ venueId: Int) -> APIRequest {
+        APIRequest(path: "/v4/menus/filters", query: ["venue_id": "\(venueId)"])
     }
 
     /// Venue details. With `compact=venue_menu_compact`, `recently_added` lists the beers on
@@ -571,11 +600,26 @@ extension APIRequest {
         APIRequest(path: "/v4/brewery/info/\(id)", query: ["collaborations": "true", "dist_pref": "m", "radius": "10"])
     }
 
-    /// A brewery's beers, most popular first. The docs capture the filters but no paging; `offset`
-    /// is the public API's parameter for it and is assumed to work here.
-    static func breweryBeers(_ id: Int, offset: Int = 0) -> APIRequest {
-        var q = ["hasNotHadBefore": "false", "q": "", "showAllBeers": "false", "sort": "most_popular",
-                 "styles": "true", "type_id": ""]
+    /// A brewery's beers, with optional search, "haven't had" filter, sort key, and style id
+    /// (`type_id`). The docs capture the filter parameters but no paging; `offset` is the public
+    /// API's parameter for it and is assumed to work here.
+    static func breweryBeers(
+        _ id: Int,
+        offset: Int = 0,
+        query: String = "",
+        hasNotHadBefore: Bool = false,
+        sort: String = "most_popular",
+        styleId: Int? = nil,
+        showAllBeers: Bool = false
+    ) -> APIRequest {
+        var q = [
+            "hasNotHadBefore": hasNotHadBefore ? "true" : "false",
+            "q": query,
+            "showAllBeers": showAllBeers ? "true" : "false",
+            "sort": sort,
+            "styles": "true",
+            "type_id": styleId.map(String.init) ?? "",
+        ]
         if offset > 0 { q["offset"] = "\(offset)" }
         return APIRequest(path: "/v4/brewery/beer_list/\(id)", query: q)
     }

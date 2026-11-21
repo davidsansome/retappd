@@ -76,7 +76,8 @@ System font throughout (SF Pro), so Dynamic Type works.
 
 | Piece | What it is | When to use it |
 |---|---|---|
-| `TaproomChip(on:)` | Capsule, 34pt tall; card with border, amber when selected | Picking one of a few options (serving style, venue). Use a `FlowLayout` for chips that wrap, or a horizontal `ScrollView` for one row. End a short list with a "…" chip that opens the full picker. |
+| `TaproomChip(on:)` | Capsule, 34pt tall; card with border, amber when selected | Picking one of a few options (serving style, venue). Use a `FlowLayout` for chips that wrap, or a horizontal `ScrollView` for one row. End a short list with a "…" chip that opens the full picker. Use `.taproomChipLabel(on:)` for `Menu` labels (Sort, Style filter chips) so they match `TaproomChip` |
+| `TaproomEmptyFilterView` | Centered muted icon, headline, caption and "Clear filters" `TaproomOutlineButton` | When search or filter chips match no beers on a brewery or venue menu |
 | `TaproomChip(on: false, dashed: true)` | Dashed outline, no fill | An "add" action within a row of chips ("+ Tag friends") when there's nothing to suggest |
 | Suggestion chips | `TaproomChip` reading "+ Name" off, turning amber (with an avatar for people) when tapped; they stay in place | One-tap picks from a likely few (recently tagged friends, a beer's common flavours), ending in a "…" chip for the full list |
 | `TaproomOutlineButton()` | Rounded rectangle (12pt), card fill, 1pt border, 44pt tall | Secondary actions, usually two side by side ("Camera" / "Photos") |
