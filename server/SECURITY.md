@@ -30,7 +30,7 @@ Residual: the Worker decrypts tokens at runtime, so a malicious deployment can e
 ```
 openssl rand -base64 32 | npx wrangler secret put MASTER_KEY_V1
 ```
-`wrangler secret put` reads stdin; the key only exists in the pipe. `MASTER_KEY_CURRENT` (a plain var, default `1`)
+`wrangler secret put` reads stdin; the key only exists in the pipe. `MASTER_KEY_CURRENT` (a required plain var, e.g. `"1"` in `wrangler.jsonc`)
 selects which version encrypts new rows. Local dev uses a throwaway key in the gitignored `.dev.vars`.
 
 ## Rotation
@@ -48,7 +48,8 @@ re-registers. No data of value is lost.
   configuration errors (`CryptoConfigError`): they are logged and the user is skipped, never deleted.
   `MASTER_KEY_CURRENT` is required and must match `/^[1-9]\d*$/`.
 - **APNs token takeover:** a registration replaces any row holding the same APNs token, whichever uid owns it (reinstall,
-  or an account switch whose DELETE failed). Registrations per APNs token are capped at 3 per hour. Residual risk: someone
+  or an account switch whose DELETE failed). Cross-uid replacements per APNs token are capped at 3 per hour (same-uid
+  re-registration is unlimited so nobody can lock a victim out). Residual risk: someone
   who learns a victim's APNs token (32 unguessable bytes, never public) can evict the victim's device row, at most 3 times
   an hour, and would then receive pushes about the attacker's own Untappd account on the victim's phone, not the victim's
   data. The victim's app re-registers on its next heartbeat (404).

@@ -52,12 +52,9 @@ export function currentKeyVersion(env: Env): number {
   return parseInt(raw, 10);
 }
 
-async function masterKey(env: Env, version: number): Promise<CryptoKey> {
+function masterKeyBytes(env: Env, version: number): { raw: string; bytes: Uint8Array } {
   const raw = env[`MASTER_KEY_V${version}`];
   if (typeof raw !== "string" || !raw) throw new CryptoConfigError(`master key v${version} not configured`);
-  const cacheKey = `${version}:${raw}`; // in-memory only
-  const hit = masterCache.get(cacheKey);
-  if (hit) return hit;
   let bytes: Uint8Array;
   try {
     bytes = b64decode(raw.trim());
@@ -65,6 +62,14 @@ async function masterKey(env: Env, version: number): Promise<CryptoKey> {
     throw new CryptoConfigError(`master key v${version} is not base64`);
   }
   if (bytes.length !== 32) throw new CryptoConfigError(`master key v${version} must be 32 bytes`);
+  return { raw, bytes };
+}
+
+async function masterKey(env: Env, version: number): Promise<CryptoKey> {
+  const { raw, bytes } = masterKeyBytes(env, version);
+  const cacheKey = `${version}:${raw}`; // in-memory only
+  const hit = masterCache.get(cacheKey);
+  if (hit) return hit;
   const key = await crypto.subtle.importKey("raw", bytes, "AES-GCM", false, ["encrypt", "decrypt"]);
   masterCache.set(cacheKey, key);
   return key;
@@ -160,14 +165,16 @@ export async function rewrapBatch(env: Env, limit = 500): Promise<{ rewrapped: n
       try {
         const n = await rewrapDek(env, row);
         // Guard on old values so a concurrent PATCH (which re-encrypts) is not clobbered.
-        await env.DB.prepare("UPDATE devices SET dek_enc = ?, key_version = ? WHERE id = ? AND key_version = ? AND dek_enc = ?")
+        const res = await env.DB.prepare("UPDATE devices SET dek_enc = ?, key_version = ? WHERE id = ? AND key_version = ? AND dek_enc = ?")
           .bind(n.dek_enc, n.key_version, row.id, row.key_version, row.dek_enc)
           .run();
-        out.rewrapped++;
+        if ((res.meta?.changes ?? 0) > 0) out.rewrapped++;
       } catch (e) {
         if (e instanceof CryptoAuthError) {
-          await env.DB.prepare("DELETE FROM devices WHERE id = ?").bind(row.id).run();
-          out.deleted++;
+          const res = await env.DB.prepare("DELETE FROM devices WHERE id = ? AND key_version = ? AND dek_enc = ?")
+            .bind(row.id, row.key_version, row.dek_enc)
+            .run();
+          if ((res.meta?.changes ?? 0) > 0) out.deleted++;
         } else out.failed++;
       }
     }
@@ -217,12 +224,11 @@ const hmacCache = new Map<string, CryptoKey>();
 /** HMAC-SHA256(key = HKDF(current master key, info), data), base64url, truncated to `bytes`. */
 export async function keyedHash(env: Env, info: string, data: string, bytes = 16): Promise<string> {
   const version = currentKeyVersion(env);
-  const raw = env[`MASTER_KEY_V${version}`];
-  if (typeof raw !== "string") throw new CryptoConfigError(`master key v${version} not configured`);
+  const { raw, bytes: keyBytes } = masterKeyBytes(env, version);
   const ck = `${version}:${info}:${raw}`;
   let key = hmacCache.get(ck);
   if (!key) {
-    const ikm = await crypto.subtle.importKey("raw", b64decode(raw.trim()), "HKDF", false, ["deriveBits"]);
+    const ikm = await crypto.subtle.importKey("raw", keyBytes, "HKDF", false, ["deriveBits"]);
     const bits = await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: enc.encode(info) }, ikm, 256);
     key = await crypto.subtle.importKey("raw", bits, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
     hmacCache.set(ck, key);

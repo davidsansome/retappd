@@ -11,7 +11,7 @@ cd "${CI_PRIMARY_REPOSITORY_PATH:-$(dirname "$0")/..}"
 
 # Homebrew is on Xcode Cloud's machines. Skip its self-update, which takes minutes.
 export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_HINTS=1
-brew install xcodegen
+command -v xcodegen >/dev/null || brew install xcodegen
 
 xcodegen generate
 echo "Generated Retappd.xcodeproj"

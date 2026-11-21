@@ -51,4 +51,18 @@ describe("APNs sender", () => {
     vi.stubGlobal("fetch", async () => { throw new Error("boom"); });
     expect(await sender.send(d, {})).toBe("error");
   });
+
+  it("coalesces concurrent cold-start providerJwt calls into a single sign", async () => {
+    const { pem } = await p8();
+    const env = testEnv({ APNS_KEY_P8: pem });
+    const signSpy = vi.spyOn(crypto.subtle, "sign");
+    try {
+      const [a, b, c] = await Promise.all([providerJwt(env, 1_000), providerJwt(env, 1_000), providerJwt(env, 1_000)]);
+      expect(a).toBe(b);
+      expect(b).toBe(c);
+      expect(signSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      signSpy.mockRestore();
+    }
+  });
 });

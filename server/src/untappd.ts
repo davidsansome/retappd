@@ -60,6 +60,7 @@ async function call(token: string, path: string, params: Record<string, string> 
   }
   const json = (await res.json()) as any;
   if (json?.meta?.code === 401) throw new UntappdAuthError();
+  if (typeof json?.meta?.code === "number" && json.meta.code !== 200) throw new UntappdError(json.meta.code);
   return json;
 }
 

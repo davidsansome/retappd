@@ -1,7 +1,7 @@
 import { intVar, type DeviceRow, type Env, type Prefs } from "./env";
 import { encryptToken, hashSecret, keyedHash, newDeviceSecret, verifySecret } from "./crypto";
 import { fetchUid, pollCounts, UntappdAuthError } from "./untappd";
-import { BASELINE_SKEW_MS } from "./poll";
+import { baselineMarkers, deleteDevice, pruneUserStmt } from "./poll";
 import { log, safeErr } from "./log";
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -78,11 +78,11 @@ async function overLimit(env: Env, key: string, limit: number, now: number): Pro
   return (row?.count ?? 1) > limit;
 }
 
-const ipLimited = async (env: Env, req: Request, now: number) =>
+const ipLimited = async (env: Env, req: Request, now: number, prefix = "ip", limit = intVar(env.REGISTER_LIMIT_PER_HOUR, 10)) =>
   overLimit(
     env,
-    "ip:" + (await keyedHash(env, "ip", ipPrefix(req.headers.get("cf-connecting-ip") ?? "unknown"))),
-    intVar(env.REGISTER_LIMIT_PER_HOUR, 10),
+    `${prefix}:${await keyedHash(env, "ip", ipPrefix(req.headers.get("cf-connecting-ip") ?? "unknown"))}`,
+    limit,
     now,
   );
 
@@ -96,15 +96,16 @@ const tokenLimited = async (env: Env, apns: string, now: number) =>
   overLimit(env, "tok:" + (await keyedHash(env, "apns", apns)), 3, now);
 
 async function pruneUsers(env: Env, uids: number[]) {
-  for (const uid of new Set(uids))
-    await env.DB.prepare("DELETE FROM users WHERE uid = ? AND NOT EXISTS (SELECT 1 FROM devices WHERE uid = ?)").bind(uid, uid).run();
+  const unique = [...new Set(uids)];
+  if (unique.length) await env.DB.batch(unique.map((uid) => pruneUserStmt(env, uid)));
 }
 
 async function authDevice(env: Env, req: Request, id: string): Promise<DeviceRow | Response> {
+  const m = /^Bearer ([A-Za-z0-9_-]{20,100})$/.exec(req.headers.get("authorization") ?? "");
+  if (!m) return err(401, "unauthorized");
   const row = await env.DB.prepare("SELECT * FROM devices WHERE id = ?").bind(id).first<DeviceRow>();
   if (!row) return err(404, "unknown device");
-  const m = /^Bearer ([A-Za-z0-9_-]{20,100})$/.exec(req.headers.get("authorization") ?? "");
-  if (!m || !(await verifySecret(m[1], row.secret_hash))) return err(401, "unauthorized");
+  if (!(await verifySecret(m[1], row.secret_hash))) return err(401, "unauthorized");
   return row;
 }
 
@@ -136,24 +137,26 @@ async function register(req: Request, env: Env, now: number): Promise<Response> 
   const uid = await verifyOrResponse(token);
   if (uid instanceof Response) return uid;
 
+  // Baseline at registration (cheap, side-effect free call) before reading holders so no network I/O sits
+  // between the cross-uid check and the batch write.
+  let marker: string | null = null;
+  let friendMarker: string | null = null;
+  if (!(await env.DB.prepare("SELECT 1 FROM users WHERE uid = ?").bind(uid).first())) {
+    try {
+      const b = baselineMarkers(now, (await pollCounts(token)).requests);
+      marker = b.marker;
+      friendMarker = b.friend_marker;
+    } catch {
+      // the first scheduled poll baselines instead
+    }
+  }
+
   const { results: holders } = await env.DB.prepare("SELECT DISTINCT uid FROM devices WHERE apns_token = ?").bind(apns).all<{ uid: number }>();
   if (holders.some((h) => h.uid !== uid) && (await tokenLimited(env, apns, now))) return err(429, "rate limited", { "retry-after": "3600" });
   const id = crypto.randomUUID();
   const secret = newDeviceSecret();
   const sealed = await encryptToken(env, id, uid, token);
   const cap = intVar(env.MAX_DEVICES_PER_UID, 10);
-  // Baseline at registration (cheap, side-effect free call) so activity before the first poll isn't swallowed.
-  let marker: string | null = null;
-  let friendMarker: string | null = null;
-  if (!(await env.DB.prepare("SELECT 1 FROM users WHERE uid = ?").bind(uid).first())) {
-    try {
-      const p = await pollCounts(token);
-      marker = String(now - BASELINE_SKEW_MS);
-      friendMarker = String(Math.max(now - BASELINE_SKEW_MS, ...p.requests.map((r) => r.at)));
-    } catch {
-      // the first scheduled poll baselines instead
-    }
-  }
   await env.DB.batch([
     env.DB.prepare("INSERT OR IGNORE INTO users (uid, created_at, marker, friend_marker) VALUES (?, ?, ?, ?)").bind(uid, now, marker, friendMarker),
     // Re-registration of the same physical device must not leave a duplicate push target.
@@ -173,6 +176,7 @@ async function register(req: Request, env: Env, now: number): Promise<Response> 
 }
 
 async function patch(req: Request, env: Env, id: string, now: number): Promise<Response> {
+  if (await ipLimited(env, req, now, "patch", 60)) return err(429, "rate limited", { "retry-after": "3600" });
   const dev = await authDevice(env, req, id);
   if (dev instanceof Response) return dev;
   let b: Record<string, unknown>;
@@ -194,6 +198,7 @@ async function patch(req: Request, env: Env, id: string, now: number): Promise<R
       vals.push(JSON.stringify(vPrefs(b.prefs, JSON.parse(dev.prefs))));
     }
     if (b.untappd_token !== undefined) {
+      if (await ipLimited(env, req, now, "patch-tok", 10)) return err(429, "rate limited", { "retry-after": "3600" });
       const token = vToken(b.untappd_token);
       const uid = await verifyOrResponse(token);
       if (uid instanceof Response) return uid;
@@ -219,11 +224,11 @@ async function patch(req: Request, env: Env, id: string, now: number): Promise<R
   return json({ ok: true });
 }
 
-async function del(req: Request, env: Env, id: string): Promise<Response> {
+async function del(req: Request, env: Env, id: string, now: number): Promise<Response> {
+  if (await ipLimited(env, req, now, "del", 30)) return err(429, "rate limited", { "retry-after": "3600" });
   const dev = await authDevice(env, req, id);
   if (dev instanceof Response) return dev.status === 404 ? new Response(null, { status: 204 }) : dev;
-  await env.DB.prepare("DELETE FROM devices WHERE id = ?").bind(id).run();
-  await pruneUsers(env, [dev.uid]);
+  await deleteDevice(env, dev);
   return new Response(null, { status: 204 });
 }
 
@@ -233,7 +238,7 @@ export async function handleRequest(req: Request, env: Env, now = Date.now()): P
     if (url.pathname === "/v1/devices" && req.method === "POST") return await register(req, env, now);
     const m = /^\/v1\/devices\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (m && req.method === "PATCH") return await patch(req, env, m[1], now);
-    if (m && req.method === "DELETE") return await del(req, env, m[1]);
+    if (m && req.method === "DELETE") return await del(req, env, m[1], now);
     return err(404, "not found");
   } catch (e) {
     log("request_error", { error: safeErr(e) });

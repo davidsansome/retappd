@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CryptoAuthError, CryptoConfigError, decryptToken, encryptToken, hashSecret, newDeviceSecret, rewrapBatch, rewrapDek, timingSafeEqual, verifySecret } from "../src/crypto";
+import { CryptoAuthError, CryptoConfigError, decryptToken, encryptToken, hashSecret, keyedHash, newDeviceSecret, rewrapBatch, rewrapDek, timingSafeEqual, verifySecret } from "../src/crypto";
 import { K1, K2, resetDb, testEnv } from "./helpers";
 
 describe("envelope crypto", () => {
@@ -98,6 +98,68 @@ describe("rotation", () => {
     expect(row.key_version).toBe(2);
     expect(await decryptToken(testEnv({ MASTER_KEY_V1: undefined, MASTER_KEY_V2: K2, MASTER_KEY_CURRENT: "2" }), row)).toBe("token-in-db-1");
     expect(await rewrapBatch(v2)).toEqual({ rewrapped: 0, failed: 0, deleted: 0 });
+  });
+
+  it("rewrapBatch optimistic concurrency prevents deleting a row updated concurrently", async () => {
+    const v1 = testEnv();
+    await resetDb(v1);
+    await v1.DB.prepare("INSERT INTO users (uid, created_at) VALUES (1, 0)").run();
+    const bad = await encryptToken(v1, "WRONG-ID", 1, "token-old");
+    await v1.DB.prepare(
+      "INSERT INTO devices (id, uid, secret_hash, apns_token, apns_env, prefs, token_enc, dek_enc, key_version, created_at, last_seen_at) VALUES ('d1',1,'h','t','sandbox','{}',?,?,1,0,0)",
+    ).bind(bad.token_enc, bad.dek_enc).run();
+
+    const v2 = testEnv({ MASTER_KEY_V2: K2, MASTER_KEY_CURRENT: "2" });
+    const fresh = await encryptToken(v2, "d1", 1, "token-fresh-v2");
+    const origPrepare = v2.DB.prepare.bind(v2.DB);
+    // Simulate a concurrent PATCH re-encrypting the row right before rewrapBatch executes DELETE.
+    const racingDb = new Proxy(v2.DB, {
+      get(target, prop, receiver) {
+        if (prop === "prepare") {
+          return (sql: string) => {
+            const stmt = origPrepare(sql);
+            if (sql.startsWith("DELETE FROM devices")) {
+              const origBind = stmt.bind.bind(stmt);
+              return {
+                ...stmt,
+                bind: (...args: unknown[]) => {
+                  const bound = origBind(...args);
+                  const origRun = bound.run.bind(bound);
+                  return {
+                    ...bound,
+                    run: async () => {
+                      await origPrepare("UPDATE devices SET token_enc = ?, dek_enc = ?, key_version = ? WHERE id = 'd1'")
+                        .bind(fresh.token_enc, fresh.dek_enc, fresh.key_version)
+                        .run();
+                      return origRun();
+                    },
+                  };
+                },
+              };
+            }
+            return stmt;
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+    const res = await rewrapBatch({ ...v2, DB: racingDb });
+    expect(res).toEqual({ rewrapped: 0, failed: 0, deleted: 0 });
+    const row = await v2.DB.prepare("SELECT * FROM devices WHERE id='d1'").first<any>();
+    expect(row).not.toBeNull();
+    expect(row.key_version).toBe(2);
+    expect(await decryptToken(v2, row)).toBe("token-fresh-v2");
+  });
+});
+
+describe("keyedHash validation", () => {
+  it("validates master key presence, base64, and 32-byte length with CryptoConfigError", async () => {
+    await expect(keyedHash(testEnv({ MASTER_KEY_V1: "" }), "ip", "1.2.3.4")).rejects.toThrow(CryptoConfigError);
+    await expect(keyedHash(testEnv({ MASTER_KEY_V1: "!!!not-base64!!!" }), "ip", "1.2.3.4")).rejects.toThrow(CryptoConfigError);
+    await expect(keyedHash(testEnv({ MASTER_KEY_V1: btoa("short") }), "ip", "1.2.3.4")).rejects.toThrow(CryptoConfigError);
+    await expect(keyedHash(testEnv({ MASTER_KEY_CURRENT: undefined }), "ip", "1.2.3.4")).rejects.toThrow(CryptoConfigError);
+    const h = await keyedHash(testEnv(), "ip", "1.2.3.4");
+    expect(h.length).toBeGreaterThan(0);
   });
 });
 

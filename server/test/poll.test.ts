@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleRequest } from "../src/api";
+import { encryptToken } from "../src/crypto";
 import { dailyCleanup, dueUsers, runPoll } from "../src/poll";
-import { FakeApns, item, mockFetch, pendingReq, req, resetDb, testEnv, toastItem, untappdMock, APNS_TOKEN } from "./helpers";
+import { fetchUid, UntappdAuthError, UntappdError } from "../src/untappd";
+import { FakeApns, K2, item, mockFetch, pendingReq, req, resetDb, testEnv, toastItem, untappdMock, APNS_TOKEN } from "./helpers";
 
 const env = testEnv();
 let u = untappdMock();
@@ -197,6 +199,30 @@ describe("polling", () => {
     await poll(T1 + 120_000);
     expect(apns.sent).toHaveLength(1);
     expect(notifCalls()).toBe(1);
+  });
+
+  it("terminates immediately when a subsequent page adds 0 new items (duplicate page)", async () => {
+    await register();
+    await poll(T1);
+    const t = T1 + 70_000;
+    const dupPage = Array.from({ length: 25 }, (_, i) => toastItem(800 + i, t + i * 1000)).reverse();
+    let notifFetches = 0;
+    vi.stubGlobal("fetch", (input: any) => {
+      const url = new URL(typeof input === "string" ? input : input.url);
+      const envelope = {
+        meta: { code: 200 },
+        notifications: { unread_count: { toasts: 50, comments: 0, friends: 0, messages: 0, venues: 0, others: 0, news: 0 }, unified_count: 50 },
+      };
+      if (url.pathname === "/v4/user/pending") return Promise.resolve(Response.json({ ...envelope, response: { count: 0, items: [] } }));
+      if (url.pathname === "/v4/notifications") {
+        notifFetches++;
+        return Promise.resolve(Response.json({ ...envelope, response: { notifications: { items: dupPage } } }));
+      }
+      return Promise.resolve(Response.json({ ...envelope, response: {} }));
+    });
+    await poll(T1 + 120_000);
+    expect(notifFetches).toBe(2);
+    expect(apns.sent).toHaveLength(25);
   });
 
   it("filters by per-device prefs and pushes to every device of the uid", async () => {
@@ -497,5 +523,27 @@ describe("daily cleanup", () => {
     expect(await devCount()).toBe(1);
     const users = (await env.DB.prepare("SELECT uid FROM users").all<any>()).results;
     expect(users.map((x) => x.uid)).toEqual([43]);
+  });
+
+  it("prunes users orphaned when rewrapBatch deletes their last unreadable device", async () => {
+    await env.DB.prepare("INSERT INTO users (uid, created_at) VALUES (99, ?)").bind(T0).run();
+    const bad = await encryptToken(env, "other-id", 99, "token-tampered-1");
+    await env.DB.prepare(
+      "INSERT INTO devices (id, uid, secret_hash, apns_token, apns_env, prefs, token_enc, dek_enc, key_version, created_at, last_seen_at) VALUES ('dev-bad',99,'h',?,'sandbox','{}',?,?,1,?,?)",
+    ).bind("cc".repeat(32), bad.token_enc, bad.dek_enc, T0, T0).run();
+    const v2 = testEnv({ MASTER_KEY_V2: K2, MASTER_KEY_CURRENT: "2" });
+    await dailyCleanup(v2, T0 + 1000);
+    expect(await devCount()).toBe(0);
+    expect(await env.DB.prepare("SELECT uid FROM users WHERE uid = 99").first()).toBeNull();
+  });
+});
+
+describe("untappd meta.code handling", () => {
+  it("throws UntappdError on HTTP 200 with non-200 meta.code and UntappdAuthError on 401", async () => {
+    vi.stubGlobal("fetch", async () => Response.json({ meta: { code: 500 } }, { status: 200 }));
+    await expect(fetchUid("good-token-xx")).rejects.toMatchObject({ name: "UntappdError", status: 500 });
+    await expect(fetchUid("good-token-xx")).rejects.toBeInstanceOf(UntappdError);
+    vi.stubGlobal("fetch", async () => Response.json({ meta: { code: 401 } }, { status: 200 }));
+    await expect(fetchUid("good-token-xx")).rejects.toBeInstanceOf(UntappdAuthError);
   });
 });

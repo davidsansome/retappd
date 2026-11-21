@@ -114,6 +114,14 @@ describe("PATCH /v1/devices/:id", () => {
     const { data } = await register();
     expect((await call(req("PATCH", `/v1/devices/${data.device_id}`, { apns_env: "x" }, bearer(data.device_secret)))).status).toBe(400);
   });
+
+  it("rate limits untappd_token updates on PATCH", async () => {
+    const { data } = await register();
+    for (let i = 0; i < 10; i++) {
+      expect((await call(req("PATCH", `/v1/devices/${data.device_id}`, { untappd_token: `good-token-${i}` }, bearer(data.device_secret)))).status).toBe(200);
+    }
+    expect((await call(req("PATCH", `/v1/devices/${data.device_id}`, { untappd_token: "good-token-11" }, bearer(data.device_secret)))).status).toBe(429);
+  });
 });
 
 describe("DELETE /v1/devices/:id", () => {

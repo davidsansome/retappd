@@ -1,4 +1,4 @@
-import type { DeviceRow, Env, Prefs } from "./env";
+import { intVar, type DeviceRow, type Env, type Prefs } from "./env";
 import { CryptoAuthError, decryptToken, rewrapBatch } from "./crypto";
 import { type ApnsSender } from "./apns";
 import * as U from "./untappd";
@@ -7,6 +7,7 @@ import { log, safeErr, uidTag } from "./log";
 const CONCURRENCY = 25;
 const WARN_USERS_PER_RUN = 500; // above this, raise POLL_SHARDS (see README)
 const MAX_ITEMS_PER_POLL = 100; // sanity cap on notification items examined (and so pushes sent) per user per poll
+const MAX_PAGES = 4; // hard cap on /v4/notifications pages fetched per user per poll
 const MAX_ITEM_AGE_MS = 24 * 3_600_000; // safety cap for the re-toast overcount case
 const STALE_MS = 7 * 86_400_000;
 const STALE_EVERY_MIN = 5;
@@ -35,7 +36,7 @@ interface UserRow {
  */
 /** Effective poll period in minutes: POLL_SHARDS, times 5 for users unseen for 7 days. */
 export function periodMin(env: Env, lastSeen: number, now: number): number {
-  const shards = Math.max(1, parseInt(String(env.POLL_SHARDS ?? "1"), 10) || 1);
+  const shards = intVar(env.POLL_SHARDS, 1);
   return (now - lastSeen >= STALE_MS ? STALE_EVERY_MIN : 1) * shards;
 }
 
@@ -88,10 +89,15 @@ async function backoff(env: Env, deps: PollDeps, u: UserRow, e: unknown) {
   log("backoff", { user: await uidTag(env, u.uid), n, secs });
 }
 
-async function deleteDevice(env: Env, d: { id: string; uid: number }) {
-  await env.DB.prepare("DELETE FROM devices WHERE id = ?").bind(d.id).run();
-  // Drop the user row (and its watermarks) as soon as its last device is gone.
-  await env.DB.prepare("DELETE FROM users WHERE uid = ? AND NOT EXISTS (SELECT 1 FROM devices WHERE uid = ?)").bind(d.uid, d.uid).run();
+export const pruneUserStmt = (env: Env, uid: number) =>
+  env.DB.prepare("DELETE FROM users WHERE uid = ? AND NOT EXISTS (SELECT 1 FROM devices WHERE uid = ?)").bind(uid, uid);
+
+export async function deleteDevice(env: Env, d: { id: string; uid: number }) {
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM devices WHERE id = ?").bind(d.id),
+    // Drop the user row (and its watermarks) as soon as its last device is gone.
+    pruneUserStmt(env, d.uid),
+  ]);
 }
 
 /** New activity units in an item: its users[] entries after the marker (a repeat by one user is one entry). */
@@ -130,6 +136,12 @@ interface Event {
 }
 
 export const BASELINE_SKEW_MS = 60_000; // Untappd vs server clock allowance for baselines
+
+export function baselineMarkers(now: number, requests: U.FriendRequest[]) {
+  const base = now - BASELINE_SKEW_MS;
+  const maxReq = requests.reduce((m, r) => Math.max(m, r.at), 0);
+  return { marker: String(base), friend_marker: String(Math.max(base, maxReq)) };
+}
 
 export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<void> {
   const { now } = deps;
@@ -186,10 +198,7 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
 
   if (baseline) {
     // First poll: record watermarks, push nothing. Existing activity and pending requests count as seen.
-    const maxReq = polled.requests.reduce((m, r) => Math.max(m, r.at), 0);
-    upd.marker = String(now - BASELINE_SKEW_MS);
-    upd.marker_keys = null;
-    upd.friend_marker = String(Math.max(now - BASELINE_SKEW_MS, maxReq));
+    Object.assign(upd, baselineMarkers(now, polled.requests), { marker_keys: null });
     log("baseline", { user: await uidTag(env, u.uid) });
   } else {
     const events: Event[] = [];
@@ -275,35 +284,39 @@ async function fetchAllUnhandled(token: string, u: UserRow, now: number) {
   const seen = new Set<string>(u.marker_keys ? JSON.parse(u.marker_keys) : []);
   const items = [...first.items];
   let page = first.items;
+  let offset = first.items.length;
+  let pages = 1;
   while (
     U.newItemsSince(items, marker, seen, now - MAX_ITEM_AGE_MS).reduce((n, i) => n + units(i, marker, seen), 0) < k &&
     page.length >= U.PAGE_SIZE &&
     U.itemTime(page[page.length - 1]) >= marker
   ) {
-    if (items.length >= MAX_ITEMS_PER_POLL) {
+    if (items.length >= MAX_ITEMS_PER_POLL || pages >= MAX_PAGES) {
       log("item_cap_hit", { cap: MAX_ITEMS_PER_POLL });
       break;
     }
     try {
-      page = (await U.fetchNotifications(token, items.length)).items;
+      page = (await U.fetchNotifications(token, offset)).items;
+      pages++;
     } catch (e) {
       log("page_fetch_failed", { error: safeErr(e) });
       break;
     }
+    offset += page.length;
     const keys = new Set(items.map(U.itemKey));
-    items.push(...page.filter((i) => !keys.has(U.itemKey(i)))); // paging while items move can repeat one
+    const fresh = page.filter((i) => !keys.has(U.itemKey(i))); // paging while items move can repeat one
+    if (fresh.length === 0) break;
+    items.push(...fresh);
   }
   return { items, counts: first.counts };
 }
 
-/** Daily: drop devices unseen for 30 days, users with no devices, old rate-limit rows; rewrap keys. */
+/** Daily: drop devices unseen for 30 days, rewrap keys, and prune users with no devices. */
 export async function dailyCleanup(env: Env, now: number) {
-  await env.DB.batch([
-    env.DB.prepare("DELETE FROM devices WHERE last_seen_at < ?").bind(now - 30 * 86_400_000),
-    env.DB.prepare("DELETE FROM users WHERE NOT EXISTS (SELECT 1 FROM devices d WHERE d.uid = users.uid)"),
-  ]);
+  await env.DB.prepare("DELETE FROM devices WHERE last_seen_at < ?").bind(now - 30 * 86_400_000).run();
   const r = await rewrapBatch(env);
   if (r.rewrapped || r.failed || r.deleted) log("rewrap", r);
+  await env.DB.prepare("DELETE FROM users WHERE NOT EXISTS (SELECT 1 FROM devices d WHERE d.uid = users.uid)").run();
 }
 
 /** Hourly: drop expired rate-limit windows. */
