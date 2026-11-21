@@ -984,11 +984,20 @@ struct UserInfo: Decodable {
         /// a request is open "pending_them" (you sent it) or "pending_you" (they did), or "ignore" when
         /// they asked and you rejected it.
         var relationship: String?
+        /// "none" normally, or "blocked_you" when *you* have blocked this user (the API's name is inverted).
+        var blockStatus: String?
+        /// "unmute" normally, or "mute" while you have muted this friend.
+        var muteStatus: String?
+
+        var isBlocked: Bool { blockStatus == "blocked_you" }
+        var isMuted: Bool { muteStatus == "mute" }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: AnyKey.self)
             id = c.int("uid") ?? c.int("id") ?? 0
             relationship = c.text("relationship")
+            blockStatus = c.text("block_status")
+            muteStatus = c.text("mute_status")
             firstName = c.text("first_name")
             lastName = c.text("last_name")
             userName = c.string("user_name") ?? ""
@@ -1001,6 +1010,18 @@ struct UserInfo: Decodable {
             totalBadges = s?.int("total_badges")
             totalFriends = s?.int("total_friends")
         }
+    }
+}
+
+/// Response from `POST /v4/account/block`, which toggles block state and returns `method: "block"`
+/// or `"unblock"`.
+struct BlockUserResult: Decodable {
+    var method: String?
+    var isBlocked: Bool { method == "block" }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        method = c.text("method")
     }
 }
 

@@ -257,6 +257,21 @@ final class CheckInOptions {
         await clearFriendCaches()
     }
 
+    /// Updates local friend state after blocking a user (the server unfriends them as part of blocking).
+    func noteBlockedFriend(_ id: Int) async {
+        let wasFriend = friendships.contains { $0.id == id }
+        removedIDs[id] = loadGeneration
+        addedFriends[id] = nil
+        setFriendships(friendships.filter { $0.id != id })
+        recentlyTagged = recentlyTagged.filter { $0.id != id }
+        if wasFriend {
+            friendRemovals += 1
+            friendListChanges += 1
+            friendCountChange -= 1
+            await clearFriendCaches()
+        }
+    }
+
     /// `list` with `item` put back just before the first of the items that followed it in `old`
     /// that `list` still has, or at the end if none are.
     private static func reinserting<T: Identifiable>(_ item: T, into list: [T], was old: [T]) -> [T]

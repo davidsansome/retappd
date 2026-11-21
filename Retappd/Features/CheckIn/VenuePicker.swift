@@ -149,6 +149,7 @@ struct VenuePicker: View {
             .frame(maxWidth: .infinity)
             .background(Taproom.background)
         }
+        .onAppear { location.start() }
         .task(id: ShopQuery(text: q, place: activePlace, hasLocation: location.location != nil)) { await search(q) }
         .task(id: ShopQuery(text: q.isEmpty ? "" : "searching", place: activePlace, hasLocation: location.location != nil)) {
             if kind == .shop, q.isEmpty { await loadShops() }

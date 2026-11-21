@@ -510,6 +510,23 @@ extension APIRequest {
         APIRequest(method: .post, path: "/v4/friend/reject/\(uid)", form: [:])
     }
 
+    /// Toggles blocking a user by id (`method` in the response is `"block"` or `"unblock"`).
+    /// Blocking also unfriends them on the server.
+    static func toggleBlockUser(_ uid: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/account/block", form: ["target_id": "\(uid)"])
+    }
+
+    /// Mutes a friend so their checkins are hidden from the friend feed. `days` is the duration
+    /// in days (`1`, `7`), or `0` to mute indefinitely. Only friends can be muted.
+    static func muteUser(_ uid: Int, days: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/user/mute/\(uid)", form: ["period_of_time": "\(days)"])
+    }
+
+    /// Unmutes a previously muted friend.
+    static func unmuteUser(_ uid: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/user/unmute/\(uid)", form: [:])
+    }
+
     /// The signed-in user's incoming friend requests (not the ones they sent): `count` and
     /// `items`, each `created_at` and a `user` (`uid` is what accept and reject take). Checked
     /// live on 2026-11-19. Nothing in the docs about paging; the test accounts never had more
@@ -577,6 +594,20 @@ extension APIRequest {
             form["geolng"] = String(format: "%.6f", lng)
         }
         return APIRequest(method: .post, path: "/v4/checkin/add", form: form)
+    }
+}
+
+enum UntappdWebURL {
+    /// Opens Untappd's web form for flagging a checkin.
+    static func flagCheckin(_ checkinID: Int) -> URL? {
+        URL(string: "https://untappd.com/checkin/flag/\(checkinID)")
+    }
+
+    /// Opens Untappd's web form for reporting a user.
+    static func reportUser(_ username: String) -> URL? {
+        var comps = URLComponents(string: "https://untappd.com/report/user")
+        comps?.queryItems = [URLQueryItem(name: "username", value: username)]
+        return comps?.url
     }
 }
 

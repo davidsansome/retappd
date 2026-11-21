@@ -328,9 +328,12 @@ struct CheckinMenuItems: View {
     let checkIn: (BeerLite) -> Void
     let edit: () -> Void
     let delete: () -> Void
+    @Environment(\.openURL) private var openURL
 
     /// Whether there's anything to show at all.
-    static func hasItems(_ c: Checkin, isMine: Bool) -> Bool { isMine || c.beerLite != nil }
+    static func hasItems(_ c: Checkin, isMine: Bool) -> Bool {
+        isMine || c.beerLite != nil || UntappdWebURL.flagCheckin(c.id) != nil
+    }
 
     var body: some View {
         if let b = checkin.beerLite {
@@ -340,6 +343,9 @@ struct CheckinMenuItems: View {
             Divider()
             Button("Edit checkin", systemImage: "pencil", action: edit)
             Button("Delete checkin", systemImage: "trash", role: .destructive, action: delete)
+        } else if let url = UntappdWebURL.flagCheckin(checkin.id) {
+            Divider()
+            Button("Flag checkin", systemImage: "flag", role: .destructive) { openURL(url) }
         }
     }
 }

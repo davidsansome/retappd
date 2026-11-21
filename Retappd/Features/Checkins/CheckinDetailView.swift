@@ -28,6 +28,7 @@ struct CheckinDetailView: View {
     @State private var containerWidth: CGFloat = 0
     @Environment(AuthStore.self) private var auth
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     init(checkin: Checkin, me: User? = nil) {
         _checkin = State(initialValue: checkin)
@@ -118,8 +119,17 @@ struct CheckinDetailView: View {
                             Button("Edit checkin", systemImage: "pencil") { editing = checkin }
                             Button("Delete checkin", systemImage: "trash", role: .destructive) { confirmDelete = true }
                         }
+                        .accessibilityIdentifier("checkin.overflowMenu")
                         .deleteCheckinConfirmation(isPresented: $confirmDelete) { Task { await delete() } }
                     }
+                }
+            } else if let flagURL = UntappdWebURL.flagCheckin(checkin.id) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu("More", systemImage: "ellipsis") {
+                        Button("Flag checkin", systemImage: "flag", role: .destructive) { openURL(flagURL) }
+                    }
+                    .tint(Taproom.ink)
+                    .accessibilityIdentifier("checkin.overflowMenu")
                 }
             }
         }

@@ -33,6 +33,12 @@ final class LocationProvider: NSObject, CLLocationManagerDelegate {
         manager.startUpdatingLocation()
     }
 
+    /// Starts updating location if the user has already granted access, without prompting.
+    func startIfAuthorized() {
+        guard authorization == .authorizedWhenInUse || authorization == .authorizedAlways else { return }
+        start()
+    }
+
     func stop() {
         isStarted = false
         manager.stopUpdatingLocation()

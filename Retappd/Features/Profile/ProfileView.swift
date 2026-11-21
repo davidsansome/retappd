@@ -11,10 +11,12 @@ struct ProfileView: View {
     var placeholder: User? = nil
     var openSettings: () -> Void = {}
     @Environment(AuthStore.self) private var auth
+    @Environment(\.openURL) private var openURL
     @State private var info: UserInfo.Profile?
     @State private var showingQR = false
     @State private var friendActionInFlight = false
     @State private var confirmingRemoval: UserInfo.Profile?
+    @State private var confirmingBlock: UserInfo.Profile?
     @State private var friendActionError: FriendActionError?
     @State private var friendActionFeedback = 0
 
@@ -44,7 +46,7 @@ struct ProfileView: View {
                             .accessibilityLabel("Updating friendship")
                     } else {
                         Menu("More", systemImage: "ellipsis") {
-                            friendMenuContent(for: action, profile: profile)
+                            overflowMenuContent(for: action, profile: profile)
                         }
                         .tint(Taproom.ink)
                         .accessibilityIdentifier("profile.overflowMenu")
@@ -60,6 +62,15 @@ struct ProfileView: View {
             Button("Remove friend", role: .destructive) { removeFriend(profile) }
         } message: { _ in
             Text("They'll be taken off your friends list. You can send a new request later.")
+        }
+        .confirmationDialog(
+            confirmingBlock.map { "Block @\($0.userName)?" } ?? "",
+            isPresented: Binding(get: { confirmingBlock != nil }, set: { if !$0 { confirmingBlock = nil } }),
+            titleVisibility: .visible, presenting: confirmingBlock
+        ) { profile in
+            Button("Block user", role: .destructive) { toggleBlockUser(profile) }
+        } message: { _ in
+            Text("They won't be able to see your checkins or interact with you, and if you're friends they'll be removed from your friends list.")
         }
         .alert(
             friendActionError?.title ?? "",
@@ -214,6 +225,33 @@ struct ProfileView: View {
     }
 
     @ViewBuilder
+    private func overflowMenuContent(for action: ProfileFriendMenu, profile: UserInfo.Profile) -> some View {
+        if !profile.isBlocked {
+            friendMenuContent(for: action, profile: profile)
+            if action == .remove {
+                if profile.isMuted {
+                    Button("Unmute user", systemImage: "speaker.wave.2") { unmuteUser(profile) }
+                } else {
+                    Menu("Mute user", systemImage: "speaker.slash") {
+                        Button("For 1 day") { muteUser(profile, days: 1) }
+                        Button("For 7 days") { muteUser(profile, days: 7) }
+                        Button("Forever") { muteUser(profile, days: 0) }
+                    }
+                }
+            }
+            Divider()
+        }
+        if profile.isBlocked {
+            Button("Unblock user", systemImage: "hand.raised.slash") { toggleBlockUser(profile) }
+        } else {
+            Button("Block user", systemImage: "hand.raised", role: .destructive) { confirmingBlock = profile }
+        }
+        if let reportURL = UntappdWebURL.reportUser(profile.userName) {
+            Button("Report user", systemImage: "flag", role: .destructive) { openURL(reportURL) }
+        }
+    }
+
+    @ViewBuilder
     private func friendMenuContent(for action: ProfileFriendMenu, profile: UserInfo.Profile) -> some View {
         switch action {
         case .add:
@@ -294,6 +332,74 @@ struct ProfileView: View {
                 friendActionError = FriendActionError(
                     title: "Couldn't answer request",
                     message: "Couldn't \(what) \(profile.displayName)'s request. \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    private func toggleBlockUser(_ profile: UserInfo.Profile) {
+        friendActionInFlight = true
+        let wasFriend = profile.relationship == "friends"
+        let blocking = !profile.isBlocked
+        Task {
+            defer { friendActionInFlight = false }
+            do {
+                let result = try await UntappdAPI.shared.fetch(.toggleBlockUser(profile.id), as: BlockUserResult.self)
+                let nowBlocked = result.isBlocked
+                info?.blockStatus = nowBlocked ? "blocked_you" : "none"
+                if nowBlocked {
+                    if wasFriend {
+                        info?.relationship = "none"
+                        if let total = info?.totalFriends { info?.totalFriends = max(0, total - 1) }
+                    }
+                    info?.muteStatus = "unmute"
+                    await CheckInOptions.shared.noteBlockedFriend(profile.id)
+                }
+                await ResponseCache.shared.remove(APIRequest.userInfo(username).cacheKey)
+                NotificationCenter.default.post(name: .userModerationChanged, object: nowBlocked ? profile.id : nil)
+                friendActionFeedback += 1
+            } catch {
+                friendActionError = FriendActionError(
+                    title: blocking ? "Couldn't block user" : "Couldn't unblock user",
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    private func muteUser(_ profile: UserInfo.Profile, days: Int) {
+        friendActionInFlight = true
+        Task {
+            defer { friendActionInFlight = false }
+            do {
+                _ = try await UntappdAPI.shared.data(.muteUser(profile.id, days: days))
+                info?.muteStatus = "mute"
+                await ResponseCache.shared.remove(APIRequest.userInfo(username).cacheKey)
+                NotificationCenter.default.post(name: .userModerationChanged, object: profile.id)
+                friendActionFeedback += 1
+            } catch {
+                friendActionError = FriendActionError(
+                    title: "Couldn't mute user",
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    private func unmuteUser(_ profile: UserInfo.Profile) {
+        friendActionInFlight = true
+        Task {
+            defer { friendActionInFlight = false }
+            do {
+                _ = try await UntappdAPI.shared.data(.unmuteUser(profile.id))
+                info?.muteStatus = "unmute"
+                await ResponseCache.shared.remove(APIRequest.userInfo(username).cacheKey)
+                NotificationCenter.default.post(name: .userModerationChanged, object: nil)
+                friendActionFeedback += 1
+            } catch {
+                friendActionError = FriendActionError(
+                    title: "Couldn't unmute user",
+                    message: error.localizedDescription
                 )
             }
         }

@@ -24,7 +24,6 @@ targets:
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        UIBackgroundModes: [remote-notification]
         # Where the notification relay lives (see server/CONTRACT.md).
         RetappdNotifyBaseURL: "https://retappd-notify.davidsansome.workers.dev"
     settings:
@@ -41,7 +40,7 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Retappd
         INFOPLIST_KEY_NSCameraUsageDescription: "The camera is used to take a photo of your beer when you check in, scan a beer's barcode, or scan a friend's QR code."
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Your location is used to find the venue you're at and nearby places to check in."
-        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Your most recent photo can be attached to a check-in."
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Allow photo library access so Retappd can quickly attach your most recent photo to a beer check-in."
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait

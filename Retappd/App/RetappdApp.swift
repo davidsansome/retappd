@@ -111,9 +111,9 @@ struct RootTabs: View {
         .environment(discover)
         .environment(unread)
         .background { keyboardShortcuts }
-        // Track location app-wide, so Discover is ready and check-ins can preselect the venue
-        // you're at, even before the Discover tab is opened.
-        .task { location.start() }
+        // Resume location updates if already authorized, without prompting until the user
+        // opens Discover or starts a check-in.
+        .task { location.startIfAuthorized() }
         .task { await loadMe() }
         .task {
             // Every response's envelope says how much is unread; the bell listens.
@@ -153,10 +153,15 @@ struct RootTabs: View {
             feed.replace(c)
             profile.replace(c)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .userModerationChanged)) { n in
+            if let hiddenUserID = n.object as? Int { feed.removeCheckins(byUserID: hiddenUserID) }
+            Task { await feed.refresh() }
+        }
         // Requests may have been accepted or rejected on Me > Friends; the bell lives on Activity,
         // so it recounts (one small call) when you come back to that tab.
         .onChange(of: page) { _, page in
             if page == .feed { Task { await unread.refresh() } }
+            if page == .discover { location.start() }
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
@@ -290,4 +295,7 @@ extension RootTabs {
 
 extension Notification.Name {
     static let didCheckIn = Notification.Name("didCheckIn")
+    /// Posted after blocking, unblocking, muting or unmuting a user. `object` is the user's `Int`
+    /// uid when their checkins should be hidden from the feed immediately, or `nil` on unblock/unmute.
+    static let userModerationChanged = Notification.Name("userModerationChanged")
 }

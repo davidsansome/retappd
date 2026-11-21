@@ -222,6 +222,9 @@ final class CheckinListModel {
     /// Drops a checkin that was deleted elsewhere.
     func remove(id: Int) { items.removeAll { $0.id == id } }
 
+    /// Drops checkins from a user who was blocked or muted.
+    func removeCheckins(byUserID userID: Int) { items.removeAll { $0.user?.id == userID } }
+
     /// Swaps in a checkin that was edited elsewhere.
     func replace(_ c: Checkin) {
         if let i = items.firstIndex(where: { $0.id == c.id }) { items[i] = c }

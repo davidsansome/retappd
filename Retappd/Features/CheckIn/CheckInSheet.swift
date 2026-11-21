@@ -121,6 +121,7 @@ struct CheckInSheet: View {
             .onChange(of: libraryItem) { _, item in loadLibraryPhoto(item) }
             .interactiveDismissDisabled(busy)
             .task { await options.loadServingTypes() }
+            .task { if editing == nil { location.start() } }
             .task { if editing == nil { await options.loadFriends() } }
             .task { await loadEditedShop() }
             .task { await prefillRating() }
