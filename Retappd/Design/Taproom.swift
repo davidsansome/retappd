@@ -360,9 +360,12 @@ extension View {
 }
 
 /// A card of a few headline counts side by side ("Check-ins 1,204", "People 310"), for the top
-/// of a detail page. Counts that are nil are left out; draws nothing if none are left.
+/// of a detail page. Counts that are nil are left out; draws nothing if none are left unless
+/// `isLoading` is true, in which case all titles are shown with redacted placeholder values so
+/// the card reserves its final height from frame zero.
 struct TaproomStatsCard: View {
     let stats: [(title: String, value: Int?)]
+    var isLoading = false
 
     private var shown: [(title: String, value: Int)] { stats.compactMap { s in s.value.map { (s.title, $0) } } }
 
@@ -372,27 +375,35 @@ struct TaproomStatsCard: View {
 
     var body: some View {
         if !shown.isEmpty {
-            HStack(spacing: 0) {
-                ForEach(Array(shown.enumerated()), id: \.offset) { i, item in
-                    VStack(spacing: 2) {
-                        Text(Self.compact(item.value))
-                            .font(.system(size: 22, weight: .heavy).monospacedDigit())
-                            .tracking(-0.5)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                        Text(item.title).font(.caption).foregroundStyle(Taproom.muted).lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .overlay(alignment: .leading) {
-                        if i > 0 { Rectangle().fill(Taproom.border).frame(width: 1) }
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-            }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 4)
-            .taproomCard()
+            card(items: shown.map { ($0.title, Self.compact($0.value), false) })
+        } else if isLoading && !stats.isEmpty {
+            card(items: stats.map { ($0.title, "12.4K", true) })
         }
+    }
+
+    private func card(items: [(title: String, text: String, placeholder: Bool)]) -> some View {
+        HStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.offset) { i, item in
+                VStack(spacing: 2) {
+                    Text(item.text)
+                        .font(.system(size: 22, weight: .heavy).monospacedDigit())
+                        .tracking(-0.5)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .redacted(reason: item.placeholder ? .placeholder : [])
+                    Text(item.title).font(.caption).foregroundStyle(Taproom.muted).lineLimit(1)
+                }
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .leading) {
+                    if i > 0 { Rectangle().fill(Taproom.border).frame(width: 1) }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(item.placeholder ? "\(item.title): loading" : "\(item.title): \(item.text)")
+            }
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 4)
+        .taproomCard()
     }
 }
 
@@ -891,6 +902,8 @@ struct TaproomRatingCard: View {
         let rating: Double?
         var empty: String = "No ratings"
         var caption: String? = nil
+        var isLoading: Bool = false
+        var isCaptionLoading: Bool = false
     }
 
     let leading: Column
@@ -912,14 +925,31 @@ struct TaproomRatingCard: View {
     private func column(_ c: Column) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(c.title).font(.caption.weight(.semibold)).foregroundStyle(Taproom.muted)
-            if let rating = c.rating, rating > 0 {
+            if c.isLoading {
+                HStack(alignment: .lastTextBaseline, spacing: 34 * 0.16) {
+                    Text("3.80")
+                        .font(.system(size: 34, weight: .heavy).monospacedDigit())
+                        .tracking(-34 * 0.03)
+                        .redacted(reason: .placeholder)
+                    FilledGlass(rating: 0, lineWidth: 1.5)
+                        .frame(height: 34 * 0.8)
+                        .alignmentGuide(.lastTextBaseline) { $0[.bottom] }
+                }
+                .fixedSize()
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(c.title): loading")
+            } else if let rating = c.rating, rating > 0 {
                 TaproomRating(rating: rating, size: 34)
             } else {
                 Text(c.empty).font(.system(size: 22, weight: .heavy)).tracking(-0.4).foregroundStyle(Taproom.muted)
                     .frame(minHeight: 34, alignment: .leading)
                     .accessibilityLabel("\(c.title): \(c.empty)")
             }
-            if let caption = c.caption { Text(caption).font(.caption).foregroundStyle(Taproom.muted) }
+            if let caption = c.caption {
+                Text(caption).font(.caption).foregroundStyle(Taproom.muted)
+                    .redacted(reason: (c.isLoading || c.isCaptionLoading) ? .placeholder : [])
+                    .accessibilityHidden(c.isLoading || c.isCaptionLoading)
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

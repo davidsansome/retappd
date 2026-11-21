@@ -9,6 +9,8 @@ final class BeerModel {
     /// The user's own rating, from `beer/info`, or `beer/userrating` if that didn't have it.
     private(set) var yourRating: Double?
     private(set) var loadError: String?
+    /// True once the initial parallel `info` + `flavors` fetch has settled (or failed).
+    private(set) var detailsLoaded = false
     let checkins: CheckinListModel
     private var firstLoad: Task<Void, Never>?
 
@@ -17,6 +19,7 @@ final class BeerModel {
         checkins = CheckinListModel(source: .beer(beer.bid))
     }
 
+    var isLoadingDetails: Bool { info == nil && !detailsLoaded }
     var hadIt: Bool { HadBeers.shared.has(beer.bid, fallback: info?.hasHad ?? beer.hasHad) }
     var breweryId: Int? { info?.brewery.flatMap { $0.id > 0 ? $0.id : nil } ?? beer.breweryId }
     var breweryName: String { info?.brewery?.name ?? beer.brewery }
@@ -33,31 +36,40 @@ final class BeerModel {
     }
 
     private func fetch() async {
-        async let i: Void = loadInfo()
-        async let f: Void = loadFlavors()
-        _ = await (i, f)
+        // Fetch info and flavors in parallel and commit them together once both settle on a cold
+        // load, so About and Flavours don't shift the page in two separate steps. Warm cache hits
+        // still apply immediately via onCached.
+        async let fetchedInfo = fetchInfo()
+        async let fetchedFlavors = fetchFlavors()
+        let (i, f) = await (fetchedInfo, fetchedFlavors)
+        if let i {
+            applyInfo(i)
+            loadError = nil
+            Task.detached(priority: .utility) { [lite = beer] in await LocalIndex.shared.add(beers: [lite]) }
+        }
+        if let f { flavors = f.items }
+        detailsLoaded = true
         if info?.hasHad == true, yourRating == nil { await loadUserRating() }
     }
 
-    private func loadInfo() async {
-        let apply = { (i: BeerInfo) in
-            self.info = i
-            self.yourRating = i.yourRating
-            self.beer = i.lite
-        }
+    private func applyInfo(_ i: BeerInfo) {
+        info = i
+        yourRating = i.yourRating
+        beer = i.lite
+    }
+
+    private func fetchInfo() async -> BeerInfo? {
         do {
-            apply(try await cacheThenNetwork(.beerInfo(beer.bid), as: BeerInfo.self, onCached: apply))
-            loadError = nil
-            Task.detached(priority: .utility) { [lite = beer] in await LocalIndex.shared.add(beers: [lite]) }
+            return try await cacheThenNetwork(.beerInfo(beer.bid), as: BeerInfo.self, onCached: applyInfo)
         } catch {
             if !error.isCancellation { loadError = error.localizedDescription }
+            return nil
         }
     }
 
-    private func loadFlavors() async {
-        let apply = { (l: FlavorTagList) in self.flavors = l.items }
-        if let l = try? await cacheThenNetwork(.beerFlavorProfile(beer.bid), as: FlavorTagList.self, onCached: apply) {
-            apply(l)
+    private func fetchFlavors() async -> FlavorTagList? {
+        try? await cacheThenNetwork(.beerFlavorProfile(beer.bid), as: FlavorTagList.self) { l in
+            self.flavors = l.items
         }
     }
 
@@ -103,7 +115,11 @@ struct BeerView: View {
                 } else {
                     LazyVStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
                         summaryContent
-                        recentCheckins
+                        if model.isLoadingDetails {
+                            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 32)
+                        } else {
+                            recentCheckins
+                        }
                     }
                 }
             }
@@ -143,11 +159,12 @@ struct BeerView: View {
         if let shopPrices { ShopPriceChip(offers: shopPrices, beerName: model.beer.name) }
         ratings
         TaproomStatsCard(stats: [("Check-ins", model.info?.stats?.total), ("People", model.info?.stats?.people),
-                                 ("This month", model.info?.stats?.thisMonth)])
+                                 ("This month", model.info?.stats?.thisMonth)],
+                         isLoading: model.isLoadingDetails)
         if let d = model.info?.description {
             TaproomSection("About") { ExpandableText(text: d) }
         }
-        if !model.flavors.isEmpty { flavours }
+        if !model.isLoadingDetails, !model.flavors.isEmpty { flavours }
         if let e = model.loadError, model.info == nil {
             ErrorRow(message: e) { Task { await model.load(force: true) } }
         }
@@ -215,42 +232,36 @@ struct BeerView: View {
 
     /// The global rating beside yours.
     private var ratings: some View {
-        HStack(alignment: .top, spacing: 0) {
-            ratingColumn("Everyone", rating: model.beer.rating,
-                         caption: model.beer.ratingCount.map { "\($0.formatted()) ratings" })
-            Rectangle().fill(Taproom.border).frame(width: 1)
-            if model.hadIt {
-                ratingColumn("You", rating: model.yourRating, empty: "Not rated",
-                             caption: yourCheckinsText)
-            } else {
-                ratingColumn("You", rating: nil, empty: "Not had",
-                             caption: model.info == nil ? nil : "Check it in to rate it")
-            }
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .taproomCard()
-        .accessibilityElement(children: .contain)
+        TaproomRatingCard(
+            leading: .init(
+                title: "Everyone",
+                rating: model.beer.rating,
+                caption: model.beer.ratingCount.map { "\($0.formatted()) ratings" }
+                    ?? (model.isLoadingDetails ? "1,234 ratings" : nil),
+                isLoading: model.beer.rating == nil && model.isLoadingDetails,
+                isCaptionLoading: model.beer.ratingCount == nil && model.isLoadingDetails
+            ),
+            trailing: model.hadIt
+                ? .init(
+                    title: "You",
+                    rating: model.yourRating,
+                    empty: "Not rated",
+                    caption: yourCheckinsText,
+                    isLoading: model.yourRating == nil && model.isLoadingDetails
+                )
+                : .init(
+                    title: "You",
+                    rating: nil,
+                    empty: "Not had",
+                    caption: "Check it in to rate it",
+                    isCaptionLoading: model.isLoadingDetails
+                )
+        )
     }
 
     private var yourCheckinsText: String? {
         guard let n = model.info?.stats?.yours, n > 0 else { return "You've had it" }
         return n == 1 ? "1 check-in" : "\(n.formatted()) check-ins"
-    }
-
-    private func ratingColumn(_ title: String, rating: Double?, empty: String = "No ratings", caption: String?) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(Taproom.muted)
-            if let rating, rating > 0 {
-                TaproomRating(rating: rating, size: 34)
-            } else {
-                Text(empty).font(.system(size: 22, weight: .heavy)).tracking(-0.4).foregroundStyle(Taproom.muted)
-                    .frame(minHeight: 34, alignment: .leading)
-                    .accessibilityLabel("\(title): \(empty)")
-            }
-            if let caption { Text(caption).font(.caption).foregroundStyle(Taproom.muted) }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: Flavours

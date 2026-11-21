@@ -10,6 +10,8 @@ final class BreweryModel {
     private(set) var loadingBeers = false
     private(set) var beersError: String?
     private(set) var loadError: String?
+    /// True once the initial `brewery/info` request has settled (or failed).
+    private(set) var infoLoaded = false
     /// Set once a page of beers adds nothing new, so "Show more" stops (the endpoint's paging
     /// isn't captured in the docs).
     private var beersExhausted = false
@@ -21,6 +23,7 @@ final class BreweryModel {
         checkins = CheckinListModel(source: .brewery(brewery.id))
     }
 
+    var isLoadingInfo: Bool { info == nil && !infoLoaded }
     var name: String { info?.name ?? brewery.name }
     var label: URL? { info?.label ?? brewery.label }
 
@@ -46,6 +49,7 @@ final class BreweryModel {
 
     private func loadInfo() async {
         let apply = { (i: BreweryInfo) in self.info = i }
+        defer { infoLoaded = true }
         do {
             apply(try await cacheThenNetwork(.breweryInfo(brewery.id), as: BreweryInfo.self, onCached: apply))
             loadError = nil
@@ -125,7 +129,11 @@ struct BreweryView: View {
                 } else {
                     LazyVStack(alignment: .leading, spacing: Taproom.sectionSpacing, pinnedViews: [.sectionHeaders]) {
                         summaryContent
-                        tabsSection
+                        if model.isLoadingInfo {
+                            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 32)
+                        } else {
+                            tabsSection
+                        }
                     }
                 }
             }
@@ -152,7 +160,8 @@ struct BreweryView: View {
         hero
         ratings
         TaproomStatsCard(stats: [("Beers", model.info?.beerCount), ("Check-ins", model.info?.stats?.total),
-                                 ("People", model.info?.stats?.people), ("Yours", model.info?.stats?.yours)])
+                                 ("People", model.info?.stats?.people), ("Yours", model.info?.stats?.yours)],
+                         isLoading: model.isLoadingInfo)
         if let d = model.info?.description {
             TaproomSection("About") { ExpandableText(text: d) }
         }
@@ -182,12 +191,16 @@ struct BreweryView: View {
 
     // MARK: Header
 
+    private var heroSubtitle: String {
+        [model.info?.type, model.info?.locality]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+
     private var hero: some View {
         HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
-                if let type = model.info?.type {
-                    Text(type).font(.subheadline).foregroundStyle(Taproom.muted)
-                }
                 Text(model.name)
                     .font(.system(size: 30, weight: .heavy))
                     .tracking(-0.6)
@@ -195,12 +208,19 @@ struct BreweryView: View {
                     .minimumScaleFactor(0.7)
                     .textSelection(.enabled)
                     .accessibilityAddTraits(.isHeader)
-                if let place = model.info?.locality, !place.isEmpty {
-                    Label(place, systemImage: "mappin.and.ellipse")
-                        .labelStyle(TightLabel())
+                let subtitle = heroSubtitle
+                if !subtitle.isEmpty {
+                    Text(subtitle)
                         .font(.footnote)
                         .foregroundStyle(Taproom.muted)
-                        .padding(.top, 4)
+                        .padding(.top, 2)
+                } else if model.isLoadingInfo {
+                    Text("Micro Brewery · City, Country")
+                        .font(.footnote)
+                        .foregroundStyle(Taproom.muted)
+                        .padding(.top, 2)
+                        .redacted(reason: .placeholder)
+                        .accessibilityHidden(true)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -216,6 +236,10 @@ struct BreweryView: View {
                 trailing: model.info?.yourAverage.flatMap { $0 > 0 ? $0 : nil }.map {
                     .init(title: "Your average", rating: $0, caption: "across the beers you've had")
                 }
+            )
+        } else if model.isLoadingInfo {
+            TaproomRatingCard(
+                leading: .init(title: "Everyone", rating: nil, caption: "10,000 ratings", isLoading: true)
             )
         }
     }
