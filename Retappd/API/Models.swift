@@ -454,6 +454,18 @@ struct Checkin: Decodable, Hashable, Identifiable {
         var image: URL?
         /// The `lg` size of `badge_image`, when there is one.
         var largeImage: URL?
+
+        init(id: Int, badgeId: Int?, userBadgeId: Int? = nil, name: String, description: String? = nil,
+             image: URL? = nil, largeImage: URL? = nil) {
+            self.id = id
+            self.badgeId = badgeId
+            self.userBadgeId = userBadgeId
+            self.name = name
+            self.description = description
+            self.image = image
+            self.largeImage = largeImage
+        }
+
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: AnyKey.self)
             badgeId = c.int("badge_id")

@@ -141,10 +141,34 @@ struct ProfileView: View {
                 }
             }
 
+            let resolvedUsername = info?.userName ?? username
+            let resolvedDisplayName = info?.displayName ?? placeholder?.displayName ?? username
+            let isOwn = isAccountTab || (auth.username?.caseInsensitiveCompare(resolvedUsername) == .orderedSame)
+
             HStack(spacing: 0) {
                 stat(info?.totalCheckins, "Total")
-                stat(info?.totalBeers, "Unique")
-                stat(info?.totalBadges, "Badges")
+                NavigationLink(value: ProfileCollectionRoute.uniqueBeers(
+                    username: resolvedUsername,
+                    displayName: resolvedDisplayName,
+                    isOwnProfile: isOwn
+                )) {
+                    stat(info?.totalBeers, "Unique", chevron: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(isOwn ? "Shows your unique beers" : "Shows \(resolvedDisplayName)'s unique beers")
+                .accessibilityIdentifier("profile.stat.unique")
+
+                NavigationLink(value: ProfileCollectionRoute.badges(
+                    username: resolvedUsername,
+                    displayName: resolvedDisplayName,
+                    isOwnProfile: isOwn
+                )) {
+                    stat(info?.totalBadges, "Badges", chevron: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(isOwn ? "Shows your badges" : "Shows \(resolvedDisplayName)'s badges")
+                .accessibilityIdentifier("profile.stat.badges")
+
                 if isAccountTab {
                     let waiting = CheckInOptions.shared.requests.count
                     NavigationLink(value: ProfileRoute.friends) {
@@ -154,6 +178,7 @@ struct ProfileView: View {
                     .accessibilityHint(waiting > 0
                         ? "Shows your friends and \(waiting) waiting friend request\(waiting == 1 ? "" : "s")"
                         : "Shows your friends")
+                    .accessibilityIdentifier("profile.stat.friends")
                 } else {
                     stat(info?.totalFriends, "Friends")
                 }
@@ -163,7 +188,11 @@ struct ProfileView: View {
             .taproomRowDivider()
             .padding(.top, Taproom.sectionSpacing)
 
-            if isAccountTab { statisticsEntry.padding(.top, Taproom.sectionSpacing) }
+            VStack(spacing: 10) {
+                if isAccountTab { statisticsEntry }
+                venuesEntry(username: resolvedUsername, displayName: resolvedDisplayName, isOwnProfile: isOwn)
+            }
+            .padding(.top, Taproom.sectionSpacing)
 
             Text("Checkins").font(Taproom.sectionLabel)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -188,6 +217,31 @@ struct ProfileView: View {
             .taproomCard()
         }
         .buttonStyle(CardLinkStyle())
+        .accessibilityIdentifier("profile.statisticsEntry")
+    }
+
+    /// Opens the user's visited venues list, available on both own and other users' profiles.
+    private func venuesEntry(username: String, displayName: String, isOwnProfile: Bool) -> some View {
+        NavigationLink(value: ProfileCollectionRoute.venues(
+            username: username,
+            displayName: displayName,
+            isOwnProfile: isOwnProfile
+        )) {
+            HStack(spacing: 12) {
+                Image(systemName: "mappin.and.ellipse").font(.title3).foregroundStyle(Taproom.amber).frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Venues").font(.body.weight(.heavy))
+                    Text(isOwnProfile ? "Places you've checked in at" : "Places \(displayName) has checked in at")
+                        .font(.footnote).foregroundStyle(Taproom.muted)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(Taproom.muted)
+            }
+            .padding(.horizontal, 14).frame(minHeight: 60)
+            .taproomCard()
+        }
+        .buttonStyle(CardLinkStyle())
+        .accessibilityIdentifier("profile.venuesEntry")
     }
 
     private var emptyText: String {

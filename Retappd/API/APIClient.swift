@@ -231,6 +231,59 @@ extension APIRequest {
         APIRequest(path: "/v4/user/info/\(username)", query: ["compact": "true"])
     }
 
+    /// Paginated list of unique beers a user has checked in (`GET /v4/user/beers/{username}`).
+    /// Filter params are left empty rather than sending every id (which triggers HTTP 414).
+    static func userBeers(_ username: String, query: String = "", sort: String = "date",
+                          offset: Int = 0, timezoneOffset: String = gmtOffsetString()) -> APIRequest {
+        var q = [
+            "brewery_id": "",
+            "container_id": "",
+            "country_id": "",
+            "q": query,
+            "rating_score": "",
+            "region_id": "",
+            "sort": sort,
+            "timezoneOffset": timezoneOffset,
+            "type_id": "",
+        ]
+        if offset > 0 { q["offset"] = "\(offset)" }
+        return APIRequest(path: "/v4/user/beers/\(username)", query: q)
+    }
+
+    /// Summary of a user's badges across categories (`GET /v4/user/badges/{username}?method=index`).
+    static func userBadgesIndex(_ username: String, limit: Int = 3) -> APIRequest {
+        APIRequest(path: "/v4/user/badges/\(username)", query: [
+            "limit": "\(limit)",
+            "method": "index",
+            "mode": "v2",
+        ])
+    }
+
+    /// Paginated list of a user's badges in one category (`GET /v4/user/badges/{username}?method=full`).
+    static func userBadges(_ username: String, segment: UserBadgeSegment, sort: String = "unlocked",
+                           offset: Int = 0, limit: Int = 25) -> APIRequest {
+        APIRequest(path: "/v4/user/badges/\(username)", query: [
+            "limit": "\(limit)",
+            "method": "full",
+            "mode": "v2",
+            "offset": "\(offset)",
+            "segment": segment.rawValue,
+            "sort": sort,
+        ])
+    }
+
+    /// Paginated list of venues a user has checked in at (`GET /v4/user/venues/{username}`).
+    static func userVenues(_ username: String, sort: String = "date", verifiedOnly: Bool = false,
+                           offset: Int = 0) -> APIRequest {
+        var q = [
+            "categories": "1",
+            "sort": sort,
+            "verifiedVenueOnly": verifiedOnly ? "true" : "false",
+        ]
+        if offset > 0 { q["offset"] = "\(offset)" }
+        return APIRequest(path: "/v4/user/venues/\(username)", query: q)
+    }
+
     /// Every beer id the signed-in user has had, in one response (no per-beer details). Behind `HadBeers`.
     static let userBeerList = APIRequest(path: "/v4/user/user_beer_list", query: ["mode": "v3"])
 
