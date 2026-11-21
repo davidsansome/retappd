@@ -33,6 +33,9 @@ final class NotificationUnread {
     private var appliedAt = 0
     @ObservationIgnored private let readIconBadge: @MainActor () -> Int
     @ObservationIgnored private let clearIconBadge: @MainActor () async -> Void
+    @ObservationIgnored private var badgeClearTask: Task<Void, Never>?
+    @ObservationIgnored private let notificationCenter: NotificationCenter
+    @ObservationIgnored nonisolated(unsafe) private var foregroundPushObserver: NSObjectProtocol?
 
     init(username: String,
          defaults: UserDefaults = .standard,
@@ -44,15 +47,24 @@ final class NotificationUnread {
          readIconBadge: @escaping @MainActor () -> Int = { UIApplication.shared.applicationIconBadgeNumber },
          clearIconBadge: @escaping @MainActor () async -> Void = {
              try? await UNUserNotificationCenter.current().setBadgeCount(0)
-         }) {
+         },
+         notificationCenter: NotificationCenter = .default) {
         self.username = username
         self.defaults = defaults
         self.loadRequests = loadRequests
         self.sequence = sequence
         self.readIconBadge = readIconBadge
         self.clearIconBadge = clearIconBadge
+        self.notificationCenter = notificationCenter
         let stored = defaults.double(forKey: Self.key(username))
         lastSeen = stored > 0 ? Date(timeIntervalSince1970: stored) : nil
+        foregroundPushObserver = notificationCenter.addObserver(forName: .foregroundPushReceived, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.refresh() }
+        }
+    }
+
+    deinit {
+        if let foregroundPushObserver { notificationCenter.removeObserver(foregroundPushObserver) }
     }
 
     static func key(_ username: String) -> String { "notifications.lastSeen.\(username.lowercased())" }
@@ -60,7 +72,8 @@ final class NotificationUnread {
     /// Friend requests newer than what the user last saw.
     var unseenRequests: Int {
         requests.filter { r in
-            guard let seen = lastSeen, let at = r.createdAt else { return true }
+            guard let seen = lastSeen else { return true }
+            guard let at = r.createdAt else { return false }
             return at > seen
         }.count
     }
@@ -85,8 +98,10 @@ final class NotificationUnread {
     /// foreground and when the feed refreshes.
     /// A failed load keeps the requests as they were.
     func refresh() async {
+        await badgeClearTask?.value
         iconBadge = readIconBadge()
         if let list = try? await loadRequests() { requests = list }
+        await badgeClearTask?.value
         iconBadge = readIconBadge()
     }
 
@@ -100,6 +115,10 @@ final class NotificationUnread {
         activity = 0
         clearedAt = sequence()
         iconBadge = 0
-        Task { await clearIconBadge() }
+        let previous = badgeClearTask
+        badgeClearTask = Task {
+            await previous?.value
+            await clearIconBadge()
+        }
     }
 }

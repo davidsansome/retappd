@@ -30,6 +30,14 @@ final class NotificationTextTests: XCTestCase {
         XCTAssertEqual(many.actors, "Jamie S and 1,199 others")
     }
 
+    func testEmptyUsersFallsBackToSomeone() {
+        let empty = NotificationItem(kind: .toast, checkinID: 1, users: [], beerName: "Late Nights III")
+        XCTAssertEqual(empty.actors, "Someone")
+        XCTAssertEqual(empty.sentence, "Someone toasted your Late Nights III")
+        let many = NotificationItem(kind: .toast, checkinID: 1, count: 3, users: [], beerName: "Late Nights III")
+        XCTAssertEqual(many.actors, "Someone and 2 others")
+    }
+
     func testMissingBeerName() {
         XCTAssertEqual(item(.toast, beer: nil).sentence, "Jamie S toasted your check-in")
         XCTAssertEqual(item(.comment, beer: nil).sentence, "Jamie S commented on your check-in")
@@ -200,6 +208,53 @@ final class NotificationUnreadTests: XCTestCase {
         await Task.yield(); await Task.yield()
         XCTAssertEqual(cleared, 1)
     }
+
+    func testRefreshAwaitsInFlightBadgeClear() async {
+        var badge = 4
+        var releaseClear: CheckedContinuation<Void, Never>?
+        let u = NotificationUnread(username: "me", defaults: defaults(), loadRequests: { [] }, sequence: { 0 },
+                                   readIconBadge: { badge },
+                                   clearIconBadge: {
+                                       await withCheckedContinuation { releaseClear = $0 }
+                                       badge = 0
+                                   },
+                                   notificationCenter: NotificationCenter())
+        await u.refresh()
+        XCTAssertEqual(u.iconBadge, 4)
+        XCTAssertTrue(u.hasUnread)
+
+        u.markSeen(newest: nil)
+        let refresh = Task { await u.refresh() }
+        while releaseClear == nil { await Task.yield() }
+        for _ in 0..<20 { await Task.yield() }
+
+        releaseClear?.resume()
+        await refresh.value
+        XCTAssertEqual(u.iconBadge, 0)
+        XCTAssertFalse(u.hasUnread)
+    }
+
+    func testDatelessRequestNotPermanentlyUnseenAfterMarkSeen() {
+        let u = unread(defaults())
+        u.setRequests([request(1, at: nil)])
+        XCTAssertEqual(u.unseenRequests, 1)
+        u.markSeen(newest: Date(timeIntervalSince1970: 500))
+        XCTAssertEqual(u.unseenRequests, 0)
+        XCTAssertFalse(u.hasUnread)
+    }
+
+    func testForegroundPushRefreshesUnread() async {
+        let center = NotificationCenter()
+        var badge = 0
+        let u = NotificationUnread(username: "me", defaults: defaults(), loadRequests: { [] }, sequence: { 0 },
+                                   readIconBadge: { badge }, clearIconBadge: {}, notificationCenter: center)
+        XCTAssertFalse(u.hasUnread)
+        badge = 2
+        center.post(name: .foregroundPushReceived, object: nil)
+        for _ in 0..<200 where u.iconBadge != 2 { await Task.yield() }
+        XCTAssertEqual(u.iconBadge, 2)
+        XCTAssertTrue(u.hasUnread)
+    }
 }
 
 @MainActor
@@ -306,5 +361,59 @@ final class NotificationsModelTests: XCTestCase {
         XCTAssertFalse(ok)  // so the screen doesn't mark anything seen
         XCTAssertEqual(m.items.count, 3)
         XCTAssertNotNil(m.error)
+    }
+
+    func testLoadMoreIgnoresURLErrorCancelled() async {
+        let m = NotificationsModel { offset, limit in
+            if offset > 0 { throw URLError(.cancelled) }
+            let items = (0..<limit).map { item(.toast, checkin: $0) }
+            return NotificationPage(items: items, hasMore: true)
+        }
+        await m.refresh()
+        await m.loadMore()
+        XCTAssertNil(m.moreError)
+        XCTAssertFalse(m.isLoadingMore)
+    }
+
+    func testRefreshResetsLoadingMoreAndStaleLoadMoreDoesNotClobberState() async {
+        var page2Continuations: [CheckedContinuation<NotificationPage, Error>] = []
+        let m = NotificationsModel { offset, limit in
+            if offset == 0 {
+                let items = (0..<limit).map { item(.toast, checkin: $0) }
+                return NotificationPage(items: items, hasMore: true)
+            }
+            return try await withCheckedThrowingContinuation { page2Continuations.append($0) }
+        }
+        await m.refresh()
+        XCTAssertEqual(m.items.count, 25)
+
+        // Start a slow loadMore() from generation 1.
+        let stale = Task { await m.loadMore() }
+        while page2Continuations.isEmpty { await Task.yield() }
+        XCTAssertTrue(m.isLoadingMore)
+
+        // Refresh starts generation 2 and resets isLoadingMore so pagination isn't blocked.
+        let refreshed = await m.refresh()
+        XCTAssertTrue(refreshed)
+        XCTAssertFalse(m.isLoadingMore)
+
+        // Start a new loadMore() in generation 2.
+        let fresh = Task { await m.loadMore() }
+        while page2Continuations.count < 2 { await Task.yield() }
+        XCTAssertTrue(m.isLoadingMore)
+
+        // Stale loadMore() finishes: its result is dropped and it must not clear isLoadingMore.
+        let stalePage = NotificationPage(items: (100..<125).map { item(.toast, checkin: $0) }, hasMore: true)
+        page2Continuations[0].resume(returning: stalePage)
+        await stale.value
+        XCTAssertTrue(m.isLoadingMore)
+        XCTAssertEqual(m.items.count, 25)
+
+        // Fresh loadMore() finishes and appends normally.
+        let freshPage = NotificationPage(items: (25..<50).map { item(.toast, checkin: $0) }, hasMore: false)
+        page2Continuations[1].resume(returning: freshPage)
+        await fresh.value
+        XCTAssertFalse(m.isLoadingMore)
+        XCTAssertEqual(m.items.count, 50)
     }
 }

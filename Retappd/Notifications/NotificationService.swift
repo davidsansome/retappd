@@ -55,6 +55,7 @@ final class NotificationService {
     @ObservationIgnored var appVersion: String
     @ObservationIgnored var apnsEnv: String
     @ObservationIgnored var requestAuthorization: () async -> Bool
+    @ObservationIgnored var authorizationStatus: () async -> UNAuthorizationStatus
     @ObservationIgnored var registerForRemote: @MainActor () -> Void
     @ObservationIgnored private(set) var apnsToken: String?
     @ObservationIgnored private var syncing = false
@@ -74,6 +75,9 @@ final class NotificationService {
          requestAuthorization: @escaping () async -> Bool = {
              (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
          },
+         authorizationStatus: @escaping () async -> UNAuthorizationStatus = {
+             await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+         },
          registerForRemote: @escaping @MainActor () -> Void = { UIApplication.shared.registerForRemoteNotifications() }) {
         self.client = client
         self.storage = storage
@@ -83,6 +87,7 @@ final class NotificationService {
         self.appVersion = appVersion
         self.apnsEnv = apnsEnv
         self.requestAuthorization = requestAuthorization
+        self.authorizationStatus = authorizationStatus
         self.registerForRemote = registerForRemote
         enabled = defaults.bool(forKey: "notify.enabled")
         prefs = defaults.data(forKey: "notify.prefs").flatMap { try? JSONDecoder().decode(NotifyPrefs.self, from: $0) } ?? NotifyPrefs()
@@ -131,10 +136,12 @@ final class NotificationService {
     /// The master switch. Turning on asks for permission first.
     func setEnabled(_ on: Bool) async {
         if on {
+            let gen = generation
             guard await requestAuthorization() else {
-                permissionDenied = true
+                if gen == generation { permissionDenied = true }
                 return
             }
+            guard gen == generation, untappdToken() != nil else { return }
             permissionDenied = false
             enabled = true
             defaults.set(true, forKey: "notify.enabled")
@@ -182,8 +189,12 @@ final class NotificationService {
     }
 
     private func markSynced(_ s: Snapshot?) {
-        if let s { defaults.set(try? JSONEncoder().encode(s), forKey: "notify.synced") } else { defaults.removeObject(forKey: "notify.synced") }
-        defaults.set(now().timeIntervalSince1970, forKey: "notify.lastSeen")
+        if let s {
+            defaults.set(try? JSONEncoder().encode(s), forKey: "notify.synced")
+            defaults.set(now().timeIntervalSince1970, forKey: "notify.lastSeen")
+        } else {
+            defaults.removeObject(forKey: "notify.synced")
+        }
     }
 
     private var heartbeatDue: Bool {
@@ -319,10 +330,15 @@ final class NotificationService {
     var hasPendingDeletion: Bool { !pendingDeletions.isEmpty }
 
     private func refreshPermission() async {
-        guard enabled else { return }
-        let s = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        guard enabled || permissionDenied else { return }
+        let s = await authorizationStatus()
         permissionDenied = (s == .denied)
     }
+}
+
+extension Notification.Name {
+    /// Posted when a push notification arrives while the app is in the foreground.
+    static let foregroundPushReceived = Notification.Name("retappd.foregroundPushReceived")
 }
 
 // MARK: - App delegate
@@ -345,7 +361,8 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions {
-        [.banner, .sound, .badge]
+        await MainActor.run { NotificationCenter.default.post(name: .foregroundPushReceived, object: nil) }
+        return [.banner, .sound, .badge]
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {

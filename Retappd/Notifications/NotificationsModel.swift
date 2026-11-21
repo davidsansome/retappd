@@ -43,6 +43,7 @@ final class NotificationsModel {
     func refresh() async -> Bool {
         guard !isLoading else { return false }
         isLoading = true
+        isLoadingMore = false
         generation += 1
         let mine = generation
         defer { if mine == generation { isLoading = false } }
@@ -83,7 +84,7 @@ final class NotificationsModel {
         isLoadingMore = true
         moreError = nil
         let mine = generation
-        defer { isLoadingMore = false }
+        defer { if mine == generation { isLoadingMore = false } }
         do {
             let page = try await fetch(loadedRaw, Self.pageSize)
             guard mine == generation else { return }
@@ -94,7 +95,7 @@ final class NotificationsModel {
         } catch is CancellationError {
         } catch {
             guard mine == generation else { return }
-            moreError = error.localizedDescription
+            if (error as? URLError)?.code != .cancelled { moreError = error.localizedDescription }
         }
     }
 

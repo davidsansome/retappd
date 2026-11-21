@@ -1,6 +1,6 @@
 import Foundation
 
-/// The small HTTP client for Retappd's notification relay (see `.claude/notify-contract.md`).
+/// The small HTTP client for Retappd's notification relay (see `server/CONTRACT.md`).
 /// Separate from `UntappdAPI`: different server, different auth, and its failures are never
 /// shown to the user.
 

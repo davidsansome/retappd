@@ -90,7 +90,7 @@ struct NotificationItem: Decodable, Identifiable, Hashable {
 
     /// "Jamie S", "Jamie S and 1 other", "Jamie S and 2 others".
     var actors: String {
-        let first = users[0].shortName
+        let first = users.first?.shortName ?? "Someone"
         let others = count - 1
         guard others > 0 else { return first }
         return others == 1 ? "\(first) and 1 other" : "\(first) and \(others.formatted()) others"

@@ -1,4 +1,5 @@
 import XCTest
+import UserNotifications
 @testable import Retappd
 
 private final class FakeTransport: NotifyTransport, @unchecked Sendable {
@@ -47,6 +48,7 @@ final class NotificationServiceTests: XCTestCase {
     private var defaults: UserDefaults!
     private var clock = Date(timeIntervalSince1970: 1_000_000)
     private var token: String? = "tok-1"
+    private var authStatus: UNAuthorizationStatus = .authorized
 
     override func setUp() {
         transport = FakeTransport()
@@ -55,16 +57,20 @@ final class NotificationServiceTests: XCTestCase {
         defaults = UserDefaults(suiteName: suite)
         clock = Date(timeIntervalSince1970: 1_000_000)
         token = "tok-1"
+        authStatus = .authorized
     }
 
-    private func makeService(granted: Bool = true) -> NotificationService {
+    private func makeService(granted: Bool = true,
+                             requestAuthorization: (() async -> Bool)? = nil) -> NotificationService {
         NotificationService(
             client: NotifyClient(baseURL: URL(string: "https://relay.test")!, transport: transport),
             storage: storage, defaults: defaults,
             untappdToken: { [unowned self] in token },
             now: { [unowned self] in clock },
             appVersion: "1.0 (1)", apnsEnv: "sandbox",
-            requestAuthorization: { granted }, registerForRemote: {})
+            requestAuthorization: requestAuthorization ?? { granted },
+            authorizationStatus: { [unowned self] in authStatus },
+            registerForRemote: {})
     }
 
     private func enabledAndRegistered() async -> NotificationService {
@@ -288,6 +294,39 @@ final class NotificationServiceTests: XCTestCase {
         let s = makeService()
         await s.signedOut().value
         XCTAssertNil(NotificationRouter.shared.pending)
+    }
+
+    func testRefreshPermissionClearsPermissionDeniedWhenDisabled() async {
+        authStatus = .denied
+        let s = makeService(granted: false)
+        await s.setEnabled(true)
+        XCTAssertFalse(s.enabled)
+        XCTAssertTrue(s.permissionDenied)
+
+        // User enables notifications in iOS Settings and returns to the app.
+        authStatus = .authorized
+        await s.appBecameActive()
+        XCTAssertFalse(s.permissionDenied)
+        XCTAssertFalse(s.enabled)
+    }
+
+    func testSetEnabledAbortsIfSignedOutDuringAuthorization() async {
+        transport.responses["POST /v1/devices"] = [(200, regJSON)]
+        var resumeAuth: CheckedContinuation<Bool, Never>?
+        let s = makeService(requestAuthorization: {
+            await withCheckedContinuation { resumeAuth = $0 }
+        })
+        s.setAPNsToken(Data([0xab]))
+        let enable = Task { await s.setEnabled(true) }
+        while resumeAuth == nil { await Task.yield() }
+
+        await s.signedOut().value
+        resumeAuth?.resume(returning: true)
+        await enable.value
+
+        XCTAssertFalse(s.enabled)
+        XCTAssertFalse(defaults.bool(forKey: "notify.enabled"))
+        XCTAssertTrue(transport.requests.isEmpty)
     }
 
     // MARK: Payload parsing

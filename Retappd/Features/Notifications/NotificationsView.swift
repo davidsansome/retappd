@@ -16,7 +16,7 @@ struct NotificationsView: View {
     /// What had been seen when the screen opened, so what's new stays marked while it's open.
     @State private var seenOnOpen: Date?
     @State private var didOpen = false
-    @State private var opening: Int?
+    @State private var opening: NotificationItem.ID?
     @State private var openFailed = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -33,7 +33,7 @@ struct NotificationsView: View {
                         .taproomRowDivider()
                 }
                 ForEach(model.items) { item in
-                    NotificationRow(item: item, isNew: item.isNew(since: seenOnOpen), isOpening: opening == item.checkinID,
+                    NotificationRow(item: item, isNew: item.isNew(since: seenOnOpen), isOpening: opening == item.id,
                                     compactLayout: typeSize.isAccessibilitySize) {
                         open(item)
                     }
@@ -77,7 +77,7 @@ struct NotificationsView: View {
 
     private func open(_ item: NotificationItem) {
         guard opening == nil else { return }
-        opening = item.checkinID
+        opening = item.id
         Task {
             openFailed = !(await openCheckin(item.checkinID))
             opening = nil
@@ -120,7 +120,7 @@ private struct NotificationRow: View {
     var body: some View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 12) {
-                Avatar(url: item.users[0].avatar, size: 44)
+                Avatar(url: item.users.first?.avatar, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     (Text(item.actors).fontWeight(.semibold) + Text(" " + item.action))
                         .font(.subheadline)
