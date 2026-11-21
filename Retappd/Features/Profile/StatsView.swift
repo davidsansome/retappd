@@ -154,9 +154,9 @@ struct StatsView: View {
         let lo = buckets.first?.anchor ?? Date()
         let hi = buckets.last.flatMap { cal.date(byAdding: unit, value: 1, to: $0.anchor) } ?? lo.addingTimeInterval(86_400)
         let chosen = selectedPoint
-        // With values on, the plot runs a little above the top gridline so the highest bar's
-        // label has room; the axis still stops at `yTop`.
-        let yMax = showValues ? Double(yTop) * 1.14 + 0.2 : Double(yTop)
+        // Always leave a little headroom above the top gridline so toggling bar values on and off
+        // never shifts the y-scale or moves the bars; the axis still stops at `yTop`.
+        let yMax = Double(yTop) * 1.14
         let labelEvery = valueLabelSpacing(count: buckets.count, maxValue: top)
         // Labels go from the newest bar back on every non-empty bar that is at least `labelEvery`
         // bars before the last labelled one, so crowded stretches thin out and lone bars always show.
