@@ -80,6 +80,12 @@ struct CustomListDetailView: View {
         .sensoryFeedback(.success, trigger: removeFeedback)
         .task { await model.loadIfNeeded() }
         .refreshable { await model.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .listsChanged)) { notification in
+            let fromDetail = notification.userInfo?["fromDetail"] as? Bool ?? false
+            let changedID = notification.userInfo?["listId"] as? Int
+            guard !fromDetail, changedID == nil || changedID == model.list.id else { return }
+            Task { await model.refresh() }
+        }
     }
 
     private var header: some View {

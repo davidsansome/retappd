@@ -333,16 +333,75 @@ final class ListsTests: XCTestCase {
         XCTAssertEqual(model.totalCount, 1)
         XCTAssertEqual(mock.calls.last, "invalidate(alice,100,2)")
     }
+
+    @MainActor
+    func testConcurrentRemovalRollbackDoesNotClobberSiblingRemoval() async {
+        let mock = MockListService()
+        let list = CustomList(id: 2, name: "Cellar", totalItemCount: 3, isWishList: false, isOwner: true)
+        let item1 = CustomListItem(listItemId: 1001, itemId: 100, beer: BeerLite(bid: 100, name: "Stout", brewery: "A"))
+        let item2 = CustomListItem(listItemId: 1002, itemId: 200, beer: BeerLite(bid: 200, name: "IPA", brewery: "B"))
+        let item3 = CustomListItem(listItemId: 1003, itemId: 300, beer: BeerLite(bid: 300, name: "Lager", brewery: "C"))
+        mock.detailPages[0] = CustomListDetailResponse(list: list, totalCount: 3, items: [item1, item2, item3])
+        mock.failBids = [100]
+        mock.delayBids = [100: 80_000_000] // 80ms so item2 finishes removing before item1 fails
+
+        let model = CustomListDetailModel(list: list, ownerUsername: "alice", service: mock)
+        await model.loadIfNeeded()
+
+        async let r1 = model.remove(item1)
+        async let r2 = model.remove(item2)
+        let (ok1, ok2) = await (r1, r2)
+
+        XCTAssertFalse(ok1)
+        XCTAssertTrue(ok2)
+        // item1 restored, item2 stays removed, item3 untouched
+        XCTAssertEqual(model.beerItems.map(\.itemId), [100, 300])
+        XCTAssertEqual(model.totalCount, 2)
+        XCTAssertEqual(model.list.totalItemCount, 2)
+    }
+
+    @MainActor
+    func testMutationsPostListsChangedNotificationAndUseConsistentSheetLimit() async {
+        let mock = MockListService()
+        let beer = BeerLite(bid: 555, name: "Test IPA", brewery: "Test Brew")
+        mock.userListsPages[0] = UserListsResponse(items: [
+            CustomList(id: 1, name: "Wish List", totalItemCount: 0, isWishList: true, isInList: false),
+        ])
+
+        var receivedListIDs: [Int] = []
+        let token = NotificationCenter.default.addObserver(
+            forName: .listsChanged, object: nil, queue: .main
+        ) { note in
+            if let id = note.userInfo?["listId"] as? Int { receivedListIDs.append(id) }
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let model = BeerListsSheetModel(beer: beer, username: "alice", service: mock)
+        await model.load()
+        XCTAssertEqual(mock.lastUserListsLimit, ListsPageLimit.beerSheet)
+
+        let ok = await model.toggle(model.lists[0])
+        XCTAssertTrue(ok)
+        XCTAssertEqual(receivedListIDs, [1])
+        XCTAssertEqual(
+            APIRequest.userLists("alice", bid: 555, limit: ListsPageLimit.beerSheet).cacheKey,
+            APIRequest.userLists("alice", bid: 555, offset: 0, limit: 50).cacheKey
+        )
+    }
 }
 
 private final class MockListService: ListService, @unchecked Sendable {
     var userListsPages: [Int: UserListsResponse] = [:]
     var detailPages: [Int: CustomListDetailResponse] = [:]
     var failNextMutation = false
+    var failBids: Set<Int> = []
+    var delayBids: [Int: UInt64] = [:]
+    var lastUserListsLimit: Int?
     var calls: [String] = []
 
     func fetchUserLists(username: String, bid: Int?, offset: Int, limit: Int,
                         onCached: (@MainActor @Sendable (UserListsResponse) -> Void)?) async throws -> UserListsResponse {
+        lastUserListsLimit = limit
         guard let page = userListsPages[offset] else {
             return UserListsResponse(items: [], totalCount: 0, offset: offset, nextURL: nil)
         }
@@ -358,25 +417,29 @@ private final class MockListService: ListService, @unchecked Sendable {
     }
 
     func addToWishlist(bid: Int) async throws -> WishlistMutationResponse {
-        if failNextMutation { throw APIError.server(code: 500, detail: "Server error") }
+        if let ns = delayBids[bid] { try? await Task.sleep(nanoseconds: ns) }
+        if failNextMutation || failBids.contains(bid) { throw APIError.server(code: 500, detail: "Server error") }
         calls.append("addToWishlist(\(bid))")
         return try UntappdAPI.decode(WishlistMutationResponse.self, from: Data(#"{"meta":{"code":200},"response":{"result":"success","action":"add"}}"#.utf8))
     }
 
     func removeFromWishlist(bid: Int) async throws -> WishlistMutationResponse {
-        if failNextMutation { throw APIError.server(code: 500, detail: "Server error") }
+        if let ns = delayBids[bid] { try? await Task.sleep(nanoseconds: ns) }
+        if failNextMutation || failBids.contains(bid) { throw APIError.server(code: 500, detail: "Server error") }
         calls.append("removeFromWishlist(\(bid))")
         return try UntappdAPI.decode(WishlistMutationResponse.self, from: Data(#"{"meta":{"code":200},"response":{"result":"success","action":"remove"}}"#.utf8))
     }
 
     func addBeer(bid: Int, toList listId: Int) async throws -> AddListItemResponse {
-        if failNextMutation { throw APIError.server(code: 500, detail: "Server error") }
+        if let ns = delayBids[bid] { try? await Task.sleep(nanoseconds: ns) }
+        if failNextMutation || failBids.contains(bid) { throw APIError.server(code: 500, detail: "Server error") }
         calls.append("addBeer(\(bid),\(listId))")
         return try UntappdAPI.decode(AddListItemResponse.self, from: Data(#"{"meta":{"code":200},"response":{"result":"success","item_id":1,"list_item_id":2}}"#.utf8))
     }
 
     func removeBeer(bid: Int, fromList listId: Int) async throws -> RemoveListItemResponse {
-        if failNextMutation { throw APIError.server(code: 500, detail: "Server error") }
+        if let ns = delayBids[bid] { try? await Task.sleep(nanoseconds: ns) }
+        if failNextMutation || failBids.contains(bid) { throw APIError.server(code: 500, detail: "Server error") }
         calls.append("removeBeer(\(bid),\(listId))")
         return try UntappdAPI.decode(RemoveListItemResponse.self, from: Data(#"{"meta":{"code":200},"response":{"result":"success","item_id":1}}"#.utf8))
     }

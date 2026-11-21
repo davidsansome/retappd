@@ -1,5 +1,16 @@
 import Foundation
 
+extension Notification.Name {
+    /// Posted whenever a beer is added to or removed from a Wish List or custom list.
+    static let listsChanged = Notification.Name("Retappd.listsChanged")
+}
+
+enum ListsPageLimit {
+    static let overview = 25
+    static let detail = 25
+    static let beerSheet = 50
+}
+
 /// Abstraction over Untappd's wishlist and custom-list endpoints so view models can be unit tested
 /// without hitting the network.
 protocol ListService: Sendable {
@@ -56,13 +67,15 @@ struct LiveListService: ListService {
             await ResponseCache.shared.remove(APIRequest.beerInfo(bid).cacheKey)
         }
         if let username {
-            await ResponseCache.shared.remove(APIRequest.userLists(username).cacheKey)
+            await ResponseCache.shared.remove(APIRequest.userLists(username, limit: ListsPageLimit.overview).cacheKey)
             if let bid {
-                await ResponseCache.shared.remove(APIRequest.userLists(username, bid: bid).cacheKey)
+                await ResponseCache.shared.remove(
+                    APIRequest.userLists(username, bid: bid, limit: ListsPageLimit.beerSheet).cacheKey
+                )
             }
         }
         if let listId {
-            await ResponseCache.shared.remove(APIRequest.customListDetail(listId).cacheKey)
+            await ResponseCache.shared.remove(APIRequest.customListDetail(listId, limit: ListsPageLimit.detail).cacheKey)
         }
     }
 }
@@ -104,7 +117,9 @@ final class UserListsModel {
         isLoading = true
         defer { isLoading = false }
         do {
-            let page = try await service.fetchUserLists(username: username, bid: nil, offset: 0, limit: 25) { cached in
+            let page = try await service.fetchUserLists(
+                username: username, bid: nil, offset: 0, limit: ListsPageLimit.overview
+            ) { cached in
                 self.lists = ListsOrder.sorted(cached.items)
             }
             lists = ListsOrder.sorted(page.items)
@@ -124,7 +139,7 @@ final class UserListsModel {
         defer { isLoadingMore = false }
         do {
             let page = try await service.fetchUserLists(
-                username: username, bid: nil, offset: lists.count, limit: 25, onCached: nil
+                username: username, bid: nil, offset: lists.count, limit: ListsPageLimit.overview, onCached: nil
             )
             let existingIDs = Set(lists.map(\.id))
             let added = page.items.filter { !existingIDs.contains($0.id) }
@@ -175,7 +190,9 @@ final class CustomListDetailModel {
         isLoading = true
         defer { isLoading = false }
         do {
-            let page = try await service.fetchListDetail(listId: list.id, offset: 0, limit: 25) { cached in
+            let page = try await service.fetchListDetail(
+                listId: list.id, offset: 0, limit: ListsPageLimit.detail
+            ) { cached in
                 self.apply(cached, replacing: true)
             }
             apply(page, replacing: true)
@@ -194,7 +211,7 @@ final class CustomListDetailModel {
         defer { isLoadingMore = false }
         do {
             let page = try await service.fetchListDetail(
-                listId: list.id, offset: items.count, limit: 25, onCached: nil
+                listId: list.id, offset: items.count, limit: ListsPageLimit.detail, onCached: nil
             )
             apply(page, replacing: false)
         } catch {
@@ -204,14 +221,13 @@ final class CustomListDetailModel {
         }
     }
 
-    /// Optimistically removes a beer from the signed-in user's list, restoring it if the server refuses.
+    /// Optimistically removes a beer from the signed-in user's list, restoring only that item if
+    /// the server refuses (so overlapping removals of other rows aren't clobbered).
     func remove(_ item: CustomListItem) async -> Bool {
         guard let bid = item.beer?.bid ?? (item.itemId != 0 ? item.itemId : nil),
               let index = items.firstIndex(where: { $0.id == item.id }) else {
             return false
         }
-        let previousItems = items
-        let previousTotal = totalCount
         items.remove(at: index)
         totalCount = max(0, totalCount - 1)
         list.totalItemCount = totalCount
@@ -224,11 +240,18 @@ final class CustomListDetailModel {
                 _ = try await service.removeBeer(bid: bid, fromList: list.id)
             }
             await service.invalidateCaches(username: ownerUsername, bid: bid, listId: list.id)
+            NotificationCenter.default.post(
+                name: .listsChanged,
+                object: nil,
+                userInfo: ["listId": list.id, "fromDetail": true]
+            )
             return true
         } catch {
-            items = previousItems
-            totalCount = previousTotal
-            list.totalItemCount = previousTotal
+            if !items.contains(where: { $0.id == item.id }) {
+                items.insert(item, at: min(index, items.count))
+                totalCount += 1
+                list.totalItemCount = totalCount
+            }
             if !error.isCancellation {
                 actionError = error.localizedDescription
             }
@@ -286,7 +309,9 @@ final class BeerListsSheetModel {
         isLoading = true
         defer { isLoading = false }
         do {
-            let page = try await service.fetchUserLists(username: username, bid: beer.bid, offset: 0, limit: 50) { cached in
+            let page = try await service.fetchUserLists(
+                username: username, bid: beer.bid, offset: 0, limit: ListsPageLimit.beerSheet
+            ) { cached in
                 self.lists = ListsOrder.sorted(cached.items)
             }
             lists = ListsOrder.sorted(page.items)
@@ -329,6 +354,11 @@ final class BeerListsSheetModel {
                 }
             }
             await service.invalidateCaches(username: username, bid: beer.bid, listId: list.id)
+            NotificationCenter.default.post(
+                name: .listsChanged,
+                object: nil,
+                userInfo: ["listId": list.id]
+            )
             return true
         } catch {
             if let rollbackIndex = lists.firstIndex(where: { $0.id == list.id }) {

@@ -78,6 +78,9 @@ struct UserListsView: View {
         .toolbarBackground(Taproom.background, for: .navigationBar)
         .task { await model.loadIfNeeded() }
         .refreshable { await model.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .listsChanged)) { _ in
+            Task { await model.refresh() }
+        }
     }
 
     private func listCard(_ list: CustomList) -> some View {
