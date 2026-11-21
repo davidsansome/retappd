@@ -116,7 +116,12 @@ struct CheckinDetailView: View {
             Button("OK") {}
         } message: { Text($0) }
         .task { await load() }
-        .refreshable { await load() }
+        .refreshable {
+            async let checkinLoad: Void = load()
+            async let prices = refreshShopPrices(beerID: checkin.beer?.bid)
+            _ = await checkinLoad
+            if case .updated(let refreshed) = await prices { shopPrices = refreshed }
+        }
         .loadingShopPrices(beerID: checkin.beer?.bid, into: $shopPrices)
     }
 

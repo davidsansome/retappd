@@ -73,6 +73,8 @@ final class BeerModel {
 struct BeerView: View {
     @State private var model: BeerModel
     @State private var checkInBeer: BeerLite?
+    /// The beer's prices at shops, from Metabeer, when shop prices are on and a shop has it.
+    @State private var shopPrices: MetabeerOffers?
     /// Tags this page's links, so its rows only show as selected for checkins it opened itself.
     @State private var listID = UUID()
     @Environment(\.beerPageCanCheckIn) private var canCheckIn
@@ -84,6 +86,7 @@ struct BeerView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
                 hero
+                if let shopPrices { ShopPriceChip(offers: shopPrices, beerName: model.beer.name) }
                 ratings
                 TaproomStatsCard(stats: [("Check-ins", model.info?.stats?.total), ("People", model.info?.stats?.people),
                                          ("This month", model.info?.stats?.thisMonth)])
@@ -115,10 +118,13 @@ struct BeerView: View {
         }
         .task { await model.load() }
         .task { await model.checkins.loadIfNeeded() }
+        .loadingShopPrices(beerID: model.beer.bid, into: $shopPrices)
         .refreshable {
             async let details: Void = model.load(force: true)
             async let checkins: Void = model.checkins.refresh()
+            async let prices = refreshShopPrices(beerID: model.beer.bid)
             _ = await (details, checkins)
+            if case .updated(let refreshed) = await prices { shopPrices = refreshed }
         }
         .fullScreenCover(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
     }

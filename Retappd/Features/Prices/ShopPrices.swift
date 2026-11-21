@@ -6,7 +6,7 @@ import SwiftUI
 private struct LoadShopPrices: ViewModifier {
     let beerID: Int?
     @Binding var offers: MetabeerOffers?
-    @AppStorage(MetabeerSettings.enabledKey) private var enabled = false
+    @AppStorage(MetabeerSettings.enabledKey) private var enabled = MetabeerSettings.defaultEnabled
     @AppStorage(MetabeerSettings.marketKey) private var market = MetabeerMarket.local
 
     func body(content: Content) -> some View {
@@ -25,6 +25,27 @@ extension View {
     }
 }
 
+/// Outcome of a manual pull-to-refresh of Metabeer shop prices.
+enum ShopPricesRefresh {
+    /// Server answered cleanly (nil means disabled or now out of stock).
+    case updated(MetabeerOffers?)
+    /// Request failed or was cancelled; keep whatever was already shown.
+    case unchanged
+}
+
+/// Refreshes Metabeer shop prices directly (bypassing the cache) when enabled in Settings.
+/// Use from `.refreshable` so pull-to-refresh gets fresh prices too.
+@MainActor
+func refreshShopPrices(beerID: Int?) async -> ShopPricesRefresh {
+    guard MetabeerSettings.isEnabled, let beerID else { return .updated(nil) }
+    do {
+        let found = try await Metabeer.shared.offers(beerID: beerID, market: MetabeerSettings.market, force: true)
+        return .updated(found.offers.isEmpty ? nil : found)
+    } catch {
+        return .unchanged
+    }
+}
+
 /// "From $6.40 each · 4 shops": the cheapest can or bottle of a beer in the shops Metabeer
 /// tracks. Opens the shops and their prices.
 struct ShopPriceChip: View {
@@ -32,20 +53,30 @@ struct ShopPriceChip: View {
     let beerName: String
     @State private var showing = false
 
+    private var chipText: Text {
+        let shops = Text("· \(offers.shopCount) \(offers.shopCount == 1 ? "shop" : "shops")")
+            .foregroundStyle(Taproom.muted)
+        if let each = offers.cheapestEach {
+            return Text("From ") + Text(offers.money(each)).fontWeight(.semibold) + Text(" each ") + shops
+        }
+        return shops
+    }
+
     var body: some View {
         Button { showing = true } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 Image(systemName: "tag").foregroundStyle(Taproom.amber)
-                if let each = offers.cheapestEach {
-                    (Text("From ") + Text(offers.money(each)).fontWeight(.semibold) + Text(" each")).lineLimit(1)
-                }
-                Text("· \(offers.shopCount) \(offers.shopCount == 1 ? "shop" : "shops")")
-                    .foregroundStyle(Taproom.muted).lineLimit(1)
+                    .accessibilityHidden(true)
+                chipText
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 Image(systemName: "chevron.right").imageScale(.small).foregroundStyle(Taproom.muted)
+                    .accessibilityHidden(true)
             }
         }
         .buttonStyle(TaproomChip(on: false))
         .accessibilityHint("Shows the shops selling this beer and their prices")
+        .accessibilityIdentifier("ShopPrices.chip")
         .sheet(isPresented: $showing) { ShopPricesSheet(offers: offers, beerName: beerName) }
     }
 }
@@ -73,24 +104,30 @@ struct ShopPricesSheet: View {
                     }
                     TaproomSection("Cheapest each first") {
                         VStack(spacing: 0) {
-                            ForEach(offers.offers) { o in
-                                Button { openURL(o.productUrl) } label: { OfferRow(offer: o, offers: offers) }
-                                    .buttonStyle(TaproomRowStyle())
-                                    .taproomRowDivider()
-                                    .accessibilityHint("Opens the shop's page")
+                            ForEach(offers.sortedOffers) { o in
+                                Button {
+                                    if o.productUrl.isHTTP { openURL(o.productUrl) }
+                                } label: {
+                                    OfferRow(offer: o, offers: offers)
+                                }
+                                .buttonStyle(TaproomRowStyle())
+                                .taproomRowDivider()
+                                .accessibilityHint("Opens the shop's page")
+                                .accessibilityIdentifier("ShopPrices.row.\(o.listingId)")
                             }
                         }
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Prices and stock come from Metabeer, which checks shops every night. Prices are before shipping.")
                             .font(.caption).foregroundStyle(Taproom.muted)
-                        if let url = offers.metabeerUrl {
+                        if let url = offers.metabeerUrl, url.isHTTP {
                             Link(destination: url) {
                                 Label("Price history on Metabeer", systemImage: "arrow.up.right")
                                     .labelStyle(TaproomTrailingIconLabel())
                             }
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(Taproom.ink)
+                            .accessibilityIdentifier("ShopPrices.historyLink")
                         }
                     }
                 }
@@ -105,7 +142,9 @@ struct ShopPricesSheet: View {
             .toolbarBackground(Taproom.background, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Close", systemImage: "xmark") { dismiss() }.tint(Taproom.ink)
+                    Button("Close", systemImage: "xmark") { dismiss() }
+                        .tint(Taproom.ink)
+                        .accessibilityIdentifier("ShopPrices.close")
                 }
             }
         }
@@ -117,27 +156,69 @@ struct ShopPricesSheet: View {
 private struct OfferRow: View {
     let offer: MetabeerOffer
     let offers: MetabeerOffers
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var packLine: String {
+        [offer.packDescription, offer.packSize > 1 ? "\(offers.money(offer.price)) the pack" : nil]
+            .compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var unitDetail: String? {
+        let parts = [
+            offer.packSize > 1 ? "each" : nil,
+            offer.pricePerLitre.map { "\(offers.money($0))/L" },
+        ].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(offer.shop).font(.body.weight(.semibold)).lineLimit(1)
-                let pack = [offer.packDescription, offer.packSize > 1 ? "\(offers.money(offer.price)) the pack" : nil]
-                    .compactMap { $0 }.joined(separator: " · ")
-                if !pack.isEmpty { Text(pack).font(.footnote).foregroundStyle(Taproom.muted).lineLimit(1) }
+        Group {
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        shopInfo
+                        Spacer(minLength: 4)
+                        externalIcon
+                    }
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(offers.money(offer.unitPrice)).font(.headline.weight(.heavy).monospacedDigit())
+                        if let unitDetail {
+                            Text(unitDetail).font(.caption).foregroundStyle(Taproom.muted).monospacedDigit()
+                        }
+                    }
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    shopInfo
+                    Spacer(minLength: 4)
+                    // What shops compare on: one can or bottle, so a 4-pack sits fairly beside a single.
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(offers.money(offer.unitPrice)).font(.headline.weight(.heavy).monospacedDigit())
+                        if let unitDetail {
+                            Text(unitDetail).font(.caption2).foregroundStyle(Taproom.muted).monospacedDigit()
+                        }
+                    }
+                    externalIcon
+                }
             }
-            Spacer(minLength: 4)
-            // What shops compare on: one can or bottle, so a 4-pack sits fairly beside a single.
-            VStack(alignment: .trailing, spacing: 0) {
-                Text(offers.money(offer.unitPrice)).font(.headline.weight(.heavy).monospacedDigit())
-                if offer.packSize > 1 { Text("each").font(.caption2).foregroundStyle(Taproom.muted) }
-            }
-            Image(systemName: "arrow.up.right").imageScale(.small).foregroundStyle(Taproom.muted)
-                .accessibilityHidden(true)
         }
         .foregroundStyle(Taproom.ink)
         .padding(.vertical, 10)
         .frame(minHeight: 60)
         .accessibilityElement(children: .combine)
+    }
+
+    private var shopInfo: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(offer.shop).font(.body.weight(.semibold)).lineLimit(2)
+            if !packLine.isEmpty {
+                Text(packLine).font(.footnote).foregroundStyle(Taproom.muted).lineLimit(2)
+            }
+        }
+    }
+
+    private var externalIcon: some View {
+        Image(systemName: "arrow.up.right").imageScale(.small).foregroundStyle(Taproom.muted)
+            .accessibilityHidden(true)
     }
 }

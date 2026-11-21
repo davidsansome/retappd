@@ -21,6 +21,20 @@ enum MetabeerSettings {
     /// Debug builds only: a server to use instead of the market's site, as a launch argument
     /// (`-metabeer.baseURL http://127.0.0.1:8000`).
     static let baseURLKey = "metabeer.baseURL"
+
+    /// Enabled by default in markets Metabeer tracks (Australia and the UK), off elsewhere.
+    static var defaultEnabled: Bool {
+        let region = Locale.current.region?.identifier
+        return region == "AU" || region == "GB"
+    }
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? defaultEnabled
+    }
+
+    static var market: MetabeerMarket {
+        UserDefaults.standard.string(forKey: marketKey).flatMap(MetabeerMarket.init(rawValue:)) ?? .local
+    }
 }
 
 /// `GET /api/v1/beers/{id}/offers`: every shop with a beer in stock. Money arrives as decimal
@@ -32,8 +46,19 @@ struct MetabeerOffers: Decodable, Sendable {
     var currency: String
     /// The beer's page on Metabeer; nil when Metabeer has never seen the beer.
     var metabeerUrl: URL?
-    /// Cheapest per can or bottle first.
+    /// In-stock offers from Metabeer.
     var offers: [MetabeerOffer]
+
+    /// Offers sorted cheapest per can or bottle first, with deterministic tie-breakers.
+    var sortedOffers: [MetabeerOffer] {
+        offers.sorted { a, b in
+            if a.unitPrice != b.unitPrice { return a.unitPrice < b.unitPrice }
+            if a.price != b.price { return a.price < b.price }
+            let shopOrder = a.shop.localizedCaseInsensitiveCompare(b.shop)
+            if shopOrder != .orderedSame { return shopOrder == .orderedAscending }
+            return a.listingId < b.listingId
+        }
+    }
 
     /// The cheapest single can or bottle.
     var cheapestEach: Decimal? { offers.map(\.unitPrice).min() }
@@ -41,6 +66,13 @@ struct MetabeerOffers: Decodable, Sendable {
     var shopCount: Int { Set(offers.map(\.shopSlug)).count }
 
     func money(_ amount: Decimal) -> String { amount.formatted(.currency(code: currency)) }
+}
+
+extension URL {
+    var isHTTP: Bool {
+        guard let scheme = scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
 }
 
 struct MetabeerOffer: Decodable, Identifiable, Sendable {
@@ -113,14 +145,41 @@ private extension KeyedDecodingContainer {
 actor Metabeer {
     static let shared = Metabeer()
 
-    private let session: URLSession = {
-        let c = URLSessionConfiguration.ephemeral
-        c.timeoutIntervalForRequest = 15
-        c.httpAdditionalHeaders = ["User-Agent": "Retappd/\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1")"]
-        return URLSession(configuration: c)
-    }()
+    typealias Fetcher = @Sendable (URL) async throws -> (Data, Int)
+
+    private struct InFlight {
+        let id: UUID
+        let task: Task<MetabeerOffers, Error>
+    }
+
+    private let fetcher: Fetcher
+    private let now: @Sendable () -> Date
+    private let maxAge: TimeInterval
+    private let maxCacheEntries: Int
     private var cache: [URL: (at: Date, offers: MetabeerOffers)] = [:]
-    private static let maxAge: TimeInterval = 10 * 60
+    private var inFlight: [URL: InFlight] = [:]
+
+    init(fetch: Fetcher? = nil,
+         now: @escaping @Sendable () -> Date = { Date() },
+         maxAge: TimeInterval = 10 * 60,
+         maxCacheEntries: Int = 200) {
+        if let fetch {
+            self.fetcher = fetch
+        } else {
+            let c = URLSessionConfiguration.ephemeral
+            c.timeoutIntervalForRequest = 15
+            c.httpAdditionalHeaders = ["User-Agent": "Retappd/\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1")"]
+            let session = URLSession(configuration: c)
+            self.fetcher = { url in
+                let (data, resp) = try await session.data(from: url)
+                let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                return (data, status)
+            }
+        }
+        self.now = now
+        self.maxAge = maxAge
+        self.maxCacheEntries = maxCacheEntries
+    }
 
     static func decode(_ data: Data) throws -> MetabeerOffers {
         let d = JSONDecoder()
@@ -128,16 +187,49 @@ actor Metabeer {
         return try d.decode(MetabeerOffers.self, from: data)
     }
 
-    func offers(beerID: Int, market: MetabeerMarket) async throws -> MetabeerOffers {
+    func offers(beerID: Int, market: MetabeerMarket, force: Bool = false) async throws -> MetabeerOffers {
         let url = Self.base(market).appending(path: "api/v1/beers/\(beerID)/offers")
-        if let hit = cache[url], Date().timeIntervalSince(hit.at) < Self.maxAge { return hit.offers }
+        let current = now()
+        if !force, let hit = cache[url], current.timeIntervalSince(hit.at) < maxAge {
+            return hit.offers
+        }
+        if !force, let running = inFlight[url] {
+            return try await running.task.value
+        }
 
-        let (data, resp) = try await session.data(from: url)
-        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200 else { throw APIError.http(status) }
-        let offers = try Self.decode(data)
-        cache[url] = (Date(), offers)
-        return offers
+        let id = UUID()
+        let fetch = fetcher
+        let task = Task<MetabeerOffers, Error> {
+            let (data, status) = try await fetch(url)
+            guard status == 200 else { throw APIError.http(status) }
+            return try Self.decode(data)
+        }
+        inFlight[url] = InFlight(id: id, task: task)
+
+        do {
+            let offers = try await task.value
+            if inFlight[url]?.id == id { inFlight[url] = nil }
+            store(offers, for: url, at: now())
+            return offers
+        } catch {
+            if inFlight[url]?.id == id { inFlight[url] = nil }
+            throw error
+        }
+    }
+
+    func clearCache() {
+        cache.removeAll()
+    }
+
+    private func store(_ offers: MetabeerOffers, for url: URL, at timestamp: Date) {
+        // Evict expired entries first, then oldest entries if still over the cap.
+        cache = cache.filter { timestamp.timeIntervalSince($0.value.at) < maxAge }
+        cache[url] = (timestamp, offers)
+        if cache.count > maxCacheEntries {
+            let excess = cache.count - maxCacheEntries
+            let oldest = cache.sorted { $0.value.at < $1.value.at }.prefix(excess)
+            for (key, _) in oldest { cache.removeValue(forKey: key) }
+        }
     }
 
     private static func base(_ market: MetabeerMarket) -> URL {

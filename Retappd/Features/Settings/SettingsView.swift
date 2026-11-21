@@ -4,7 +4,7 @@ enum ProfileRoute: Hashable { case settings, friends, statistics }
 
 struct SettingsView: View {
     @AppStorage(Appearance.storageKey) private var appearance = Appearance.system
-    @AppStorage(MetabeerSettings.enabledKey) private var shopPrices = false
+    @AppStorage(MetabeerSettings.enabledKey) private var shopPrices = MetabeerSettings.defaultEnabled
     @AppStorage(MetabeerSettings.marketKey) private var market = MetabeerMarket.local
     @Environment(AuthStore.self) private var auth
     @State private var settings: AccountSettings?
