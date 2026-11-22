@@ -267,9 +267,7 @@ extension RootTabs {
         case .friendRequest:
             openFriends()
         case .pendingCheckins:
-            // The "To check in" card leads Discover. Tapping the notice is asking to check in now,
-            // so don't make the card wait for a connection check first.
-            Connectivity.shared.userAskedToCheckIn()
+            // The "To check in" card leads Discover.
             page = .discover
             discoverPath = NavigationPath()  // back to the top, where the card is
         case .checkin(let id):

@@ -95,20 +95,9 @@ final class Connectivity {
             defaults.set(newValue, forKey: Self.offlineModeKey)
             applyOfflineMode(newValue)
             if newValue { proof.reset() }
-            userWentOnline = !newValue
         }
     }
     private var storedOfflineMode: Bool
-
-    /// True after the user turns offline mode off or taps a saved check-ins notification, until
-    /// the network path changes or offline mode goes back on. Either says you want to check in
-    /// now, so the "To check in" list shows at once instead of waiting for `prove(_:)`.
-    private(set) var userWentOnline = false
-
-    /// The user opened a saved check-ins notification: show the list now (unless offline mode is on).
-    func userAskedToCheckIn() {
-        if !offlineMode { userWentOnline = true }
-    }
 
     /// From `NWPathMonitor`: nil until it has reported.
     private(set) var pathSatisfied: Bool?
@@ -163,10 +152,7 @@ final class Connectivity {
 
     func pathChanged(satisfied: Bool) {
         // A new path (Wi-Fi to cellular, or losing signal) says nothing for the old streak.
-        if pathSatisfied != satisfied {
-            proof.reset()
-            if pathSatisfied != nil { userWentOnline = false }
-        }
+        if pathSatisfied != satisfied { proof.reset() }
         pathSatisfied = satisfied
     }
 
