@@ -142,6 +142,9 @@ struct TaproomEmptyFilterView: View {
 
 /// A secondary button: rounded, outlined, filling its share of a row.
 struct TaproomOutlineButton: ButtonStyle {
+    /// False sizes it to its label plus side padding, like `TaproomPrimaryButton(fullWidth: false)`,
+    /// for a button at the end of a row.
+    var fullWidth = true
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -150,7 +153,8 @@ struct TaproomOutlineButton: ButtonStyle {
             .labelStyle(TightLabel())
             .font(.subheadline.weight(.medium))
             .foregroundStyle(color)
-            .frame(maxWidth: .infinity, minHeight: 44)
+            .padding(.horizontal, fullWidth ? 0 : 20)
+            .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: 44)
             .background(Taproom.card, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Taproom.border))
             .opacity(!isEnabled ? 0.4 : configuration.isPressed ? 0.7 : 1)
