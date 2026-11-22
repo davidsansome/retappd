@@ -201,6 +201,7 @@ struct GlassRating: View {
     @State private var autoPouring = false
     @State private var autoPourTask: Task<Void, Never>?
     @State private var usePourSpring = false
+    @State private var handledPour = 0
     /// Whether the latest drag movement was upwards.
     @State private var filling = true
     /// Counts taps on the glass, each of which releases a burst of bubbles.
@@ -220,6 +221,7 @@ struct GlassRating: View {
         autoPourTask = nil
         autoPouring = false
         usePourSpring = false
+        handledPour = pourTrigger
         onUserInteraction?()
     }
 
@@ -227,6 +229,7 @@ struct GlassRating: View {
         GeometryReader { geo in
             let h = geo.size.height
             let level = h * CGFloat(min(max(rating, 0), 5) / 5 * maxFill)
+            let pourSpring = !reduceMotion && (pourTrigger != handledPour || usePourSpring)
             ZStack(alignment: .bottom) {
                 PintShape().fill(Taproom.glassInside)
                 VStack(spacing: 0) {
@@ -245,7 +248,7 @@ struct GlassRating: View {
                 .clipShape(PintShape())
                 PintShape().stroke(Taproom.glassRim, lineWidth: 2)
             }
-            .animation(usePourSpring ? .spring(response: 0.55, dampingFraction: 0.85) : .interactiveSpring(response: 0.25, dampingFraction: 0.85), value: rating)
+            .animation(pourSpring ? .spring(response: 0.55, dampingFraction: 0.85) : .interactiveSpring(response: 0.25, dampingFraction: 0.85), value: rating)
             .contentShape(Rectangle())
             .highPriorityGesture(
                 DragGesture(minimumDistance: 0)
@@ -276,6 +279,7 @@ struct GlassRating: View {
             )
         }
         .onChange(of: pourTrigger) {
+            handledPour = pourTrigger
             guard !reduceMotion && rating > 0 else { return }
             autoPourTask?.cancel()
             usePourSpring = true
