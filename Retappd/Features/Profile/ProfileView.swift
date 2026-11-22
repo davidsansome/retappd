@@ -16,6 +16,7 @@ struct ProfileView: View {
     /// True once the initial `user/info` request has settled (or failed).
     @State private var infoLoaded = false
     @State private var showingQR = false
+    @State private var showAvatarPhoto = false
     @State private var friendActionInFlight = false
     @State private var confirmingRemoval: UserInfo.Profile?
     @State private var confirmingBlock: UserInfo.Profile?
@@ -111,9 +112,26 @@ struct ProfileView: View {
     private var header: some View {
         VStack(spacing: 0) {
             VStack(spacing: 4) {
-                Avatar(url: info?.avatar ?? placeholder?.avatar, size: 96)
                 let namePlaceholder = info == nil && placeholder == nil && isLoadingInfo
                 let displayName = info?.displayName ?? placeholder?.displayName ?? username
+                if let avatarURL = info?.avatar ?? placeholder?.avatar {
+                    Button { showAvatarPhoto = true } label: {
+                        Avatar(url: avatarURL, size: 96)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(displayName)'s photo")
+                    .accessibilityHint("Opens it full screen")
+                    .accessibilityIdentifier("profile.avatarButton")
+                    .fullScreenCover(isPresented: $showAvatarPhoto) {
+                        PhotoViewer(
+                            url: avatarURL,
+                            placeholder: info?.avatarThumb ?? placeholder?.avatar ?? avatarURL,
+                            title: displayName
+                        )
+                    }
+                } else {
+                    Avatar(url: nil, size: 96)
+                }
                 Text(namePlaceholder ? "Display Name" : displayName)
                     .font(.system(size: 26, weight: .heavy))
                     .tracking(-0.4)

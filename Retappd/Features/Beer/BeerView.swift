@@ -141,6 +141,7 @@ struct BeerView: View {
     @State private var model: BeerModel
     @State private var checkInBeer: BeerLite?
     @State private var showingListsSheet = false
+    @State private var showLabelPhoto = false
     /// The beer's prices at shops, from Metabeer, when shop prices are on and a shop has it.
     @State private var shopPrices: MetabeerOffers?
     /// Tags this page's links, so its rows only show as selected for checkins it opened itself.
@@ -280,11 +281,24 @@ struct BeerView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            BeerLabel(beer: model.beer.label, beerHD: model.info?.labelHD, brewery: model.beer.breweryLabel, size: 96, cornerRadius: 16)
+            let resolved = BeerLabel.resolve(beer: model.beer.label, beerHD: model.info?.labelHD, brewery: model.beer.breweryLabel)
+            let label = BeerLabel(beer: model.beer.label, beerHD: model.info?.labelHD, brewery: model.beer.breweryLabel, size: 96, cornerRadius: 16)
                 .overlay(alignment: .topTrailing) {
                     if model.hadIt { HadCorner(size: 30) }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 16))
+            if let resolved {
+                Button { showLabelPhoto = true } label: { label }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Beer label")
+                    .accessibilityHint("Opens it full screen")
+                    .accessibilityIdentifier("beer.labelButton")
+                    .fullScreenCover(isPresented: $showLabelPhoto) {
+                        PhotoViewer(url: resolved.url, placeholder: resolved.fallback ?? resolved.url, title: model.beer.name)
+                    }
+            } else {
+                label
+            }
         }
     }
 

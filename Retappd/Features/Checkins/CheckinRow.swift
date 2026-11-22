@@ -505,27 +505,6 @@ struct FlowLayout: Layout {
     }
 }
 
-struct PhotoViewer: View {
-    let url: URL
-    let placeholder: URL
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            CachedImage(url: url, maxPixel: 2000) {
-                CachedImage(url: placeholder, maxPixel: 1000) { ProgressView().tint(.white) }
-            }
-            .aspectRatio(contentMode: .fit)
-        }
-        .overlay(alignment: .topTrailing) {
-            Button("Close", systemImage: "xmark.circle.fill") { dismiss() }
-                .labelStyle(.iconOnly).font(.title).foregroundStyle(.white.opacity(0.8)).padding()
-        }
-        .onTapGesture { dismiss() }
-    }
-}
-
 /// Icon for a serving style, drawn amber by default; a generic glass for styles without one.
 struct ServingIcon: View {
     let name: String

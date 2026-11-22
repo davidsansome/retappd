@@ -437,7 +437,7 @@ struct CheckinDetailView: View {
             .accessibilityLabel("Photo")
             .accessibilityHint("Opens it full screen")
             .fullScreenCover(isPresented: $showPhoto) {
-                PhotoViewer(url: p.large ?? url, placeholder: p.medium ?? url)
+                PhotoViewer(url: p.large ?? url, placeholder: p.medium ?? url, title: checkin.beer?.name ?? "Check-in photo")
             }
         }
     }

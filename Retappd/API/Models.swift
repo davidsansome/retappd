@@ -1064,6 +1064,7 @@ struct UserInfo: Decodable {
         var userName: String
         var displayName: String
         var avatar: URL?
+        var avatarThumb: URL?
         var location: String?
         var totalCheckins: Int?
         var totalBeers: Int?
@@ -1092,6 +1093,7 @@ struct UserInfo: Decodable {
             userName = c.string("user_name") ?? ""
             displayName = User.displayName(firstName: firstName, lastName: lastName, userName: userName)
             avatar = c.url("user_avatar_hd") ?? c.url("user_avatar")
+            avatarThumb = c.url("user_avatar")
             location = c.text("location")
             let s = c.nested("stats")
             totalCheckins = s?.int("total_checkins")

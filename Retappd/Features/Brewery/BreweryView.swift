@@ -254,6 +254,7 @@ struct BreweryView: View {
     /// Tags this page's links, so its rows only show as selected for checkins it opened itself.
     @State private var listID = UUID()
     @State private var containerWidth: CGFloat = 0
+    @State private var showLabelPhoto = false
 
     enum Tab: Hashable { case beers, checkins }
 
@@ -384,7 +385,20 @@ struct BreweryView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            BeerLabel(beer: nil, brewery: model.label, breweryHD: model.info?.labelHD, size: 72, cornerRadius: 18)
+            let resolved = BeerLabel.resolve(beer: nil, brewery: model.label, breweryHD: model.info?.labelHD)
+            let label = BeerLabel(beer: nil, brewery: model.label, breweryHD: model.info?.labelHD, size: 72, cornerRadius: 18)
+            if let resolved {
+                Button { showLabelPhoto = true } label: { label }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Brewery logo")
+                    .accessibilityHint("Opens it full screen")
+                    .accessibilityIdentifier("brewery.labelButton")
+                    .fullScreenCover(isPresented: $showLabelPhoto) {
+                        PhotoViewer(url: resolved.url, placeholder: resolved.fallback ?? resolved.url, title: model.name)
+                    }
+            } else {
+                label
+            }
         }
     }
 
