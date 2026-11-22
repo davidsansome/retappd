@@ -76,6 +76,14 @@ final class UntappdAPI: @unchecked Sendable {
         set { lock.withLock { _onUnreadCounts = newValue } }
     }
 
+    private var _onRequestOutcome: (@Sendable (RequestOutcome) -> Void)?
+    /// Called (on any thread) after every request: whether a response arrived, and how fast.
+    /// Feeds `Connectivity`. A cancelled request reports nothing.
+    var onRequestOutcome: (@Sendable (RequestOutcome) -> Void)? {
+        get { lock.withLock { _onRequestOutcome } }
+        set { lock.withLock { _onRequestOutcome = newValue } }
+    }
+
     /// How many requests have started so far; each takes the next number as it starts.
     var currentSequence: Int { lock.withLock { sequence } }
     private func nextSequence() -> Int { lock.withLock { sequence += 1; return sequence } }
@@ -125,7 +133,17 @@ final class UntappdAPI: @unchecked Sendable {
     /// Fetches raw bytes and validates the envelope. Only valid responses are returned (and so cached).
     func data(_ r: APIRequest) async throws -> Data {
         let started = nextSequence()
-        let (data, resp) = try await session.data(for: urlRequest(r))
+        let clock = ContinuousClock()
+        let begin = clock.now
+        let result: (Data, URLResponse)
+        do {
+            result = try await session.data(for: urlRequest(r))
+        } catch {
+            if !(error is CancellationError), (error as? URLError)?.code != .cancelled { onRequestOutcome?(.noResponse) }
+            throw error
+        }
+        onRequestOutcome?(.response(latency: Self.seconds(clock.now - begin)))
+        let (data, resp) = result
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let envelope = try? JSONDecoder().decode(Envelope<Ignored>.self, from: data)
         let meta = envelope?.meta
@@ -139,6 +157,10 @@ final class UntappdAPI: @unchecked Sendable {
         guard (200..<300).contains(status) else { throw APIError.http(status) }
         if let counts = envelope?.notifications, r.path != "/v4/notifications" { onUnreadCounts?(counts, started) }
         return data
+    }
+
+    static func seconds(_ d: Duration) -> TimeInterval {
+        Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
     }
 
     static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
