@@ -17,8 +17,17 @@ private final class MockCheckinTransport: CheckinBackgroundTransport {
 
     var uploads: [RecordedUpload] = []
     var activeTaskList: [ActiveBackgroundTask] = []
+    var holdActiveTasks = false
+    private var activeTasksContinuation: CheckedContinuation<[ActiveBackgroundTask], Never>?
     var cancelledJobIDs: [UUID] = []
     var cancelAllCount = 0
+
+    func releaseActiveTasks() {
+        holdActiveTasks = false
+        let cont = activeTasksContinuation
+        activeTasksContinuation = nil
+        cont?.resume(returning: activeTaskList)
+    }
 
     func startUpload(request: URLRequest, fromFile fileURL: URL, taskDescription: String) {
         let bytes = try? Data(contentsOf: fileURL)
@@ -31,7 +40,10 @@ private final class MockCheckinTransport: CheckinBackgroundTransport {
     }
 
     func activeTasks() async -> [ActiveBackgroundTask] {
-        activeTaskList
+        if holdActiveTasks {
+            return await withCheckedContinuation { activeTasksContinuation = $0 }
+        }
+        return activeTaskList
     }
 
     func cancelTasks(matching jobID: UUID) async {
@@ -138,6 +150,7 @@ final class CheckinQueueTests: XCTestCase {
                 self?.scheduledNotifications.append((id, beer))
             },
             onSuccessHaptic: { [weak self] in self?.hapticCount += 1 },
+            onDiscardUnsavedCheckin: {},
             toastDuration: .milliseconds(50)
         )
     }
@@ -674,5 +687,169 @@ final class CheckinQueueTests: XCTestCase {
         transport.complete(taskDescription: transport.uploads[1].taskDescription, error: URLError(.timedOut))
         try? await Task.sleep(for: .milliseconds(30))
         XCTAssertEqual(scheduledNotifications.count, 1)
+    }
+
+    // MARK: Delegate / reconcile race ordering & background completion handler
+
+    func testReconcileDoesNotDuplicateWhenStep1CompletesDuringActiveTasksLookup() async {
+        let queue1 = makeQueue()
+        let jobID = queue1.enqueueNew(sampleDraft(), beerName: "IPA", breweryName: "Brew",
+                                      username: "alice", photo: sampleImage())
+        await waitForUploads(count: 1)
+        let step1Desc = transport.uploads[0].taskDescription
+
+        // Relaunch with activeTasks() suspended while iOS delivers the queued Step 1 completion.
+        let transport2 = MockCheckinTransport()
+        transport2.activeTaskList = []
+        transport2.holdActiveTasks = true
+        let queue2 = makeQueue(transport: transport2)
+        queue2.start()
+        try? await Task.sleep(for: .milliseconds(15))
+
+        // Step 1 completes while reconcile() is awaiting activeTasks() -> transitions to Step 2.
+        let step1JSON = #"{"meta":{"code":200},"response":{"checkin_id":601,"photo_upload":{"url":"https://s3.test/601","destination_url":"https://cdn.test/601.jpg"}}}"#
+        transport2.complete(taskDescription: step1Desc, status: 200, json: step1JSON)
+        XCTAssertEqual(transport2.uploads.count, 1)
+        XCTAssertEqual(transport2.uploads[0].taskDescription, CheckinQueue.taskDescription(jobID, .step2))
+
+        // Release activeTasks() returning [] -> reconcile MUST NOT re-enqueue Step 2!
+        transport2.releaseActiveTasks()
+        await queue2.reconcile()
+
+        XCTAssertEqual(transport2.uploads.count, 1, "reconcile() must not start a duplicate Step 2 PUT")
+        XCTAssertTrue(scheduledNotifications.isEmpty)
+    }
+
+    func testDelayedStep1CompletionRecoversAfterReconcileAndIgnoresDuplicate() async {
+        let queue1 = makeQueue()
+        let jobID = queue1.enqueueNew(sampleDraft(), beerName: "IPA", breweryName: "Brew",
+                                      username: "alice", photo: sampleImage())
+        await waitForUploads(count: 1)
+        let step1Desc = transport.uploads[0].taskDescription
+
+        // Relaunch: reconcile() runs first with no active tasks and marks .submittingCheckin failed
+        // (without scheduling a local notification).
+        appActive = false
+        let transport2 = MockCheckinTransport()
+        transport2.activeTaskList = []
+        let queue2 = makeQueue(transport: transport2)
+        queue2.start()
+        await queue2.reconcile()
+
+        XCTAssertEqual(queue2.jobs.first?.phase, .failed(
+            step: .checkin,
+            message: "Check-in was interrupted while sending. Check your feed before retrying."
+        ))
+        XCTAssertTrue(scheduledNotifications.isEmpty, "reconcile-inferred failure must not fire local notification")
+
+        // Queued Step 1 success arrives after reconcile() -> recovers into Step 2.
+        let step1JSON = #"{"meta":{"code":200},"response":{"checkin_id":701,"photo_upload":{"url":"https://s3.test/701","destination_url":"https://cdn.test/701.jpg"}}}"#
+        transport2.complete(taskDescription: step1Desc, status: 200, json: step1JSON)
+        XCTAssertEqual(transport2.uploads.count, 1)
+        XCTAssertEqual(transport2.uploads[0].taskDescription, CheckinQueue.taskDescription(jobID, .step2))
+
+        // A stale/duplicate Step 1 completion arriving while in .uploadingPhoto MUST be ignored.
+        let dupJSON = #"{"meta":{"code":200},"response":{"checkin_id":999,"photo_upload":{"url":"https://s3.test/999","destination_url":"https://cdn.test/999.jpg"}}}"#
+        transport2.complete(taskDescription: step1Desc, status: 200, json: dupJSON)
+        XCTAssertEqual(transport2.uploads.count, 1, "Stale duplicate Step 1 completion must be ignored")
+        XCTAssertEqual(queue2.jobs.first?.phase, .uploadingPhoto(
+            checkinId: 701,
+            uploadURL: URL(string: "https://s3.test/701")!,
+            destinationURL: URL(string: "https://cdn.test/701.jpg")!
+        ))
+    }
+
+    func testReconcileDoesNotFailNewlyEnqueuedPreparingJobDuringAwait() async {
+        let transport2 = MockCheckinTransport()
+        transport2.activeTaskList = []
+        transport2.holdActiveTasks = true
+
+        var releaseEncoder: CheckedContinuation<Data?, Never>?
+        let queue = CheckinQueue(
+            transport: transport2,
+            storageDirectory: tempDir,
+            backgroundTasks: bgTasks,
+            imageEncoder: { _ in
+                await withCheckedContinuation { releaseEncoder = $0 }
+            },
+            tokenProvider: { "test-token" },
+            notificationCenter: center,
+            onDiscardUnsavedCheckin: {},
+            toastDuration: .milliseconds(50)
+        )
+
+        queue.start()
+        try? await Task.sleep(for: .milliseconds(15))
+
+        // Enqueue a new check-in while reconcile() is suspended awaiting activeTasks().
+        let newJobID = queue.enqueueNew(sampleDraft(), beerName: "Fresh", breweryName: "Brew",
+                                        username: "alice", photo: sampleImage())
+        XCTAssertEqual(queue.jobs.first(where: { $0.id == newJobID })?.phase, .preparing)
+
+        // Release reconcile(): the newly enqueued job was not in the pre-await snapshot, so it stays .preparing.
+        transport2.releaseActiveTasks()
+        await queue.reconcile()
+        XCTAssertEqual(queue.jobs.first(where: { $0.id == newJobID })?.phase, .preparing)
+
+        // Release image encoder so the job proceeds normally to Step 1.
+        releaseEncoder?.resume(returning: Data([0xFF, 0xD8]))
+        await waitForUploads(in: transport2, count: 1)
+        XCTAssertEqual(queue.jobs.first(where: { $0.id == newJobID })?.phase, .submittingCheckin)
+    }
+
+    func testBackgroundCompletionHandlerWaitsForReconcileAndFailureNotification() async {
+        let queue1 = makeQueue()
+        _ = queue1.enqueueNew(sampleDraft(), beerName: "Porter", breweryName: "Brew",
+                              username: "alice", photo: nil)
+        await waitForUploads(count: 1)
+        let step1Desc = transport.uploads[0].taskDescription
+
+        appActive = false
+        let transport2 = MockCheckinTransport()
+        transport2.activeTaskList = []
+        transport2.holdActiveTasks = true
+
+        var releaseAuthStatus: CheckedContinuation<UNAuthorizationStatus, Never>?
+        let queue2 = CheckinQueue(
+            transport: transport2,
+            storageDirectory: tempDir,
+            backgroundTasks: bgTasks,
+            tokenProvider: { "test-token" },
+            notificationCenter: center,
+            isAppActive: { false },
+            notificationAuthStatus: {
+                await withCheckedContinuation { releaseAuthStatus = $0 }
+            },
+            scheduleFailureNotification: { [weak self] id, beer in
+                self?.scheduledNotifications.append((id, beer))
+            },
+            onDiscardUnsavedCheckin: {},
+            toastDuration: .milliseconds(50)
+        )
+
+        var completionCalled = false
+        queue2.handleBackgroundSessionEvents(identifier: BackgroundURLSessionTransport.sessionIdentifier) {
+            completionCalled = true
+        }
+        try? await Task.sleep(for: .milliseconds(15))
+
+        // Step 1 fails in background (spawns async notificationAuthStatus check) and session finishes events.
+        transport2.complete(taskDescription: step1Desc, error: URLError(.timedOut))
+        transport2.finishBackgroundEvents()
+        try? await Task.sleep(for: .milliseconds(15))
+
+        // Completion handler MUST stay held while reconcile() and notification check are still running.
+        XCTAssertFalse(completionCalled)
+
+        // Release reconcile() first -> still held because notification check is pending.
+        transport2.releaseActiveTasks()
+        await queue2.reconcile()
+        XCTAssertFalse(completionCalled)
+
+        // Release notification auth check -> notification scheduled, then completion handler fires.
+        releaseAuthStatus?.resume(returning: .authorized)
+        try? await Task.sleep(for: .milliseconds(25))
+        XCTAssertEqual(scheduledNotifications.count, 1)
+        XCTAssertTrue(completionCalled)
     }
 }

@@ -169,7 +169,6 @@ final class BackgroundURLSessionTransport: NSObject, CheckinBackgroundTransport,
         config.sessionSendsLaunchEvents = true
         config.waitsForConnectivity = true
         config.timeoutIntervalForRequest = 60
-        config.timeoutIntervalForResource = 180
         return URLSession(configuration: config, delegate: self, delegateQueue: delegateQueue)
     }()
 
@@ -293,16 +292,23 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
     @ObservationIgnored private let notificationAuthStatus: () async -> UNAuthorizationStatus
     @ObservationIgnored private let scheduleFailureNotification: (UUID, String) -> Void
     @ObservationIgnored private let onSuccessHaptic: () -> Void
+    @ObservationIgnored private let onDiscardUnsavedCheckin: () -> Void
     @ObservationIgnored private let toastDuration: Duration
 
     @ObservationIgnored private var started = false
     @ObservationIgnored private var backgroundCompletionHandler: (() -> Void)?
+    @ObservationIgnored private var backgroundEventsFinished = false
+    @ObservationIgnored private var pendingBackgroundWorkCount = 0
     @ObservationIgnored private var toastClearTask: Task<Void, Never>?
     /// Original `Checkin` objects kept in memory for in-session edits so `.checkinEdited` can
     /// update feeds and detail views in place without losing unedited fields.
     @ObservationIgnored private var editingCheckins: [UUID: Checkin] = [:]
     /// Tracks jobs that have already refreshed an expired S3 presigned URL once to prevent loops.
     @ObservationIgnored private var refreshedUploadURLJobIDs: Set<UUID> = []
+    /// Tracks job IDs that have already received a delegate completion in this process so
+    /// cold-launch `reconcile()` never races them.
+    @ObservationIgnored private var receivedCompletionJobIDs: Set<UUID> = []
+    @ObservationIgnored private var reconcileTask: Task<Void, Never>?
 
     init(
         transport: CheckinBackgroundTransport = BackgroundURLSessionTransport(),
@@ -320,6 +326,7 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         },
         scheduleFailureNotification: @escaping (UUID, String) -> Void = CheckinQueue.defaultScheduleFailureNotification,
         onSuccessHaptic: @escaping () -> Void = { UINotificationFeedbackGenerator().notificationOccurred(.success) },
+        onDiscardUnsavedCheckin: @escaping () -> Void = { Task { await HadBeers.shared.refresh(force: true) } },
         toastDuration: Duration = .seconds(2)
     ) {
         self.transport = transport
@@ -333,6 +340,7 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         self.notificationAuthStatus = notificationAuthStatus
         self.scheduleFailureNotification = scheduleFailureNotification
         self.onSuccessHaptic = onSuccessHaptic
+        self.onDiscardUnsavedCheckin = onDiscardUnsavedCheckin
         self.toastDuration = toastDuration
         self.transport.delegate = self
     }
@@ -364,7 +372,15 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         started = true
         (transport as? BackgroundURLSessionTransport)?.ensureSessionStarted()
         loadJobsFromDisk()
-        Task { await reconcile() }
+        let snapshot = Dictionary(uniqueKeysWithValues: jobs.map { ($0.id, $0.phase) })
+        pendingBackgroundWorkCount += 1
+        reconcileTask = Task {
+            defer {
+                pendingBackgroundWorkCount -= 1
+                flushBackgroundCompletionHandlerIfReady()
+            }
+            await runReconcile(snapshot: snapshot)
+        }
     }
 
     func handleBackgroundSessionEvents(identifier: String, completionHandler: @escaping () -> Void) {
@@ -373,18 +389,37 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
             return
         }
         backgroundCompletionHandler = completionHandler
+        backgroundEventsFinished = false
         start()
     }
 
     /// Reconciles persisted jobs against currently active background URLSession tasks.
+    /// If `start()` already launched reconciliation, awaits that task instead of running twice.
     func reconcile() async {
+        if let task = reconcileTask {
+            await task.value
+        } else {
+            let snapshot = Dictionary(uniqueKeysWithValues: jobs.map { ($0.id, $0.phase) })
+            await runReconcile(snapshot: snapshot)
+        }
+    }
+
+    private func runReconcile(snapshot: [UUID: PendingCheckin.Phase]) async {
         let active = await transport.activeTasks()
         let activeJobIDs = Set(active.compactMap { Self.parseTaskDescription($0.taskDescription)?.0 })
 
         var changed = false
         for i in jobs.indices {
             let job = jobs[i]
-            if job.isFailed || activeJobIDs.contains(job.id) { continue }
+            // Only touch jobs that existed in the pre-await snapshot, haven't changed phase,
+            // haven't received a delegate completion, and have no active background task.
+            guard let snapPhase = snapshot[job.id],
+                  snapPhase == job.phase,
+                  !receivedCompletionJobIDs.contains(job.id),
+                  !job.isFailed,
+                  !activeJobIDs.contains(job.id) else {
+                continue
+            }
 
             switch job.phase {
             case .preparing:
@@ -399,6 +434,7 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
 
             case .submittingCheckin:
                 // Ambiguous whether Untappd received Step 1: surface as failed instead of double-posting.
+                // Do not schedule a failure notification for reconcile-inferred failures.
                 jobs[i].phase = .failed(
                     step: .checkin,
                     message: "Check-in was interrupted while sending. Check your feed before retrying."
@@ -511,11 +547,16 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
     }
 
     func discard(_ id: UUID) {
+        let discarded = jobs.first { $0.id == id }
         jobs.removeAll { $0.id == id }
         editingCheckins.removeValue(forKey: id)
         refreshedUploadURLJobIDs.remove(id)
+        receivedCompletionJobIDs.remove(id)
         persistJobs()
         removeJobDirectory(id)
+        if let discarded, !discarded.checkinAlreadySaved, !discarded.isEdit {
+            onDiscardUnsavedCheckin()
+        }
         Task { await transport.cancelTasks(matching: id) }
     }
 
@@ -523,6 +564,7 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         jobs.removeAll()
         editingCheckins.removeAll()
         refreshedUploadURLJobIDs.removeAll()
+        receivedCompletionJobIDs.removeAll()
         toastClearTask?.cancel()
         toastClearTask = nil
         completedToast = nil
@@ -687,8 +729,9 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         data: Data,
         error: Error?
     ) {
-        guard let (jobID, stepTag) = Self.parseTaskDescription(taskDescription),
-              let job = jobs.first(where: { $0.id == jobID }) else { return }
+        guard let (jobID, stepTag) = Self.parseTaskDescription(taskDescription) else { return }
+        receivedCompletionJobIDs.insert(jobID)
+        guard let job = jobs.first(where: { $0.id == jobID }) else { return }
 
         withBackgroundTask("com.davidsansome.retappd.checkin.transition") {
             switch stepTag {
@@ -705,14 +748,31 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
     }
 
     func transportDidFinishBackgroundEvents() {
+        backgroundEventsFinished = true
+        flushBackgroundCompletionHandlerIfReady()
+    }
+
+    private func flushBackgroundCompletionHandlerIfReady() {
+        guard backgroundEventsFinished, pendingBackgroundWorkCount == 0 else { return }
         let handler = backgroundCompletionHandler
         backgroundCompletionHandler = nil
+        backgroundEventsFinished = false
         handler?()
     }
 
     // MARK: Step Completion Handlers
 
     private func handleStep1Completion(job: PendingCheckin, response: HTTPURLResponse?, data: Data, error: Error?) {
+        // Only accept Step 1 completions while submitting, or when recovering from a
+        // cold-launch reconcile() that marked `.submittingCheckin` failed before the
+        // queued delegate callback arrived. Ignores stale/duplicate Step 1 responses.
+        switch job.phase {
+        case .submittingCheckin, .failed(step: .checkin, _):
+            break
+        default:
+            return
+        }
+
         if let error {
             if error.isCancellation { return }
             markFailed(jobID: job.id, step: .checkin, message: error.localizedDescription)
@@ -833,6 +893,7 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
     private func finishJob(_ job: PendingCheckin, photoDestinationURL: URL?) {
         jobs.removeAll { $0.id == job.id }
         refreshedUploadURLJobIDs.remove(job.id)
+        receivedCompletionJobIDs.remove(job.id)
         persistJobs()
         removeJobDirectory(job.id)
 
@@ -870,11 +931,18 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         persistJobs()
 
         if !isAppActive() {
+            pendingBackgroundWorkCount += 1
             Task { [weak self] in
                 guard let self else { return }
-                let status = await self.notificationAuthStatus()
-                if status == .authorized {
-                    self.scheduleFailureNotification(jobID, beerName)
+                defer {
+                    self.pendingBackgroundWorkCount -= 1
+                    self.flushBackgroundCompletionHandlerIfReady()
+                }
+                await self.withBackgroundTaskAsync("com.davidsansome.retappd.checkin.notify") {
+                    let status = await self.notificationAuthStatus()
+                    if status == .authorized {
+                        self.scheduleFailureNotification(jobID, beerName)
+                    }
                 }
             }
         }
