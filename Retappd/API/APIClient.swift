@@ -240,15 +240,6 @@ extension APIRequest {
         return APIRequest(path: "/v4/user/checkins/\(username)", query: q)
     }
 
-    /// The venues `username` has checked in at, most recent visit first, 25 a page. The query is
-    /// what the official app sent in the captured samples (`categories=1` included); `offset`
-    /// comes from `pagination.next_url`. A `limit` parameter wasn't captured, so none is sent.
-    static func userVenues(_ username: String, offset: Int = 0) -> APIRequest {
-        var q = ["categories": "1", "sort": "date", "verifiedVenueOnly": "false"]
-        if offset > 0 { q["offset"] = "\(offset)" }
-        return APIRequest(path: "/v4/user/venues/\(username)", query: q)
-    }
-
     /// Totals for `start`...`end` (YYYY-MM-DD, both inclusive, in the time zone `gmtOffset` hours
     /// from GMT). Always for the signed-in user. The official app sends `v2=true`.
     static func userStats(start: String, end: String, gmtOffset: Double) -> APIRequest {

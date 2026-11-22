@@ -22,9 +22,9 @@ final class VenueHistoryTests: XCTestCase {
         XCTAssertEqual(item.venue.venueId, 12)
         XCTAssertEqual(item.venue.name, "The Parcel Yard")
         XCTAssertEqual(item.venue.lat ?? 0, 51.5318, accuracy: 0.0001)
-        XCTAssertEqual(item.visits, 3)
+        XCTAssertEqual(item.visitCount, 3)
         XCTAssertEqual(item.recentCheckinId, 1581209939)
-        XCTAssertNotNil(item.lastVisit)
+        XCTAssertNotNil(item.recentVisit)
     }
 
     func testRequestMatchesCapturedQuery() {
@@ -44,26 +44,26 @@ final class VenueHistoryTests: XCTestCase {
         Venue(venueId: id, name: name ?? "Venue \(id)", lat: lat, lng: lng)
     }
 
-    private func item(_ id: Int, checkin: Int, visits: Int = 1, lat: Double = 51.5, lng: Double = -0.12) -> UserVenuesPage.Item {
-        UserVenuesPage.Item(venue: venue(id, lat: lat, lng: lng), visits: visits, recentCheckinId: checkin)
+    private func item(_ id: Int, checkin: Int, visits: Int = 1, lat: Double = 51.5, lng: Double = -0.12) -> UserVenueItem {
+        UserVenueItem(venue: venue(id, lat: lat, lng: lng), visitCount: visits, recentCheckinId: checkin)
     }
 
     /// Serves `pages` by offset and counts the requests.
     final class FakeServer: @unchecked Sendable {
-        var pages: [[UserVenuesPage.Item]]
+        var pages: [[UserVenueItem]]
         var requests: [Int] = []
         var failAtOffset: Int?
-        init(_ pages: [[UserVenuesPage.Item]]) { self.pages = pages }
+        init(_ pages: [[UserVenueItem]]) { self.pages = pages }
         var total: Int { pages.map(\.count).reduce(0, +) }
         func page(at offset: Int) throws -> UserVenuesPage {
             requests.append(offset)
             if offset == failAtOffset { throw URLError(.timedOut) }
             var start = 0
             for p in pages {
-                if start == offset { return UserVenuesPage(items: p, totalCount: total) }
+                if start == offset { return UserVenuesPage(totalCount: total, items: p) }
                 start += p.count
             }
-            return UserVenuesPage(items: [], totalCount: total)
+            return UserVenuesPage(totalCount: total, items: [])
         }
     }
 
