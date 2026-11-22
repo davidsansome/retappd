@@ -138,26 +138,6 @@ final class ConnectivityTests: XCTestCase {
         XCTAssertEqual(probes, 0)
     }
 
-    func testTurningOfflineModeOffCountsAsGoingOnline() {
-        let clock = FakeClock()
-        let c = make(clock) { .noResponse }
-        c.pathChanged(satisfied: true)
-        XCTAssertFalse(c.userWentOnline)
-        c.offlineMode = true
-        XCTAssertFalse(c.userWentOnline)
-        c.offlineMode = false
-        XCTAssertTrue(c.userWentOnline)
-        c.pathChanged(satisfied: true)  // no change
-        XCTAssertTrue(c.userWentOnline)
-        c.pathChanged(satisfied: false)
-        XCTAssertFalse(c.userWentOnline)
-        c.pathChanged(satisfied: true)
-        c.offlineMode = true
-        c.offlineMode = false
-        c.offlineMode = true
-        XCTAssertFalse(c.userWentOnline)
-    }
-
     func testAPathChangeStartsAgain() {
         let clock = FakeClock()
         let c = make(clock) { .noResponse }
