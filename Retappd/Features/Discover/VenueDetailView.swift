@@ -350,7 +350,6 @@ final class VenueModel {
 struct VenueDetailView: View {
     @State private var model: VenueModel
     @State private var searchText = ""
-    @State private var checkInBeer: BeerLite?
     /// The tab the user picked; until then, the menu if there is one, else checkins.
     @State private var pickedTab: VenueTab?
     /// The menu section shown; defaults to the first.
@@ -420,7 +419,6 @@ struct VenueDetailView: View {
         }
         .refreshable { await model.load(force: true) }
         .onChange(of: model.everyone?.items) { model.updateLastCheckinByBeer() }
-        .checkInPresentation(item: $checkInBeer) { CheckInSheet(beer: $0, venue: model.venue) }
     }
 
     @ViewBuilder private var venueBody: some View {
@@ -737,12 +735,12 @@ struct VenueDetailView: View {
         return VStack(spacing: 0) {
             // Menu numbers hidden until we know where the real tap numbers come from.
             ForEach(rows, id: \.id) { _, b in
-                Button { checkInBeer = b } label: {
+                NavigationLink(value: BeerBreweryRoute.beer(b, venue: model.venue)) {
                     BeerRow(beer: b, detail: last[b.bid].map { "here \(RelativeTime.short($0))" })
                 }
                 .buttonStyle(TaproomRowStyle())
                 .taproomRowDivider()
-                .accessibilityHint("Checks in this beer")
+                .accessibilityHint("Opens the beer's page")
             }
         }
     }

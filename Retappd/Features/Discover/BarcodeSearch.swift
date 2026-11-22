@@ -183,7 +183,7 @@ struct BarcodeSearchSheet: View {
                             } label: { BeerRow(beer: b) }
                             .buttonStyle(TaproomRowStyle())
                             .taproomRowDivider()
-                            .accessibilityHint("Checks in this beer")
+                            .accessibilityHint("Opens the beer's page")
                         }
                     }
                 }

@@ -137,6 +137,7 @@ final class BeerModel {
 /// A beer's page: what it is, how it rates, whether you've had it, and who's been drinking it.
 /// Reached from check-ins, brewery lists and the check-in screen with a `BeerBreweryRoute`.
 struct BeerView: View {
+    let venue: Venue?
     @State private var model: BeerModel
     @State private var checkInBeer: BeerLite?
     @State private var showingListsSheet = false
@@ -149,7 +150,10 @@ struct BeerView: View {
     @Environment(DiscoverModel.self) private var discover
     @Environment(AuthStore.self) private var auth
 
-    init(beer: BeerLite) { _model = State(initialValue: BeerModel(beer: beer)) }
+    init(beer: BeerLite, venue: Venue? = nil) {
+        _model = State(initialValue: BeerModel(beer: beer))
+        self.venue = venue
+    }
 
     private var isTwoColumn: Bool { containerWidth >= .twoColumnThreshold }
 
@@ -232,7 +236,7 @@ struct BeerView: View {
             _ = await (details, checkins)
             if case .updated(let refreshed) = await prices { shopPrices = refreshed }
         }
-        .checkInPresentation(item: $checkInBeer) { CheckInSheet(beer: $0, venue: discover.here.first) }
+        .checkInPresentation(item: $checkInBeer) { CheckInSheet(beer: $0, venue: venue ?? discover.here.first) }
     }
 
     @ViewBuilder private var summaryContent: some View {

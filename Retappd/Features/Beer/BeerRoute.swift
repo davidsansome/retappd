@@ -11,7 +11,7 @@ struct BreweryPreview: Hashable {
 /// Where a beer or brewery link goes. Push one with `NavigationLink(value:)` from any
 /// `NavigationStack` that has `.beerAndBreweryDestinations()` on its content.
 enum BeerBreweryRoute: Hashable {
-    case beer(BeerLite)
+    case beer(BeerLite, venue: Venue? = nil)
     case brewery(BreweryPreview)
     case badge(Checkin.Badge)
     case userLists(username: String, displayName: String?)
@@ -46,7 +46,7 @@ extension View {
     func beerAndBreweryDestinations() -> some View {
         navigationDestination(for: BeerBreweryRoute.self) { route in
             switch route {
-            case .beer(let beer): BeerView(beer: beer)
+            case .beer(let beer, let venue): BeerView(beer: beer, venue: venue)
             case .brewery(let brewery): BreweryView(brewery: brewery)
             case .badge(let badge): BadgeView(badge: badge)
             case .userLists(let username, let displayName): UserListsView(username: username, displayName: displayName)

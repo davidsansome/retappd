@@ -8,9 +8,9 @@ struct DiscoverView: View {
     var scanRequests = 0
     @Environment(LocationProvider.self) private var location
     @State private var query = ""
-    @State private var checkInBeer: BeerLite?
     @State private var scanning = false
     @State private var scannedBeer: BeerLite?
+    @State private var scannedBeerToOpen: BeerLite?
     @State private var handledScans = 0
     @State private var containerWidth: CGFloat = 0
     @State private var selectedVenue: Venue?
@@ -55,7 +55,6 @@ struct DiscoverView: View {
         .task { await model.refreshIfStale(location: location.location) }
         // Venues, and the checkins and people on their pages.
         .modifier(CheckinDestinations(enabled: true, me: model.me))
-        .checkInPresentation(item: $checkInBeer) { CheckInSheet(beer: $0, venue: model.here.first) }
         .checkInPresentation(item: $finishing) { CheckInSheet(pending: $0.item, beer: $0.beer) }
         .onChange(of: finishing == nil) { _, closed in
             // Back from finishing a saved search: stop looking for it if it was posted.
@@ -65,11 +64,12 @@ struct DiscoverView: View {
             }
         }
         .sheet(isPresented: $scanning, onDismiss: {
-            // Open the check-in once the scanner has gone, as only one modal shows at a time.
-            if let b = scannedBeer { scannedBeer = nil; checkInBeer = b }
+            // Open the beer page once the scanner has gone, as only one modal shows at a time.
+            if let b = scannedBeer { scannedBeer = nil; scannedBeerToOpen = b }
         }) {
             BarcodeSearchSheet { scannedBeer = $0 }
         }
+        .navigationDestination(item: $scannedBeerToOpen) { BeerView(beer: $0) }
         .onAppear(perform: handleScanRequest)
         .onChange(of: scanRequests) { handleScanRequest() }
         .onChange(of: defaultSplitVenue?.id, initial: true) {
@@ -276,12 +276,16 @@ struct DiscoverView: View {
             }
             VStack(spacing: 0) {
                 ForEach(model.beerResults.prefix(20)) { b in
-                    Button {
-                        if let f = finding { finishing = Finishing(item: f, beer: b) } else { checkInBeer = b }
-                    } label: { BeerRow(beer: b) }
+                    Group {
+                        if let f = finding {
+                            Button { finishing = Finishing(item: f, beer: b) } label: { BeerRow(beer: b) }
+                        } else {
+                            NavigationLink(value: BeerBreweryRoute.beer(b)) { BeerRow(beer: b) }
+                        }
+                    }
                         .buttonStyle(TaproomRowStyle())
                         .taproomRowDivider()
-                        .accessibilityHint("Checks in this beer")
+                        .accessibilityHint(finding != nil ? "Finishes your saved check-in" : "Opens the beer's page")
                 }
             }
         }
