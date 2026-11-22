@@ -3,7 +3,8 @@ import SwiftUI
 /// Discover's "To check in" list: check-ins saved for later while offline. The rows to finish them
 /// appear only once offline mode is off and real Untappd responses have proven the connection
 /// good (`Connectivity.prove`), so a flaky signal doesn't put you in front of a check-in that
-/// fails. Until then it shows how many are waiting, and why.
+/// fails. Turning offline mode off yourself counts as that proof (`Connectivity.userWentOnline`).
+/// Until then it shows how many are waiting, and why.
 struct ToCheckInSection: View {
     /// Finish this saved check-in (it has a beer).
     var onCheckIn: (PendingCheckin) -> Void
@@ -23,7 +24,7 @@ struct ToCheckInSection: View {
                         Text("To check in").font(Taproom.sectionLabel)
                         TaproomCountBadge(count: items.count)
                     }
-                    if connectivity.offlineMode || !proven {
+                    if connectivity.offlineMode || !(proven || connectivity.userWentOnline) {
                         waiting
                     } else {
                         list
