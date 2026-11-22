@@ -405,6 +405,25 @@ final class FriendsTests: XCTestCase {
     }
 
     @MainActor
+    func testSuggestedFriendsAreRecentlyTaggedThenNearbyThenTheRest() async throws {
+        let all = (1...12).map { makeFriend($0) }
+        let u = all.map(\.user)
+        let store = await loadedStore(all, recent: [u[2], u[0]])
+
+        // Nearby: one also recently tagged (shown once, as recent), a duplicate, then others.
+        let nearby = [u[0], u[6], u[6], u[4]]
+        XCTAssertEqual(store.suggestedFriends(limit: 5, nearby: nearby).map(\.id), [3, 1, 7, 5, 10])
+        // Nobody nearby: topped up alphabetically, as before.
+        XCTAssertEqual(store.suggestedFriends(limit: 3).map(\.id), [3, 1, 10])
+        // Up to `limit` of each.
+        let many = Array(u[3...10])
+        XCTAssertEqual(store.suggestedFriends(limit: 2, nearby: many).map(\.id), [3, 1, 4, 5])
+
+        try await store.removeFriend(all[6])
+        XCTAssertFalse(store.suggestedFriends(nearby: nearby).contains { $0.id == 7 })
+    }
+
+    @MainActor
     func testLoadStartedBeforeARemovalCannotBringTheFriendBack() async throws {
         let all = (1...3).map { makeFriend($0) }
         let gate = Gate()

@@ -13,6 +13,8 @@ struct ProfileView: View {
     @Environment(AuthStore.self) private var auth
     @Environment(\.openURL) private var openURL
     @State private var info: UserInfo.Profile?
+    /// True once the initial `user/info` request has settled (or failed).
+    @State private var infoLoaded = false
     @State private var showingQR = false
     @State private var friendActionInFlight = false
     @State private var confirmingRemoval: UserInfo.Profile?
@@ -103,17 +105,23 @@ struct ProfileView: View {
         }
     }
 
+    private var isLoadingInfo: Bool { info == nil && !infoLoaded }
+
     /// The avatar and name centred as the hero, then the stats in a row.
     private var header: some View {
         VStack(spacing: 0) {
             VStack(spacing: 4) {
                 Avatar(url: info?.avatar ?? placeholder?.avatar, size: 96)
-                Text(info?.displayName ?? placeholder?.displayName ?? username)
+                let namePlaceholder = info == nil && placeholder == nil && isLoadingInfo
+                let displayName = info?.displayName ?? placeholder?.displayName ?? username
+                Text(namePlaceholder ? "Display Name" : displayName)
                     .font(.system(size: 26, weight: .heavy))
                     .tracking(-0.4)
                     .multilineTextAlignment(.center)
                     .padding(.top, 8)
+                    .redacted(reason: namePlaceholder ? .placeholder : [])
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityLabel(namePlaceholder ? "Loading profile" : displayName)
                 Text(["@" + (info?.userName ?? username), info?.location].compactMap { $0 }.joined(separator: " · "))
                     .font(.subheadline).foregroundStyle(Taproom.muted)
                     .multilineTextAlignment(.center)
@@ -141,10 +149,34 @@ struct ProfileView: View {
                 }
             }
 
+            let resolvedUsername = info?.userName ?? username
+            let resolvedDisplayName = info?.displayName ?? placeholder?.displayName ?? username
+            let isOwn = isAccountTab || (auth.username?.caseInsensitiveCompare(resolvedUsername) == .orderedSame)
+
             HStack(spacing: 0) {
                 stat(info?.totalCheckins, "Total")
-                stat(info?.totalBeers, "Unique")
-                stat(info?.totalBadges, "Badges")
+                NavigationLink(value: ProfileCollectionRoute.uniqueBeers(
+                    username: resolvedUsername,
+                    displayName: resolvedDisplayName,
+                    isOwnProfile: isOwn
+                )) {
+                    stat(info?.totalBeers, "Unique", chevron: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(isOwn ? "Shows your unique beers" : "Shows \(resolvedDisplayName)'s unique beers")
+                .accessibilityIdentifier("profile.stat.unique")
+
+                NavigationLink(value: ProfileCollectionRoute.badges(
+                    username: resolvedUsername,
+                    displayName: resolvedDisplayName,
+                    isOwnProfile: isOwn
+                )) {
+                    stat(info?.totalBadges, "Badges", chevron: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(isOwn ? "Shows your badges" : "Shows \(resolvedDisplayName)'s badges")
+                .accessibilityIdentifier("profile.stat.badges")
+
                 if isAccountTab {
                     let waiting = CheckInOptions.shared.requests.count
                     NavigationLink(value: ProfileRoute.friends) {
@@ -154,6 +186,7 @@ struct ProfileView: View {
                     .accessibilityHint(waiting > 0
                         ? "Shows your friends and \(waiting) waiting friend request\(waiting == 1 ? "" : "s")"
                         : "Shows your friends")
+                    .accessibilityIdentifier("profile.stat.friends")
                 } else {
                     stat(info?.totalFriends, "Friends")
                 }
@@ -163,7 +196,12 @@ struct ProfileView: View {
             .taproomRowDivider()
             .padding(.top, Taproom.sectionSpacing)
 
-            if isAccountTab { statisticsEntry.padding(.top, Taproom.sectionSpacing) }
+            VStack(spacing: 10) {
+                if isAccountTab { statisticsEntry }
+                listsEntry
+                venuesEntry(username: resolvedUsername, displayName: resolvedDisplayName, isOwnProfile: isOwn)
+            }
+            .padding(.top, Taproom.sectionSpacing)
 
             Text("Checkins").font(Taproom.sectionLabel)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -188,6 +226,56 @@ struct ProfileView: View {
             .taproomCard()
         }
         .buttonStyle(CardLinkStyle())
+        .accessibilityIdentifier("profile.statisticsEntry")
+    }
+
+    /// Opens the user's visited venues list, available on both own and other users' profiles.
+    private func venuesEntry(username: String, displayName: String, isOwnProfile: Bool) -> some View {
+        NavigationLink(value: ProfileCollectionRoute.venues(
+            username: username,
+            displayName: displayName,
+            isOwnProfile: isOwnProfile
+        )) {
+            HStack(spacing: 12) {
+                Image(systemName: "mappin.and.ellipse").font(.title3).foregroundStyle(Taproom.amber).frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Venues").font(.body.weight(.heavy))
+                    Text(isOwnProfile ? "Places you've checked in at" : "Places \(displayName) has checked in at")
+                        .font(.footnote).foregroundStyle(Taproom.muted)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(Taproom.muted)
+            }
+            .padding(.horizontal, 14).frame(minHeight: 60)
+            .taproomCard()
+        }
+        .buttonStyle(CardLinkStyle())
+        .accessibilityIdentifier("profile.venuesEntry")
+    }
+
+    /// Opens the user's Wish List and custom lists.
+    private var listsEntry: some View {
+        NavigationLink(
+            value: BeerBreweryRoute.userLists(
+                username: username,
+                displayName: isAccountTab ? nil : (info?.displayName ?? placeholder?.displayName)
+            )
+        ) {
+            HStack(spacing: 12) {
+                Image(systemName: "bookmark.fill").font(.title3).foregroundStyle(Taproom.amber).frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Lists").font(.body.weight(.heavy))
+                    Text(isAccountTab ? "Wish List and custom lists" : "Wish List and public lists")
+                        .font(.footnote).foregroundStyle(Taproom.muted)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(Taproom.muted)
+            }
+            .padding(.horizontal, 14).frame(minHeight: 60)
+            .taproomCard()
+        }
+        .buttonStyle(CardLinkStyle())
+        .accessibilityIdentifier("profile.listsEntry")
     }
 
     private var emptyText: String {
@@ -198,12 +286,14 @@ struct ProfileView: View {
 
     /// `badge` is how many friend requests are waiting: shown as an amber count by the number.
     private func stat(_ n: Int?, _ label: String, chevron: Bool = false, badge: Int = 0) -> some View {
-        VStack(spacing: 2) {
-            Text(n.map { $0.formatted() } ?? "–")
+        let placeholder = n == nil && isLoadingInfo
+        return VStack(spacing: 2) {
+            Text(placeholder ? "1,234" : (n.map { $0.formatted() } ?? "–"))
                 .font(.system(size: 22, weight: .heavy).monospacedDigit())
                 .tracking(-0.5)
                 .minimumScaleFactor(0.6)
                 .lineLimit(1)
+                .redacted(reason: placeholder ? .placeholder : [])
                 .overlay(alignment: .topTrailing) {
                     // Sits just past the number's trailing edge, centred on its top.
                     if badge > 0 {
@@ -222,6 +312,7 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(placeholder ? "\(label): loading" : "\(label): \(n.map { $0.formatted() } ?? "–")")
     }
 
     @ViewBuilder
@@ -415,6 +506,8 @@ struct ProfileView: View {
     }
 
     private func loadInfo() async {
+        if info == nil { infoLoaded = false }
+        defer { if !Task.isCancelled { infoLoaded = true } }
         // A fetch that began before a friend was removed or added doesn't know about it.
         let changeAtStart = CheckInOptions.shared.friendCountChange
         let current = { (p: UserInfo.Profile?) -> UserInfo.Profile? in

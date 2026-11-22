@@ -8,7 +8,7 @@ final class CheckinListModel {
         case friends
         case user(String)
         case venue(Int, friendsOnly: Bool)
-        case beer(Int)
+        case beer(Int, friendsOnly: Bool = false)
         case brewery(Int)
 
         func request(maxId: Int? = nil) -> APIRequest {
@@ -16,7 +16,7 @@ final class CheckinListModel {
             case .friends: .friendFeed(maxId: maxId)
             case .user(let u): .userCheckins(u, maxId: maxId)
             case .venue(let id, let friendsOnly): .venueCheckins(id, friendsOnly: friendsOnly, maxId: maxId)
-            case .beer(let id): .beerCheckins(id, maxId: maxId)
+            case .beer(let id, let friendsOnly): .beerCheckins(id, friendsOnly: friendsOnly, maxId: maxId)
             case .brewery(let id): .breweryCheckins(id, maxId: maxId)
             }
         }
@@ -45,6 +45,8 @@ final class CheckinListModel {
     private(set) var isRefreshing = false
     private(set) var isLoadingMore = false
     private(set) var reachedEnd = false
+    private(set) var ratingScore: Double?
+    private(set) var ratingCount: Int?
     private(set) var error: String?
     private(set) var moreError: String?
     /// Bumped at the start of each `reload()`, so views can reload anything they show alongside.
@@ -234,11 +236,15 @@ final class CheckinListModel {
         items = page.checkins
         nextMaxId = page.nextMaxId
         reachedEnd = page.checkins.isEmpty
+        ratingScore = page.ratingScore
+        ratingCount = page.ratingCount
         ingest(page.checkins)
     }
 
     /// Puts a fresh first page on top, keeping already-loaded older items if the two overlap.
     private func merge(fresh page: CheckinPage) {
+        ratingScore = page.ratingScore
+        ratingCount = page.ratingCount
         guard let oldestFresh = page.checkins.last?.id, let newestOld = items.first?.id, newestOld >= oldestFresh else {
             apply(page, replacing: true)
             return
