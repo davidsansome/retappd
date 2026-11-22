@@ -332,6 +332,66 @@ extension View {
     }
 }
 
+/// "Offline" beside a switch for the user's offline mode (`Connectivity.offlineMode`), amber
+/// when on like the Settings toggles. Only the user turns it off. Sits at the top right of a
+/// screen that searches or checks in (Discover, the check-in screen).
+struct TaproomOfflineSwitch: View {
+    @State private var connectivity = Connectivity.shared
+
+    var body: some View {
+        Toggle(isOn: $connectivity.offlineMode) {
+            Text("Offline")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(connectivity.offlineMode ? Taproom.ink : Taproom.muted)
+        }
+        .toggleStyle(.switch)
+        .tint(Taproom.amber)
+        .fixedSize()
+        .frame(minHeight: 44)
+        .accessibilityLabel("Offline mode")
+        .accessibilityHint("While it's on, nothing is sent to Untappd")
+        .sensoryFeedback(.selection, trigger: connectivity.offlineMode)
+    }
+}
+
+/// A card that tells you something about the app's state: an amber icon, a bold title and a
+/// muted message, with optional buttons under it. The offline banner and the slow-connection
+/// prompt on Discover.
+struct TaproomNotice<Actions: View>: View {
+    let systemImage: String
+    let title: String
+    let message: String
+    @ViewBuilder var actions: Actions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(Taproom.amber)
+                    .font(.body.weight(.semibold))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.subheadline.weight(.semibold))
+                    Text(message).font(.footnote).foregroundStyle(Taproom.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            actions
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .taproomCard()
+        .accessibilityElement(children: .contain)
+    }
+}
+
+extension TaproomNotice where Actions == EmptyView {
+    init(systemImage: String, title: String, message: String) {
+        self.init(systemImage: systemImage, title: title, message: message) { EmptyView() }
+    }
+}
+
 /// A pint glass filled to a rating, for showing (not setting) a score. `GlassRating` is the
 /// draggable one on the check-in screen.
 struct FilledGlass: View {
