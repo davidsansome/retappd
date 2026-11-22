@@ -93,6 +93,7 @@ final class Connectivity {
             guard newValue != storedOfflineMode else { return }
             storedOfflineMode = newValue
             defaults.set(newValue, forKey: Self.offlineModeKey)
+            applyOfflineMode(newValue)
             if newValue { proof.reset() }
         }
     }
@@ -103,6 +104,7 @@ final class Connectivity {
     private(set) var proof = ConnectionProof()
 
     @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let applyOfflineMode: (Bool) -> Void
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private let wait: (TimeInterval) async -> Void
     @ObservationIgnored private let probe: () async -> RequestOutcome
@@ -112,12 +114,15 @@ final class Connectivity {
     init(defaults: UserDefaults = .standard,
          now: @escaping () -> Date = Date.init,
          wait: @escaping (TimeInterval) async -> Void = { s in try? await Task.sleep(for: .seconds(s)) },
-         probe: (() async -> RequestOutcome)? = nil) {
+         probe: (() async -> RequestOutcome)? = nil,
+         applyOfflineMode: @escaping (Bool) -> Void = { UntappdAPI.shared.isOffline = $0 }) {
         self.defaults = defaults
+        self.applyOfflineMode = applyOfflineMode
         self.now = now
         self.wait = wait
         self.probe = probe ?? Connectivity.defaultProbe
         storedOfflineMode = defaults.bool(forKey: Self.offlineModeKey)
+        applyOfflineMode(storedOfflineMode)
     }
 
     /// Whether it's worth sending anything at all.
@@ -188,7 +193,10 @@ final class Connectivity {
         do {
             _ = try await UntappdAPI.shared.data(.userInfo(user))
         } catch let e as APIError {
-            if case .unauthorized = e { return .noResponse }
+            switch e {
+            case .unauthorized, .offline: return .noResponse
+            default: break  // the server answered, if with an error
+            }
         } catch {
             return .noResponse
         }

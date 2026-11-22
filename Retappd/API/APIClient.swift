@@ -6,6 +6,8 @@ enum APIError: LocalizedError {
     case server(code: Int, detail: String?)
     case unauthorized
     case decoding
+    /// The user has turned on offline mode, so nothing was sent.
+    case offline
 
     var errorDescription: String? {
         switch self {
@@ -13,6 +15,7 @@ enum APIError: LocalizedError {
         case .server(_, let d): d ?? "Untappd returned an error."
         case .unauthorized: "Your session has expired. Please sign in again."
         case .decoding: "Couldn't read the server's response."
+        case .offline: "Offline mode is on."
         }
     }
 }
@@ -76,6 +79,14 @@ final class UntappdAPI: @unchecked Sendable {
         set { lock.withLock { _onUnreadCounts = newValue } }
     }
 
+    private var _isOffline = false
+    /// Mirrors `Connectivity.offlineMode`: while it's true, `data(_:)` and Algolia searches throw
+    /// `APIError.offline` without sending anything.
+    var isOffline: Bool {
+        get { lock.withLock { _isOffline } }
+        set { lock.withLock { _isOffline = newValue } }
+    }
+
     private var _onRequestOutcome: (@Sendable (RequestOutcome) -> Void)?
     /// Called (on any thread) after every request: whether a response arrived, and how fast.
     /// Feeds `Connectivity`. A cancelled request reports nothing.
@@ -132,6 +143,7 @@ final class UntappdAPI: @unchecked Sendable {
 
     /// Fetches raw bytes and validates the envelope. Only valid responses are returned (and so cached).
     func data(_ r: APIRequest) async throws -> Data {
+        if isOffline { throw APIError.offline }
         let started = nextSequence()
         let clock = ContinuousClock()
         let begin = clock.now

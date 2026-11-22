@@ -53,6 +53,9 @@ final class DiscoverModel {
 
     // MARK: Nearby
 
+    /// Clears the slow-connection prompt without a new search ("Keep waiting").
+    func dismissSlow() { isSlow = false }
+
     func update(location: CLLocation?, force: Bool = false) async {
         guard let loc = location else { return }
         if !force, let last = lastQueried, last.distance(from: loc) < 20,
@@ -222,12 +225,18 @@ final class DiscoverModel {
     private(set) var beerResults: [BeerLite] = []
     private(set) var venueResults: [Venue] = []
     private(set) var isSearching = false
+    /// Set when a search's network results have taken longer than `slowAfter`, so Discover can
+    /// offer offline mode. Cleared by the next search, or when the results arrive.
+    private(set) var isSlow = false
+    /// How long a search may wait on the network before it counts as slow.
+    static let slowAfter: Duration = .seconds(8)
 
     /// Local results synchronously-ish, then network results (themselves cache-first).
     func search(_ raw: String) async {
         let q = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         searchGeneration += 1
         let generation = searchGeneration
+        isSlow = false
         guard !q.isEmpty else {
             beerResults = []
             venueResults = []
@@ -241,12 +250,24 @@ final class DiscoverModel {
         guard !Task.isCancelled, searchGeneration == generation else { return }
         beerResults = localBeers
         venueResults = localVenues
+        // Offline mode: what's on the phone is all there is. (Requests would throw anyway.)
+        guard !Connectivity.shared.offlineMode else {
+            isSearching = false
+            return
+        }
 
         // Debounce network work while typing; cancelled by the next keystroke.
         try? await Task.sleep(for: .milliseconds(200))
         guard !Task.isCancelled, searchGeneration == generation else { return }
         isSearching = true
-        defer { if searchGeneration == generation { isSearching = false } }
+        let watchdog = Task {
+            try? await Task.sleep(for: Self.slowAfter)
+            if !Task.isCancelled, searchGeneration == generation { isSlow = true }
+        }
+        defer {
+            watchdog.cancel()
+            if searchGeneration == generation { isSearching = false; isSlow = false }
+        }
 
         async let b: Void = searchBeersRemote(q, local: localBeers, generation: generation)
         async let v: Void = searchVenuesRemote(q, loc: loc, local: localVenues, generation: generation)
