@@ -286,8 +286,7 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
     @ObservationIgnored private let notificationAuthStatus: () async -> UNAuthorizationStatus
     @ObservationIgnored private let scheduleFailureNotification: (UUID, String) -> Void
     @ObservationIgnored private let onSuccessHaptic: () -> Void
-    @ObservationIgnored private let onCheckinSaved: @MainActor (Int) -> Void
-    @ObservationIgnored private let onDiscardUnsavedCheckin: () -> Void
+    @ObservationIgnored private let onCheckinSaved: @MainActor (Int, String, String) -> Void
     @ObservationIgnored private let toastDuration: Duration
 
     @ObservationIgnored private var started = false
@@ -321,8 +320,11 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         },
         scheduleFailureNotification: @escaping (UUID, String) -> Void = CheckinQueue.defaultScheduleFailureNotification,
         onSuccessHaptic: @escaping () -> Void = { UINotificationFeedbackGenerator().notificationOccurred(.success) },
-        onCheckinSaved: @escaping @MainActor (Int) -> Void = { HadBeers.shared.add($0) },
-        onDiscardUnsavedCheckin: @escaping () -> Void = {},
+        onCheckinSaved: @escaping @MainActor (Int, String, String) -> Void = { bid, name, brewery in
+            HadBeers.shared.add(bid)
+            let had = BeerLite(bid: bid, name: name, brewery: brewery, hasHad: true)
+            Task { await LocalIndex.shared.add(beers: [had]) }
+        },
         toastDuration: Duration = .seconds(2)
     ) {
         self.transport = transport
@@ -337,7 +339,6 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         self.scheduleFailureNotification = scheduleFailureNotification
         self.onSuccessHaptic = onSuccessHaptic
         self.onCheckinSaved = onCheckinSaved
-        self.onDiscardUnsavedCheckin = onDiscardUnsavedCheckin
         self.toastDuration = toastDuration
         self.transport.delegate = self
     }
@@ -551,20 +552,17 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
     }
 
     func discard(_ id: UUID) {
-        let discarded = jobs.first { $0.id == id }
         jobs.removeAll { $0.id == id }
         editingCheckins.removeValue(forKey: id)
         refreshedUploadURLJobIDs.remove(id)
         receivedCompletionJobIDs.remove(id)
         persistJobs()
         removeJobDirectory(id)
-        if let discarded, !discarded.checkinAlreadySaved, !discarded.isEdit {
-            onDiscardUnsavedCheckin()
-        }
         Task { await transport.cancelTasks(matching: id) }
     }
 
     func cancelAllForSignOut() {
+        let oldJobIDs = jobs.map(\.id)
         jobs.removeAll()
         editingCheckins.removeAll()
         refreshedUploadURLJobIDs.removeAll()
@@ -572,8 +570,13 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         toastClearTask?.cancel()
         toastClearTask = nil
         completedToast = nil
-        try? FileManager.default.removeItem(at: storageDirectory)
-        Task { await transport.cancelAllTasks() }
+        persistJobs()
+        for id in oldJobIDs { removeJobDirectory(id) }
+        Task {
+            for id in oldJobIDs {
+                await transport.cancelTasks(matching: id)
+            }
+        }
     }
 
     // MARK: Step Execution
@@ -582,7 +585,14 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         await withBackgroundTaskAsync("com.davidsansome.retappd.checkin.enqueue") {
             if let photo {
                 guard let jpeg = await imageEncoder(photo) else {
-                    markFailed(jobID: jobID, step: .checkin, message: "Couldn't prepare the photo for upload.")
+                    if let idx = jobs.firstIndex(where: { $0.id == jobID }) {
+                        jobs[idx].hasPhoto = false
+                    }
+                    markFailed(
+                        jobID: jobID,
+                        step: .checkin,
+                        message: "Couldn't prepare the photo for upload. Retry will check in without the photo."
+                    )
                     return
                 }
                 guard jobs.contains(where: { $0.id == jobID }) else { return }
@@ -590,7 +600,14 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
                     try ensureJobDirectory(jobID)
                     try writeProtected(jpeg, to: photoFileURL(for: jobID))
                 } catch {
-                    markFailed(jobID: jobID, step: .checkin, message: "Couldn't save the photo for upload.")
+                    if let idx = jobs.firstIndex(where: { $0.id == jobID }) {
+                        jobs[idx].hasPhoto = false
+                    }
+                    markFailed(
+                        jobID: jobID,
+                        step: .checkin,
+                        message: "Couldn't save the photo for upload. Retry will check in without the photo."
+                    )
                     return
                 }
             }
@@ -601,6 +618,10 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
 
     private func startStep1(jobID: UUID) {
         guard let idx = jobs.firstIndex(where: { $0.id == jobID }) else { return }
+        if jobs[idx].hasPhoto && !FileManager.default.fileExists(atPath: photoFileURL(for: jobID).path) {
+            jobs[idx].hasPhoto = false
+            persistJobs()
+        }
         let job = jobs[idx]
 
         let apiRequest: APIRequest
@@ -734,19 +755,24 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         error: Error?
     ) {
         guard let (jobID, stepTag) = Self.parseTaskDescription(taskDescription) else { return }
-        receivedCompletionJobIDs.insert(jobID)
         guard let job = jobs.first(where: { $0.id == jobID }) else { return }
 
         withBackgroundTask("com.davidsansome.retappd.checkin.transition") {
+            let handled: Bool
             switch stepTag {
             case .step1:
-                handleStep1Completion(job: job, response: response, data: data, error: error)
+                handled = handleStep1Completion(job: job, response: response, data: data, error: error)
             case .step2:
-                handleStep2Completion(job: job, response: response, error: error)
+                handled = handleStep2Completion(job: job, response: response, error: error)
             case .step2refresh:
-                handleStep2RefreshCompletion(job: job, response: response, data: data, error: error)
+                handled = handleStep2RefreshCompletion(job: job, response: response, data: data, error: error)
             case .step3:
-                handleStep3Completion(job: job, response: response, data: data, error: error)
+                handled = handleStep3Completion(job: job, response: response, data: data, error: error)
+            }
+            // Only record after the callback actually processed a live phase (not a stale callback),
+            // and only while the job still exists (finishJob clears it).
+            if handled && jobs.contains(where: { $0.id == jobID }) {
+                receivedCompletionJobIDs.insert(jobID)
             }
         }
     }
@@ -766,7 +792,8 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
 
     // MARK: Step Completion Handlers
 
-    private func handleStep1Completion(job: PendingCheckin, response: HTTPURLResponse?, data: Data, error: Error?) {
+    @discardableResult
+    private func handleStep1Completion(job: PendingCheckin, response: HTTPURLResponse?, data: Data, error: Error?) -> Bool {
         // Only accept Step 1 completions while submitting, or when recovering from a
         // cold-launch reconcile() that marked `.submittingCheckin` failed before the
         // queued delegate callback arrived. Ignores stale/duplicate Step 1 responses.
@@ -774,13 +801,23 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         case .submittingCheckin, .failed(step: .checkin, _):
             break
         default:
-            return
+            return false
         }
 
         if let error {
-            if error.isCancellation { return }
-            markFailed(jobID: job.id, step: .checkin, message: error.localizedDescription)
-            return
+            if error.isCancellation {
+                // App-initiated cancellations remove the job before cancelling, so a cancellation
+                // arriving for a still-present job came from the system (e.g. force-quit).
+                markFailed(
+                    jobID: job.id,
+                    step: .checkin,
+                    message: "Check-in was interrupted while sending. Check your feed before retrying.",
+                    notify: false
+                )
+            } else {
+                markFailed(jobID: job.id, step: .checkin, message: error.localizedDescription)
+            }
+            return true
         }
 
         let decoded: CheckinAddResponse
@@ -789,16 +826,17 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
             decoded = try UntappdAPI.decode(CheckinAddResponse.self, from: data)
         } catch {
             markFailed(jobID: job.id, step: .checkin, message: error.localizedDescription)
-            return
+            return true
         }
 
         if case .new = job.kind {
-            onCheckinSaved(job.beerBid)
+            onCheckinSaved(job.beerBid, job.beerName, job.breweryName)
+            notificationCenter.post(name: .didCheckIn, object: nil)
         }
 
         guard job.hasPhoto else {
             finishJob(job, photoDestinationURL: nil)
-            return
+            return true
         }
 
         let checkinId: Int?
@@ -809,14 +847,16 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
 
         guard let checkinId, let uploadURL = decoded.photoUploadURL, let destinationURL = decoded.photoDestinationURL else {
             markFailed(jobID: job.id, step: .checkin, message: APIError.decoding.localizedDescription)
-            return
+            return true
         }
 
         startStep2(jobID: job.id, checkinId: checkinId, uploadURL: uploadURL, destinationURL: destinationURL)
+        return true
     }
 
-    private func handleStep2Completion(job: PendingCheckin, response: HTTPURLResponse?, error: Error?) {
-        guard case .uploadingPhoto(let checkinId, let uploadURL, let destinationURL) = job.phase else { return }
+    @discardableResult
+    private func handleStep2Completion(job: PendingCheckin, response: HTTPURLResponse?, error: Error?) -> Bool {
+        guard case .uploadingPhoto(let checkinId, let uploadURL, let destinationURL) = job.phase else { return false }
         let failedStep = PendingCheckin.FailedStep.photoUpload(
             checkinId: checkinId,
             uploadURL: uploadURL,
@@ -824,9 +864,17 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         )
 
         if let error {
-            if error.isCancellation { return }
-            markFailed(jobID: job.id, step: failedStep, message: error.localizedDescription)
-            return
+            if error.isCancellation {
+                markFailed(
+                    jobID: job.id,
+                    step: failedStep,
+                    message: "Photo upload was interrupted. Tap Retry to try again.",
+                    notify: false
+                )
+            } else {
+                markFailed(jobID: job.id, step: failedStep, message: error.localizedDescription)
+            }
+            return true
         }
 
         let status = response?.statusCode ?? 0
@@ -838,19 +886,21 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
                 fallbackUploadURL: uploadURL,
                 fallbackDestinationURL: destinationURL
             )
-            return
+            return true
         }
 
         guard (200..<300).contains(status) else {
             markFailed(jobID: job.id, step: failedStep, message: APIError.http(status).localizedDescription)
-            return
+            return true
         }
 
         startStep3(jobID: job.id, checkinId: checkinId, destinationURL: destinationURL)
+        return true
     }
 
-    private func handleStep2RefreshCompletion(job: PendingCheckin, response: HTTPURLResponse?, data: Data, error: Error?) {
-        guard case .uploadingPhoto(let checkinId, let oldUploadURL, let oldDestinationURL) = job.phase else { return }
+    @discardableResult
+    private func handleStep2RefreshCompletion(job: PendingCheckin, response: HTTPURLResponse?, data: Data, error: Error?) -> Bool {
+        guard case .uploadingPhoto(let checkinId, let oldUploadURL, let oldDestinationURL) = job.phase else { return false }
         let failedStep = PendingCheckin.FailedStep.photoUpload(
             checkinId: checkinId,
             uploadURL: oldUploadURL,
@@ -858,9 +908,17 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         )
 
         if let error {
-            if error.isCancellation { return }
-            markFailed(jobID: job.id, step: failedStep, message: error.localizedDescription)
-            return
+            if error.isCancellation {
+                markFailed(
+                    jobID: job.id,
+                    step: failedStep,
+                    message: "Photo upload was interrupted. Tap Retry to try again.",
+                    notify: false
+                )
+            } else {
+                markFailed(jobID: job.id, step: failedStep, message: error.localizedDescription)
+            }
+            return true
         }
 
         do {
@@ -874,26 +932,37 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         } catch {
             markFailed(jobID: job.id, step: failedStep, message: error.localizedDescription)
         }
+        return true
     }
 
-    private func handleStep3Completion(job: PendingCheckin, response: HTTPURLResponse?, data: Data, error: Error?) {
-        guard case .completingPhoto(let checkinId, let destinationURL) = job.phase else { return }
+    @discardableResult
+    private func handleStep3Completion(job: PendingCheckin, response: HTTPURLResponse?, data: Data, error: Error?) -> Bool {
+        guard case .completingPhoto(let checkinId, let destinationURL) = job.phase else { return false }
         let failedStep = PendingCheckin.FailedStep.photoComplete(checkinId: checkinId, destinationURL: destinationURL)
 
         if let error {
-            if error.isCancellation { return }
-            markFailed(jobID: job.id, step: failedStep, message: error.localizedDescription)
-            return
+            if error.isCancellation {
+                markFailed(
+                    jobID: job.id,
+                    step: failedStep,
+                    message: "Photo completion was interrupted. Tap Retry to finish attaching the photo.",
+                    notify: false
+                )
+            } else {
+                markFailed(jobID: job.id, step: failedStep, message: error.localizedDescription)
+            }
+            return true
         }
 
         do {
             try validateAPIResponse(data: data, response: response)
         } catch {
             markFailed(jobID: job.id, step: failedStep, message: error.localizedDescription)
-            return
+            return true
         }
 
         finishJob(job, photoDestinationURL: destinationURL)
+        return true
     }
 
     // MARK: Completion & Failure
@@ -907,7 +976,10 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
 
         switch job.kind {
         case .new:
-            notificationCenter.post(name: .didCheckIn, object: nil)
+            // Step 1 already posted `.didCheckIn`; post again once the photo finishes so feeds show it.
+            if job.hasPhoto {
+                notificationCenter.post(name: .didCheckIn, object: nil)
+            }
             showToast("Checked in \(job.beerName)")
         case .edit(let draft):
             if var updated = editingCheckins.removeValue(forKey: job.id) {
@@ -932,13 +1004,13 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         }
     }
 
-    private func markFailed(jobID: UUID, step: PendingCheckin.FailedStep, message: String) {
+    private func markFailed(jobID: UUID, step: PendingCheckin.FailedStep, message: String, notify: Bool = true) {
         guard let idx = jobs.firstIndex(where: { $0.id == jobID }) else { return }
         jobs[idx].phase = .failed(step: step, message: message)
         let beerName = jobs[idx].beerName
         persistJobs()
 
-        if !isAppActive() {
+        if notify && !isAppActive() {
             pendingBackgroundWorkCount += 1
             Task { [weak self] in
                 guard let self else { return }
@@ -974,8 +1046,10 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
 
     private func buildAPIUploadRequest(_ r: APIRequest) -> (URLRequest, Data) {
         var req = UntappdAPI.shared.urlRequest(r)
-        if req.value(forHTTPHeaderField: "Authorization") == nil, let token = tokenProvider() {
+        if let token = tokenProvider() {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        } else {
+            req.setValue(nil, forHTTPHeaderField: "Authorization")
         }
         let body = req.httpBody ?? Data()
         req.httpBody = nil

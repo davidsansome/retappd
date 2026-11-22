@@ -54,7 +54,7 @@ struct CheckinQueueBanner: View {
             Text("Your check-in for \(job.beerName) hasn't been saved yet.")
         }
         .confirmationDialog(
-            "Cancel check-in?",
+            confirmCancelJob?.checkinAlreadySaved == true ? "Cancel photo upload?" : "Cancel check-in?",
             isPresented: Binding(
                 get: { confirmCancelJob != nil },
                 set: { if !$0 { confirmCancelJob = nil } }
@@ -62,7 +62,7 @@ struct CheckinQueueBanner: View {
             titleVisibility: .visible,
             presenting: confirmCancelJob
         ) { job in
-            Button("Cancel check-in", role: .destructive) {
+            Button(job.checkinAlreadySaved ? "Cancel photo upload" : "Cancel check-in", role: .destructive) {
                 queue.cancel(job.id)
                 confirmCancelJob = nil
             }
@@ -70,7 +70,9 @@ struct CheckinQueueBanner: View {
                 confirmCancelJob = nil
             }
         } message: { job in
-            Text("If \(job.beerName) already reached Untappd, it won't be deleted automatically.")
+            Text(job.checkinAlreadySaved
+                 ? "Your check-in for \(job.beerName) is already saved, and only the photo upload will be cancelled."
+                 : "If \(job.beerName) already reached Untappd, it won't be deleted automatically.")
         }
     }
 
@@ -96,10 +98,10 @@ struct CheckinQueueBanner: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
             Button {
-                if job.phase == .submittingCheckin {
-                    confirmCancelJob = job
-                } else {
+                if job.phase == .preparing {
                     queue.cancel(job.id)
+                } else {
+                    confirmCancelJob = job
                 }
             } label: {
                 Image(systemName: "xmark")
@@ -109,7 +111,7 @@ struct CheckinQueueBanner: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Cancel \(job.beerName)")
+            .accessibilityLabel(job.checkinAlreadySaved ? "Cancel photo upload for \(job.beerName)" : "Cancel \(job.beerName)")
             .accessibilityIdentifier("checkinQueue.cancel")
             .padding(.trailing, -10)
         }

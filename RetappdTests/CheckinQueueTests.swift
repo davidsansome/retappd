@@ -153,8 +153,7 @@ final class CheckinQueueTests: XCTestCase {
                 self?.scheduledNotifications.append((id, beer))
             },
             onSuccessHaptic: { [weak self] in self?.hapticCount += 1 },
-            onCheckinSaved: { [weak self] bid in self?.savedBeerIDs.append(bid) },
-            onDiscardUnsavedCheckin: {},
+            onCheckinSaved: { [weak self] bid, _, _ in self?.savedBeerIDs.append(bid) },
             toastDuration: .milliseconds(50)
         )
     }
@@ -309,7 +308,7 @@ final class CheckinQueueTests: XCTestCase {
                            json: #"{"meta":{"code":200},"response":{"result":"success"}}"#)
 
         XCTAssertTrue(queue.jobs.isEmpty)
-        XCTAssertEqual(didCheckInCount, 1)
+        XCTAssertEqual(didCheckInCount, 2, "Expected .didCheckIn after Step 1 save and after Step 3 photo completion")
         XCTAssertFalse(FileManager.default.fileExists(atPath: tempDir.appendingPathComponent(jobID.uuidString).path))
     }
 
@@ -608,20 +607,23 @@ final class CheckinQueueTests: XCTestCase {
 
     // MARK: (k) cancelAllForSignOut cancels & wipes jobs
 
-    func testCancelAllForSignOutCancelsAndWipesJobs() async {
+    func testCancelAllForSignOutCancelsAndWipesJobs() async throws {
         let queue = makeQueue()
-        _ = queue.enqueueNew(sampleDraft(), beerName: "IPA", breweryName: "Brew",
-                             username: "alice", photo: sampleImage())
+        let jobID = queue.enqueueNew(sampleDraft(), beerName: "IPA", breweryName: "Brew",
+                                     username: "alice", photo: sampleImage())
         await waitForUploads(count: 1)
         XCTAssertEqual(queue.jobs.count, 1)
 
         queue.cancelAllForSignOut()
-        await waitUntil { self.transport.cancelAllCount == 1 }
+        await waitUntil { self.transport.cancelledJobIDs.contains(jobID) }
 
         XCTAssertTrue(queue.jobs.isEmpty)
         XCTAssertNil(queue.completedToast)
-        XCTAssertEqual(transport.cancelAllCount, 1)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: tempDir.path))
+        XCTAssertTrue(transport.cancelledJobIDs.contains(jobID))
+        XCTAssertEqual(transport.cancelAllCount, 0, "Should cancel only snapshotted jobs, not future sessions")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tempDir.appendingPathComponent(jobID.uuidString).path))
+        let jobsData = try Data(contentsOf: tempDir.appendingPathComponent("jobs.json"))
+        XCTAssertEqual(try JSONDecoder().decode([PendingCheckin].self, from: jobsData), [])
     }
 
     // MARK: (l) Edit check-in flow posts .checkinEdited
@@ -789,7 +791,6 @@ final class CheckinQueueTests: XCTestCase {
             },
             tokenProvider: { "test-token" },
             notificationCenter: center,
-            onDiscardUnsavedCheckin: {},
             toastDuration: .milliseconds(50)
         )
 
@@ -840,7 +841,6 @@ final class CheckinQueueTests: XCTestCase {
             scheduleFailureNotification: { [weak self] id, beer in
                 self?.scheduledNotifications.append((id, beer))
             },
-            onDiscardUnsavedCheckin: {},
             toastDuration: .milliseconds(50)
         )
 
@@ -937,5 +937,58 @@ final class CheckinQueueTests: XCTestCase {
     func testBackgroundTransportHasBoundedResourceTimeout() {
         XCTAssertGreaterThan(BackgroundURLSessionTransport.resourceTimeout, 0)
         XCTAssertLessThanOrEqual(BackgroundURLSessionTransport.resourceTimeout, 30 * 60)
+    }
+
+    func testSystemCancellationDuringReconcileMarksFailedInsteadOfHanging() async {
+        let queue1 = makeQueue()
+        let jobID = queue1.enqueueNew(sampleDraft(), beerName: "Lager", breweryName: "Brew",
+                                      username: "alice", photo: sampleImage())
+        await waitForUploads(count: 1)
+        let step1Desc = transport.uploads[0].taskDescription
+
+        // Simulate force-quit: iOS delivers NSURLErrorCancelled while reconcile() holds activeTasks().
+        appActive = false
+        let transport2 = MockCheckinTransport()
+        transport2.activeTaskList = []
+        transport2.holdActiveTasks = true
+        let queue2 = makeQueue(transport: transport2)
+        queue2.start()
+        await waitUntil { transport2.isHoldingActiveTasks }
+
+        transport2.complete(taskDescription: step1Desc, error: URLError(.cancelled))
+        transport2.releaseActiveTasks()
+        await queue2.reconcile()
+
+        XCTAssertEqual(queue2.jobs.first?.id, jobID)
+        XCTAssertEqual(queue2.jobs.first?.phase, .failed(
+            step: .checkin,
+            message: "Check-in was interrupted while sending. Check your feed before retrying."
+        ))
+        XCTAssertTrue(scheduledNotifications.isEmpty)
+    }
+
+    func testImageEncodeFailureDowngradesToNoPhotoSoRetrySucceeds() async {
+        let queue = makeQueue(jpegBytes: nil)
+        let jobID = queue.enqueueNew(sampleDraft(), beerName: "Pilsner", breweryName: "Brew",
+                                     username: "alice", photo: sampleImage())
+        await waitUntil { self.queueFailed(queue, jobID) }
+
+        XCTAssertEqual(queue.jobs.first?.hasPhoto, false)
+        XCTAssertEqual(queue.jobs.first?.phase, .failed(
+            step: .checkin,
+            message: "Couldn't prepare the photo for upload. Retry will check in without the photo."
+        ))
+
+        queue.retry(jobID)
+        XCTAssertEqual(transport.uploads.count, 1)
+        let body = String(data: transport.uploads[0].fileBytes ?? Data(), encoding: .utf8) ?? ""
+        XCTAssertTrue(body.contains("is_photo=false"))
+
+        transport.complete(
+            taskDescription: transport.uploads[0].taskDescription,
+            status: 200,
+            json: #"{"meta":{"code":200},"response":{"result":"success","checkin_id":901}}"#
+        )
+        XCTAssertTrue(queue.jobs.isEmpty)
     }
 }
