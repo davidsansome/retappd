@@ -73,6 +73,7 @@ struct RootTabs: View {
     @State private var page = Page.feed
     @State private var feedPath = NavigationPath()
     @State private var profilePath = NavigationPath()
+    @State private var discoverPath = NavigationPath()
     @State private var backgroundedAt: Date?
     /// Bumped to focus Discover's search field, or open its barcode scanner, from the tab bar.
     @State private var searchRequests = 0
@@ -101,7 +102,7 @@ struct RootTabs: View {
                 .toolbarVisibility(.hidden, for: .tabBar)
             }
             Tab("Discover", systemImage: "mappin.and.ellipse", value: .discover) {
-                NavigationStack {
+                NavigationStack(path: $discoverPath) {
                     DiscoverView(model: discover, searchRequests: searchRequests, scanRequests: scanRequests)
                         .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
                         .beerAndBreweryDestinations()
@@ -270,6 +271,7 @@ extension RootTabs {
             // so don't make the card wait for a connection check first.
             Connectivity.shared.userAskedToCheckIn()
             page = .discover
+            discoverPath = NavigationPath()  // back to the top, where the card is
         case .checkin(let id):
             page = .feed
             feedPath = NavigationPath()
