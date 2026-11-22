@@ -100,10 +100,15 @@ final class Connectivity {
     }
     private var storedOfflineMode: Bool
 
-    /// True after the user turns offline mode off, until the network path changes or offline
-    /// mode goes back on. Switching back online yourself says you think the connection is good,
-    /// so the "To check in" list shows at once instead of waiting for `prove(_:)`.
+    /// True after the user turns offline mode off or taps a saved check-ins notification, until
+    /// the network path changes or offline mode goes back on. Either says you want to check in
+    /// now, so the "To check in" list shows at once instead of waiting for `prove(_:)`.
     private(set) var userWentOnline = false
+
+    /// The user opened a saved check-ins notification: show the list now (unless offline mode is on).
+    func userAskedToCheckIn() {
+        if !offlineMode { userWentOnline = true }
+    }
 
     /// From `NWPathMonitor`: nil until it has reported.
     private(set) var pathSatisfied: Bool?

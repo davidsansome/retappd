@@ -158,6 +158,19 @@ final class ConnectivityTests: XCTestCase {
         XCTAssertFalse(c.userWentOnline)
     }
 
+    func testOpeningTheNotificationCountsAsGoingOnlineUnlessOffline() {
+        let c = make(FakeClock()) { .noResponse }
+        c.offlineMode = true
+        c.userAskedToCheckIn()
+        XCTAssertFalse(c.userWentOnline)
+        c.offlineMode = false
+        c.pathChanged(satisfied: true)
+        c.pathChanged(satisfied: false)
+        XCTAssertFalse(c.userWentOnline)
+        c.userAskedToCheckIn()
+        XCTAssertTrue(c.userWentOnline)
+    }
+
     func testAPathChangeStartsAgain() {
         let clock = FakeClock()
         let c = make(clock) { .noResponse }
