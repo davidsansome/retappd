@@ -10,6 +10,8 @@ struct ToCheckInSection: View {
     var onFind: (PendingCheckin) -> Void
     @State private var pending = PendingCheckins.shared
     @State private var connectivity = Connectivity.shared
+    /// The saved check-in whose remove button was tapped, awaiting confirmation.
+    @State private var removing: PendingCheckin?
 
     private var items: [PendingCheckin] { pending.items }
 
@@ -33,6 +35,13 @@ struct ToCheckInSection: View {
                      ? "Offline mode is on. Turn it off to check these in."
                      : "Check-ins post at the time you finish them. Ones more than an hour late start “LCI”.")
                     .font(.caption).foregroundStyle(Taproom.muted)
+            }
+            .confirmationDialog("Remove “\(removing?.title ?? "")” from your list?",
+                                isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+                                titleVisibility: .visible, presenting: removing) { item in
+                Button("Remove", role: .destructive) { withAnimation { pending.remove(item.id) } }
+            } message: { _ in
+                Text("It won't be checked in.")
             }
         }
     }
@@ -61,9 +70,17 @@ struct ToCheckInSection: View {
                     .disabled(connectivity.offlineMode)
             } else {
                 Button("Find") { onFind(item) }
-                    .buttonStyle(TaproomOutlineButton())
-                    .fixedSize()
+                    .buttonStyle(TaproomOutlineButton(fullWidth: false))
             }
+            Button { removing = item } label: {
+                Image(systemName: "xmark")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Taproom.muted)
+                    .frame(width: 32, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Remove from list")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
