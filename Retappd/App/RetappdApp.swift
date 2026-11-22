@@ -127,6 +127,7 @@ struct RootTabs: View {
             open(route)
         }
         .task { await HadBeers.shared.refresh() }
+        .task { await VenueHistory.shared.refresh() }
         .task { await CheckInOptions.shared.loadAccountSettings() }
         .task { await CheckInOptions.shared.loadRecentVenues(username: username) }
         .task { await CheckInOptions.shared.loadFriends() }
@@ -171,6 +172,7 @@ struct RootTabs: View {
                 Task { await NotificationService.shared.appBecameActive() }
                 Task { await unread.refresh() }
                 Task { await HadBeers.shared.refresh() }
+                Task { await VenueHistory.shared.refresh() }
                 if let at = backgroundedAt, Date.now.timeIntervalSince(at) >= Self.staleAfter {
                     reopenedAfterAWhile()
                 }

@@ -72,6 +72,7 @@ final class AuthStore {
         // First and synchronously: the ticks go at once, an in-flight sync is abandoned, and a
         // sign-in straight afterwards can't pick up this account's list.
         HadBeers.shared.clear()
+        VenueHistory.shared.clear()
         Keychain.delete("access_token")
         UserDefaults.standard.removeObject(forKey: "username")
         UntappdAPI.shared.token = nil

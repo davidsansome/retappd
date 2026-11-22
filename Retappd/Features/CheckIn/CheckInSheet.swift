@@ -594,6 +594,7 @@ struct CheckInSheet: View {
         had.hasHad = true
         await LocalIndex.shared.add(beers: [had])
         HadBeers.shared.add(beer.bid)
+        if let venue { VenueHistory.shared.record(venue, checkinId: r.checkinId) }
         let uploaded = await upload(jpeg, r, checkinId: r.checkinId)
         NotificationCenter.default.post(name: .didCheckIn, object: nil)
         if uploaded { dismiss() }
