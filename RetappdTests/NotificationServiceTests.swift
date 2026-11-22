@@ -342,6 +342,7 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(route("tag", id: "7"), .checkin(7))
         XCTAssertEqual(route("comment_tag", id: 9), .checkin(9))
         XCTAssertEqual(route("friend_request"), .friendRequest)
+        XCTAssertEqual(route("pending_checkins"), .pendingCheckins)
         XCTAssertNil(route("toast"), "check-in types need an id")
         XCTAssertNil(route("mystery", id: 1))
         XCTAssertNil(NotificationRoute(userInfo: ["aps": [:]]))

@@ -26,6 +26,10 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         # Where the notification relay lives (see server/CONTRACT.md).
         RetappdNotifyBaseURL: "https://retappd-notify.davidsansome.workers.dev"
+        # Background refresh, to notice the connection is back for check-ins saved offline
+        # (PendingReminders).
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [com.davidsansome.retappd.pending-checkins]
     settings:
       configs:
         Debug:

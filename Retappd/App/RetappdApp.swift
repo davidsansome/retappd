@@ -132,6 +132,7 @@ struct RootTabs: View {
         }
         .task { await HadBeers.shared.refresh() }
         .task { await VenueHistory.shared.refresh() }
+        .onChange(of: PendingCheckins.shared.items) { _, items in PendingReminders.shared.update(items) }
         .task { await CheckInOptions.shared.loadAccountSettings() }
         .task { await CheckInOptions.shared.loadRecentVenues(username: username) }
         .task { await CheckInOptions.shared.loadFriends() }
@@ -171,6 +172,7 @@ struct RootTabs: View {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background:
+                PendingReminders.shared.update(PendingCheckins.shared.items)
                 backgroundedAt = .now
             case .active:
                 Task { await NotificationService.shared.appBecameActive() }
@@ -254,6 +256,9 @@ extension RootTabs {
         switch route {
         case .friendRequest:
             openFriends()
+        case .pendingCheckins:
+            // The "To check in" card leads Discover.
+            page = .discover
         case .checkin(let id):
             page = .feed
             feedPath = NavigationPath()
