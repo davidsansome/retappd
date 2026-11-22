@@ -10,6 +10,10 @@ struct RetappdApp: App {
 
     init() {
         Task { await LocalIndex.shared.warmUp() }
+        UntappdAPI.shared.onRequestOutcome = { outcome in
+            Task { @MainActor in Connectivity.shared.record(outcome) }
+        }
+        Connectivity.shared.startMonitoring()
     }
 
     var body: some Scene {
