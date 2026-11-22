@@ -732,7 +732,8 @@ struct CheckInSheet: View {
             containerId: serving?.id,
             taggedUserIds: tagged.map(\.id),
             purchaseFoursquareId: shop?.foursquareId,
-            flavorIds: flavors.map(\.id)
+            flavorIds: flavors.map(\.id),
+            venue: venue
         )
         let username = discover.me?.userName ?? UserDefaults.standard.string(forKey: "username") ?? ""
         CheckinQueue.shared.enqueueNew(draft, beerName: beer.name, breweryName: beer.brewery,

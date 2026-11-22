@@ -4,8 +4,8 @@ import SwiftUI
 /// have failed and need a retry, or just finished. Collapses to zero height when empty.
 struct CheckinQueueBanner: View {
     let queue: CheckinQueue
-    @State private var confirmDiscardJob: PendingCheckin?
-    @State private var confirmCancelJob: PendingCheckin?
+    @State private var confirmDiscardJob: QueuedCheckin?
+    @State private var confirmCancelJob: QueuedCheckin?
 
     private var isVisible: Bool { !queue.jobs.isEmpty || queue.completedToast != nil }
 
@@ -77,7 +77,7 @@ struct CheckinQueueBanner: View {
     }
 
     @ViewBuilder
-    private func jobCard(_ job: PendingCheckin) -> some View {
+    private func jobCard(_ job: QueuedCheckin) -> some View {
         switch job.phase {
         case .preparing, .submittingCheckin:
             activeRow(job.isEdit ? "Saving \(job.beerName)…" : "Checking in \(job.beerName)…", job: job)
@@ -88,7 +88,7 @@ struct CheckinQueueBanner: View {
         }
     }
 
-    private func activeRow(_ text: String, job: PendingCheckin) -> some View {
+    private func activeRow(_ text: String, job: QueuedCheckin) -> some View {
         HStack(spacing: 10) {
             ProgressView()
                 .tint(Taproom.amber)
@@ -122,7 +122,7 @@ struct CheckinQueueBanner: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func failedCard(_ job: PendingCheckin, message: String) -> some View {
+    private func failedCard(_ job: QueuedCheckin, message: String) -> some View {
         let title = job.checkinAlreadySaved
             ? "Photo failed for \(job.beerName)"
             : (job.isEdit ? "Couldn't save \(job.beerName)" : "Couldn't check in \(job.beerName)")

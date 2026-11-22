@@ -113,6 +113,7 @@ final class CheckinQueueTests: XCTestCase {
     private var scheduledNotifications: [(UUID, String)] = []
     private var hapticCount = 0
     private var savedBeerIDs: [Int] = []
+    private var savedVenues: [(venue: Venue?, checkinId: Int?)] = []
     private var unauthorizedCount = 0
 
     override func setUp() {
@@ -127,6 +128,7 @@ final class CheckinQueueTests: XCTestCase {
         scheduledNotifications = []
         hapticCount = 0
         savedBeerIDs = []
+        savedVenues = []
         unauthorizedCount = 0
     }
 
@@ -153,12 +155,15 @@ final class CheckinQueueTests: XCTestCase {
                 self?.scheduledNotifications.append((id, beer))
             },
             onSuccessHaptic: { [weak self] in self?.hapticCount += 1 },
-            onCheckinSaved: { [weak self] bid, _, _ in self?.savedBeerIDs.append(bid) },
+            onCheckinSaved: { [weak self] bid, _, _, venue, checkinId in
+                self?.savedBeerIDs.append(bid)
+                self?.savedVenues.append((venue, checkinId))
+            },
             toastDuration: .milliseconds(50)
         )
     }
 
-    private func sampleDraft(bid: Int = 42) -> NewCheckinDraft {
+    private func sampleDraft(bid: Int = 42, venue: Venue? = nil) -> NewCheckinDraft {
         NewCheckinDraft(
             beerBid: bid,
             foursquareId: "fsq-1",
@@ -169,7 +174,8 @@ final class CheckinQueueTests: XCTestCase {
             containerId: 1,
             taggedUserIds: [10, 20],
             purchaseFoursquareId: "shop-1",
-            flavorIds: [5]
+            flavorIds: [5],
+            venue: venue
         )
     }
 
@@ -219,7 +225,8 @@ final class CheckinQueueTests: XCTestCase {
         }
         defer { center.removeObserver(token) }
 
-        let jobID = queue.enqueueNew(sampleDraft(), beerName: "Pacific Ale", breweryName: "Stone & Wood",
+        let venue = Venue(venueId: 77, foursquareId: "fsq-1", name: "The Taproom", isVerified: false)
+        let jobID = queue.enqueueNew(sampleDraft(venue: venue), beerName: "Pacific Ale", breweryName: "Stone & Wood",
                                      username: "alice", photo: nil)
         await waitForUploads(count: 1)
 
@@ -235,6 +242,10 @@ final class CheckinQueueTests: XCTestCase {
 
         XCTAssertTrue(queue.jobs.isEmpty)
         XCTAssertEqual(didCheckInCount, 1)
+        XCTAssertEqual(savedBeerIDs, [42])
+        XCTAssertEqual(savedVenues.count, 1)
+        XCTAssertEqual(savedVenues.first?.venue?.venueId, 77)
+        XCTAssertEqual(savedVenues.first?.checkinId, 12345)
         XCTAssertEqual(hapticCount, 1)
         XCTAssertEqual(queue.completedToast?.message, "Checked in Pacific Ale")
         XCTAssertFalse(FileManager.default.fileExists(atPath: tempDir.appendingPathComponent(jobID.uuidString).path))
@@ -623,7 +634,7 @@ final class CheckinQueueTests: XCTestCase {
         XCTAssertEqual(transport.cancelAllCount, 0, "Should cancel only snapshotted jobs, not future sessions")
         XCTAssertFalse(FileManager.default.fileExists(atPath: tempDir.appendingPathComponent(jobID.uuidString).path))
         let jobsData = try Data(contentsOf: tempDir.appendingPathComponent("jobs.json"))
-        XCTAssertEqual(try JSONDecoder().decode([PendingCheckin].self, from: jobsData), [])
+        XCTAssertEqual(try JSONDecoder().decode([QueuedCheckin].self, from: jobsData), [])
     }
 
     // MARK: (l) Edit check-in flow posts .checkinEdited
