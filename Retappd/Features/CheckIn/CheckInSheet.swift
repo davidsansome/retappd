@@ -17,6 +17,8 @@ struct CheckInSheet: View {
     @State private var options = CheckInOptions.shared
     @State private var connectivity = Connectivity.shared
     @State private var rating: Double = 0
+    @State private var prefillPour = 0
+    @State private var userTouchedRating = false
     @State private var shout = ""
     @State private var serving: ServingType?
     @State private var tagged: [User] = []
@@ -201,9 +203,15 @@ struct CheckInSheet: View {
                 photoControls
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            GlassRating(rating: $rating, step: options.ratingStep)
-                .frame(width: 112)
-                .frame(minHeight: 262)
+            GlassRating(
+                rating: $rating,
+                step: options.ratingStep,
+                pourTrigger: prefillPour,
+                onUserInteraction: { userTouchedRating = true }
+            )
+            .frame(width: 112)
+            .frame(minHeight: 262)
+            .accessibilityIdentifier("checkIn.glassRating")
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -632,10 +640,19 @@ struct CheckInSheet: View {
     /// moved the glass. Silently leaves it at 0 if the request fails.
     private func prefillRating() async {
         guard editing == nil, let beer else { return }
-        guard let r = try? await UntappdAPI.shared.fetch(.userRating(beer.bid), as: UserBeerRating.self),
-              let last = r.rating, rating == 0 else { return }
-        let step = options.ratingStep
-        withAnimation { rating = max(GlassRating.snap(last, step: step), step) }
+        let start = ContinuousClock.now
+        guard let r = try? await UntappdAPI.shared.fetch(.userRating(beer.bid), as: UserBeerRating.self) else { return }
+        let elapsed = ContinuousClock.now - start
+        if elapsed < .milliseconds(220) {
+            try? await Task.sleep(for: .milliseconds(220) - elapsed)
+        }
+        guard !Task.isCancelled,
+              let last = r.rating,
+              let target = GlassRating.prefillTarget(lastRating: last, step: options.ratingStep),
+              rating == 0,
+              !userTouchedRating else { return }
+        rating = target
+        prefillPour += 1
     }
 
     private func loadBeerFlavors() async {

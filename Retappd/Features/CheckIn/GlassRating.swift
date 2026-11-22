@@ -186,6 +186,10 @@ struct GlassRating: View {
     @Binding var rating: Double
     /// 0.1 or 0.25.
     var step: Double
+    /// Bumped to trigger a prefill pour animation with bubbles.
+    var pourTrigger: Int = 0
+    /// Called when the user interacts with the glass (drag, tap, or VoiceOver adjust).
+    var onUserInteraction: (() -> Void)? = nil
 
     /// How full the glass is at 5, leaving room for the head.
     private let maxFill = 0.93
@@ -193,6 +197,10 @@ struct GlassRating: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Whether you're dragging the glass, which pours in new bubbles.
     @State private var pouring = false
+    /// Whether an automatic prefill pour is emitting bubbles.
+    @State private var autoPouring = false
+    @State private var autoPourTask: Task<Void, Never>?
+    @State private var usePourSpring = false
     /// Whether the latest drag movement was upwards.
     @State private var filling = true
     /// Counts taps on the glass, each of which releases a burst of bubbles.
@@ -205,6 +213,14 @@ struct GlassRating: View {
         guard Date.now.timeIntervalSince(lastBurst) > 0.3 else { return }
         lastBurst = .now
         bursts += 1
+    }
+
+    private func beginUserInteraction() {
+        autoPourTask?.cancel()
+        autoPourTask = nil
+        autoPouring = false
+        usePourSpring = false
+        onUserInteraction?()
     }
 
     var body: some View {
@@ -221,7 +237,7 @@ struct GlassRating: View {
                     Rectangle().fill(Taproom.amber).frame(height: level)
                         .overlay {
                             if !reduceMotion {
-                                Bubbles(emitting: pouring, filling: filling, bursts: bursts)
+                                Bubbles(emitting: pouring || autoPouring, filling: autoPouring ? true : filling, bursts: bursts)
                             }
                         }
                 }
@@ -229,12 +245,13 @@ struct GlassRating: View {
                 .clipShape(PintShape())
                 PintShape().stroke(Taproom.glassRim, lineWidth: 2)
             }
-            .animation(.interactiveSpring(response: 0.25, dampingFraction: 0.85), value: rating)
+            .animation(usePourSpring ? .spring(response: 0.55, dampingFraction: 0.85) : .interactiveSpring(response: 0.25, dampingFraction: 0.85), value: rating)
             .contentShape(Rectangle())
             .highPriorityGesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { v in
                         guard h > 0 else { return }
+                        beginUserInteraction()
                         rating = snap(Double((h - v.location.y) / (h * maxFill)) * 5)
                         if !pouring { pouring = true }
                         if touchStart == nil { touchStart = .now }
@@ -252,10 +269,29 @@ struct GlassRating: View {
             .simultaneousGesture(
                 SpatialTapGesture().onEnded { v in
                     guard h > 0 else { return }
+                    beginUserInteraction()
                     rating = snap(Double((h - v.location.y) / (h * maxFill)) * 5)
                     burst()
                 }
             )
+        }
+        .onChange(of: pourTrigger) {
+            guard !reduceMotion && rating > 0 else { return }
+            autoPourTask?.cancel()
+            usePourSpring = true
+            filling = true
+            autoPouring = true
+            bursts += 1
+            autoPourTask = Task {
+                try? await Task.sleep(for: .milliseconds(700))
+                guard !Task.isCancelled else { return }
+                autoPouring = false
+                usePourSpring = false
+            }
+        }
+        .onDisappear {
+            autoPourTask?.cancel()
+            autoPourTask = nil
         }
         .sensoryFeedback(.selection, trigger: rating)
         .accessibilityElement()
@@ -263,12 +299,18 @@ struct GlassRating: View {
         .accessibilityValue(rating == 0 ? "None" : "\(Self.format(rating, step: step)) out of 5")
         .accessibilityHint("Swipe up or down to change it")
         .accessibilityAdjustableAction { dir in
+            beginUserInteraction()
             switch dir {
             case .increment: rating = snap(rating + step)
             case .decrement: rating = snap(rating - step)
             @unknown default: break
             }
         }
+    }
+
+    static func prefillTarget(lastRating: Double?, step: Double) -> Double? {
+        guard let lastRating, lastRating > 0 else { return nil }
+        return max(snap(lastRating, step: step), step)
     }
 
     static func snap(_ raw: Double, step: Double) -> Double {
