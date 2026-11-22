@@ -96,6 +96,7 @@ struct PhotoViewer: View {
                 .accessibilityLabel("Close")
                 .accessibilityIdentifier("photoViewer.close")
         }
+        .accessibilityAction(.escape) { dismiss() }
         .presentationBackground(.clear)
         .task(id: url) {
             async let full = ImagePipeline.shared.image(url, maxPixel: 2400)
@@ -151,6 +152,7 @@ private struct ZoomableImageScrollView: UIViewRepresentable {
             target: context.coordinator,
             action: #selector(Coordinator.handleDismissPan(_:))
         )
+        dismissPan.maximumNumberOfTouches = 1
         dismissPan.delegate = context.coordinator
         scrollView.addGestureRecognizer(dismissPan)
 
@@ -209,7 +211,9 @@ private struct ZoomableImageScrollView: UIViewRepresentable {
             guard gestureRecognizer === dismissPan, let scrollView, let pan = dismissPan else {
                 return true
             }
-            guard scrollView.zoomScale <= 1.01 else { return false }
+            guard pan.numberOfTouches == 1, !scrollView.isZooming, scrollView.zoomScale <= 1.01 else {
+                return false
+            }
             let velocity = pan.velocity(in: scrollView)
             return velocity.y > 0 && abs(velocity.y) > abs(velocity.x)
         }
