@@ -830,6 +830,54 @@ extension APIRequest {
         }
         return APIRequest(method: .post, path: "/v4/checkin/add", form: form)
     }
+
+    // MARK: - Global Top Lists
+
+    /// Globally top-rated beers (`GET /v4/beer/top_rated`). Verified live on 2026-11-22:
+    /// - `styles=true` and `countries=true` return the full style (~1,450) and country (~223)
+    ///   filter lists alongside `beers`; pass them only until cached locally.
+    /// - `type_id` filters by numeric style id; `country_id` filters by numeric country id;
+    ///   `in_production=true` limits to beers currently in production.
+    static func topRatedBeers(
+        styleId: Int? = nil,
+        countryId: Int? = nil,
+        inProduction: Bool = false,
+        includeStyles: Bool = false,
+        includeCountries: Bool = false
+    ) -> APIRequest {
+        var q: [String: String] = [:]
+        if includeStyles { q["styles"] = "true" }
+        if includeCountries { q["countries"] = "true" }
+        if let styleId { q["type_id"] = "\(styleId)" }
+        if let countryId { q["country_id"] = "\(countryId)" }
+        if inProduction { q["in_production"] = "true" }
+        return APIRequest(path: "/v4/beer/top_rated", query: q)
+    }
+
+    /// Globally top-rated breweries (`GET /v4/brewery/top_rated`). Verified live on 2026-11-22:
+    /// - `countries=true` includes the country filter list; `brewery_types` (16 types) is returned
+    ///   in the response.
+    /// - `brewery_type` MUST be the numeric `brewery_type_id` as a string (e.g. `"2"`); sending a
+    ///   slug such as `"micro_brewery"` causes HTTP 500.
+    static func topRatedBreweries(
+        countryId: Int? = nil,
+        breweryTypeId: Int? = nil,
+        includeCountries: Bool = false
+    ) -> APIRequest {
+        var q: [String: String] = [:]
+        if includeCountries { q["countries"] = "true" }
+        if let countryId { q["country_id"] = "\(countryId)" }
+        if let breweryTypeId { q["brewery_type"] = "\(breweryTypeId)" }
+        return APIRequest(path: "/v4/brewery/top_rated", query: q)
+    }
+
+    /// Globally trending craft (`micro`) and macro (`macro`) beers (`GET /v4/beer/trending`).
+    /// Verified live on 2026-11-22: omitting `type=local` returns global trending lists.
+    static let trendingBeersGlobal = APIRequest(path: "/v4/beer/trending")
+
+    /// Globally trending venues (`GET /v4/venue/trending?type=global`).
+    /// Verified live on 2026-11-22: returns `items` with `total_users`, `your_count`, and `venue`.
+    static let trendingVenuesGlobal = APIRequest(path: "/v4/venue/trending", query: ["type": "global"])
 }
 
 enum UntappdWebURL {

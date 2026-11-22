@@ -215,7 +215,10 @@ struct ProfileView: View {
             .padding(.top, Taproom.sectionSpacing)
 
             VStack(spacing: 10) {
-                if isAccountTab { statisticsEntry }
+                if isAccountTab {
+                    statisticsEntry
+                    topListsEntry
+                }
                 listsEntry
                 venuesEntry(username: resolvedUsername, displayName: resolvedDisplayName, isOwnProfile: isOwn)
             }
@@ -245,6 +248,25 @@ struct ProfileView: View {
         }
         .buttonStyle(CardLinkStyle())
         .accessibilityIdentifier("profile.statisticsEntry")
+    }
+
+    /// Opens the Global Top Lists screen; only on your own profile.
+    private var topListsEntry: some View {
+        NavigationLink(value: ProfileRoute.topLists) {
+            HStack(spacing: 12) {
+                Image(systemName: "trophy.fill").font(.title3).foregroundStyle(Taproom.amber).frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Global Top Lists").font(.body.weight(.heavy))
+                    Text("Top rated beers, breweries and trending").font(.footnote).foregroundStyle(Taproom.muted)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(Taproom.muted)
+            }
+            .padding(.horizontal, 14).frame(minHeight: 60)
+            .taproomCard()
+        }
+        .buttonStyle(CardLinkStyle())
+        .accessibilityIdentifier("profile.topListsEntry")
     }
 
     /// Opens the user's visited venues list, available on both own and other users' profiles.
@@ -602,6 +624,7 @@ private struct SettingsDestination: ViewModifier {
                 case .settings: SettingsView()
                 case .friends: FriendsListView(username: username)
                 case .statistics: StatsView(username: username)
+                case .topLists: GlobalTopListsView()
                 case .blockedUsers: BlockedUsersView()
                 case .mutedUsers: MutedUsersView()
                 }
