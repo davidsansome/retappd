@@ -20,8 +20,12 @@ struct RetappdApp: App {
         WindowGroup {
             Group {
                 if let username = auth.username, auth.isSignedIn {
-                    RootTabs(username: username)
-                        .id(username)
+                    if AuthStore.isValidUsername(username) {
+                        RootTabs(username: username)
+                            .id(username)
+                    } else {
+                        UsernameResolutionView()
+                    }
                 } else {
                     LoginView()
                         #if DEBUG
@@ -60,6 +64,7 @@ struct RootTabs: View {
     }
 
     let username: String
+    @Environment(AuthStore.self) private var auth
     @Environment(LocationProvider.self) private var location
     @Environment(\.scenePhase) private var scenePhase
     @State private var feed = CheckinListModel(source: .friends)
@@ -133,7 +138,11 @@ struct RootTabs: View {
         .task { await HadBeers.shared.refresh() }
         .task { await VenueHistory.shared.refresh() }
         .onChange(of: PendingCheckins.shared.items) { _, items in PendingReminders.shared.update(items) }
-        .task { await CheckInOptions.shared.loadAccountSettings() }
+        .task {
+            if let settings = await CheckInOptions.shared.loadAccountSettings() {
+                auth.reconcileUsername(settings.userName)
+            }
+        }
         .task { await CheckInOptions.shared.loadRecentVenues(username: username) }
         .task { await CheckInOptions.shared.loadFriends() }
         .task(id: location.location.map { "\($0.coordinate.latitude),\($0.coordinate.longitude)" }) {
@@ -300,6 +309,55 @@ extension RootTabs {
         }
         if let info = try? await cacheThenNetwork(.userInfo(username), as: UserInfo.self, onCached: apply) {
             apply(info)
+        }
+    }
+}
+
+/// Shown briefly on launch only when an existing install has an invalid username stored (such as an
+/// email address from an older sign-in) while resolving the canonical Untappd `user_name`.
+private struct UsernameResolutionView: View {
+    @Environment(AuthStore.self) private var auth
+    @State private var error: String?
+    @State private var attempt = 0
+
+    var body: some View {
+        VStack(spacing: 16) {
+            if let error {
+                Text("Couldn't load your account")
+                    .font(.headline)
+                Text(error)
+                    .font(.subheadline)
+                    .foregroundStyle(Taproom.muted)
+                    .multilineTextAlignment(.center)
+                HStack(spacing: 12) {
+                    Button("Try again") {
+                        self.error = nil
+                        attempt += 1
+                    }
+                    .buttonStyle(TaproomOutlineButton())
+                    Button("Sign out", role: .destructive) {
+                        auth.signOut()
+                    }
+                    .buttonStyle(TaproomOutlineButton())
+                }
+            } else {
+                ProgressView()
+                Text("Finishing sign in…")
+                    .font(.subheadline)
+                    .foregroundStyle(Taproom.muted)
+            }
+        }
+        .padding(Taproom.margin)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .taproomScreen()
+        .task(id: attempt) {
+            do {
+                try await auth.refreshUsernameIfNeeded()
+            } catch {
+                if !error.isCancellation {
+                    self.error = error.localizedDescription
+                }
+            }
         }
     }
 }
