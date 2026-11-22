@@ -14,6 +14,8 @@ enum BeerBreweryRoute: Hashable {
     case beer(BeerLite)
     case brewery(BreweryPreview)
     case badge(Checkin.Badge)
+    case userLists(username: String, displayName: String?)
+    case customList(CustomList, ownerUsername: String)
 
     /// The route to a badge's page; nil when its `badge_id` isn't known (the status request needs it).
     static func badge(of badge: Checkin.Badge) -> BeerBreweryRoute? {
@@ -30,15 +32,35 @@ enum BeerBreweryRoute: Hashable {
     }
 }
 
+/// Where a profile collection link goes (unique beers, badges, venues). Works from both the
+/// signed-in user's Profile tab and any other user's profile pushed onto any tab's stack.
+enum ProfileCollectionRoute: Hashable {
+    case uniqueBeers(username: String, displayName: String, isOwnProfile: Bool)
+    case badges(username: String, displayName: String, isOwnProfile: Bool)
+    case venues(username: String, displayName: String, isOwnProfile: Bool)
+}
+
 extension View {
-    /// Makes `BeerBreweryRoute` links push the Beer and Brewery pages. Put it once on the root
-    /// of each `NavigationStack`; SwiftUI ignores (and warns about) repeats further up a stack.
+    /// Makes `BeerBreweryRoute` and `ProfileCollectionRoute` links push their pages. Put it once on
+    /// the root of each `NavigationStack`; SwiftUI ignores (and warns about) repeats further up a stack.
     func beerAndBreweryDestinations() -> some View {
         navigationDestination(for: BeerBreweryRoute.self) { route in
             switch route {
             case .beer(let beer): BeerView(beer: beer)
             case .brewery(let brewery): BreweryView(brewery: brewery)
             case .badge(let badge): BadgeView(badge: badge)
+            case .userLists(let username, let displayName): UserListsView(username: username, displayName: displayName)
+            case .customList(let list, let ownerUsername): CustomListDetailView(list: list, ownerUsername: ownerUsername)
+            }
+        }
+        .navigationDestination(for: ProfileCollectionRoute.self) { route in
+            switch route {
+            case .uniqueBeers(let username, let displayName, let isOwnProfile):
+                UserBeersView(username: username, displayName: displayName, isOwnProfile: isOwnProfile)
+            case .badges(let username, let displayName, let isOwnProfile):
+                UserBadgesView(username: username, displayName: displayName, isOwnProfile: isOwnProfile)
+            case .venues(let username, let displayName, let isOwnProfile):
+                UserVenuesView(username: username, displayName: displayName, isOwnProfile: isOwnProfile)
             }
         }
     }

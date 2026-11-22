@@ -284,9 +284,25 @@ final class CheckInOptions {
         return out
     }
 
-    /// Friends to offer as one-tap chips: recently tagged ones, else the first of the rest.
-    func suggestedFriends(limit: Int = 5) -> [User] {
-        Array(orderedFriends.prefix(limit))
+    /// Friends to offer as one-tap chips: up to `limit` recently tagged ones, then up to `limit`
+    /// of `nearby` (friends checking in near you, closest first) not already offered, topped up
+    /// to `limit` from the rest alphabetically.
+    func suggestedFriends(limit: Int = 5, nearby: [User] = []) -> [User] {
+        var out = Array(recentlyTagged.prefix(limit))
+        var ids = Set(out.map(\.id))
+        let near = nearbyFriends(nearby).filter { !ids.contains($0.id) }.prefix(limit)
+        out += near
+        ids.formUnion(near.map(\.id))
+        for u in orderedFriends where out.count < limit && ids.insert(u.id).inserted {
+            out.append(u)
+        }
+        return out
+    }
+
+    /// `nearby` without duplicates or anyone just removed or blocked (whom the feed may still
+    /// show), in the order given.
+    func nearbyFriends(_ nearby: [User]) -> [User] {
+        dedupe(nearby)
     }
 
     func loadFlavorTags() async {
@@ -315,10 +331,16 @@ final class CheckInOptions {
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
-    /// Reads the account's settings in the background (called at startup) to learn the rating step.
-    func loadAccountSettings() async {
+    /// Reads the account's settings in the background (called at startup) to learn the rating step
+    /// and canonical username.
+    @discardableResult
+    func loadAccountSettings() async -> AccountSettings? {
         let apply = { (a: AccountSettings) in self.setRatingBump(a.ratingBump) }
-        if let a = try? await cacheThenNetwork(.userSettings, as: AccountSettings.self, onCached: apply) { apply(a) }
+        guard let a = try? await cacheThenNetwork(.userSettings, as: AccountSettings.self, onCached: apply) else {
+            return nil
+        }
+        apply(a)
+        return a
     }
 
     /// Called when the rating bump setting is known or changed (e.g. from Settings).
