@@ -8,6 +8,7 @@ enum Algolia {
     static func cacheKey(beerQuery q: String) -> String { "algolia beer \(LocalIndex.normalize(q))" }
 
     static func searchBeers(_ query: String, hits: Int = 30) async throws -> Data {
+        if UntappdAPI.shared.isOffline { throw APIError.offline }
         var comps = URLComponents(string: "https://\(appID)-dsn.algolia.net/1/indexes/beer")!
         comps.queryItems = [
             URLQueryItem(name: "query", value: query),

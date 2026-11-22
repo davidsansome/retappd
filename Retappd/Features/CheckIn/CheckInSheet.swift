@@ -13,6 +13,7 @@ struct CheckInSheet: View {
     @Environment(LocationProvider.self) private var location
     @Environment(DiscoverModel.self) private var discover
     @State private var options = CheckInOptions.shared
+    @State private var connectivity = Connectivity.shared
     @State private var rating: Double = 0
     @State private var shout = ""
     @State private var serving: ServingType?
@@ -101,6 +102,9 @@ struct CheckInSheet: View {
                     Button { dismiss() } label: { Image(systemName: "xmark") }
                         .accessibilityLabel("Close")
                         .disabled(busy)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    TaproomOfflineSwitch().disabled(busy)
                 }
             }
             .beerAndBreweryDestinations()
@@ -413,16 +417,25 @@ struct CheckInSheet: View {
     }
 
     private var submitButton: some View {
-        Button(action: finished ? { dismiss() } : submit) {
-            if busy {
-                ProgressView().tint(Taproom.background)
-            } else {
-                Text(finished ? "Done" : editing == nil ? "Check in" : "Save")
+        let offline = connectivity.offlineMode && !finished
+        return VStack(spacing: 8) {
+            if offline {
+                Text("Offline mode is on. Turn it off at the top to check in.")
+                    .font(.caption)
+                    .foregroundStyle(Taproom.muted)
+                    .multilineTextAlignment(.center)
             }
+            Button(action: finished ? { dismiss() } : submit) {
+                if busy {
+                    ProgressView().tint(Taproom.background)
+                } else {
+                    Text(finished ? "Done" : editing == nil ? "Check in" : "Save")
+                }
+            }
+            .buttonStyle(TaproomPrimaryButton())
+            .keyboardShortcut(.return, modifiers: .command)
+            .disabled(busy || offline)
         }
-        .buttonStyle(TaproomPrimaryButton())
-        .keyboardShortcut(.return, modifiers: .command)
-        .disabled(busy)
         .taproomBottomBar()
     }
 

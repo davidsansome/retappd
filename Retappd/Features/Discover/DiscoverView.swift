@@ -14,6 +14,7 @@ struct DiscoverView: View {
     @State private var handledScans = 0
     @State private var containerWidth: CGFloat = 0
     @State private var selectedVenue: Venue?
+    @State private var connectivity = Connectivity.shared
 
     private var isSplit: Bool { containerWidth >= .twoColumnThreshold }
 
@@ -34,7 +35,11 @@ struct DiscoverView: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
         .taproomScreen()
         .toolbar(.hidden, for: .navigationBar)
-        .task(id: query) { await model.search(query) }
+        .task(id: SearchKey(query: query, offline: connectivity.offlineMode)) { await model.search(query) }
+        .onChange(of: connectivity.offlineMode) { _, offline in
+            // Back online by the user's choice: fetch what's around again.
+            if !offline { Task { await model.update(location: location.location, force: true) } }
+        }
         .task { await model.refreshIfStale(location: location.location) }
         // Venues, and the checkins and people on their pages.
         .modifier(CheckinDestinations(enabled: true, me: model.me))
@@ -59,6 +64,7 @@ struct DiscoverView: View {
     private var listColumn: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                connectionNotice
                 if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     nearbyContent
                 } else {
@@ -73,7 +79,13 @@ struct DiscoverView: View {
         }
         .scrollDismissesKeyboard(.immediately)
         .safeAreaInset(edge: .top, spacing: 0) {
-            TaproomSearchField(text: $query, prompt: "Beers or venues", focusRequests: searchRequests)
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    TaproomOfflineSwitch()
+                }
+                TaproomSearchField(text: $query, prompt: "Beers or venues", focusRequests: searchRequests)
+            }
                 .frame(maxWidth: isSplit ? .infinity : .readableContentWidth)
                 .padding(.horizontal, Taproom.margin)
                 .padding(.vertical, 6)
@@ -103,6 +115,29 @@ struct DiscoverView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Taproom.background)
+        }
+    }
+
+    private struct SearchKey: Equatable {
+        var query: String
+        var offline: Bool
+    }
+
+    /// The offline banner, or the offer to go offline when a search is taking too long.
+    @ViewBuilder private var connectionNotice: some View {
+        if connectivity.offlineMode {
+            TaproomNotice(systemImage: "clock.arrow.circlepath", title: "Offline mode is on",
+                          message: "Search shows beers and venues this phone already knows. Turn it off at the top when you have a good connection.")
+        } else if model.isSlow {
+            TaproomNotice(systemImage: "wifi.exclamationmark", title: "The connection is slow",
+                          message: "Untappd hasn't answered yet. Go offline to search what's on this phone. It stays offline until you switch it back.") {
+                HStack(spacing: 8) {
+                    Button("Keep waiting") { model.dismissSlow() }
+                        .buttonStyle(TaproomOutlineButton())
+                    Button("Go offline") { connectivity.offlineMode = true }
+                        .buttonStyle(TaproomPrimaryButton(compact: true))
+                }
+            }
         }
     }
 
@@ -145,7 +180,7 @@ struct DiscoverView: View {
             TaproomSection("Nearby") { venueRows(model.nearby) }
         } else if model.isLoading {
             ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
-        } else if let e = model.error {
+        } else if let e = model.error, !connectivity.offlineMode {
             ErrorRow(message: e) { Task { await model.update(location: location.location, force: true) } }
         } else if model.origin == nil && !location.isDenied {
             Label("Finding your location…", systemImage: "location").foregroundStyle(Taproom.muted)

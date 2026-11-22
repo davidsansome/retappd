@@ -76,7 +76,7 @@ final class ConnectivityTests: XCTestCase {
                       probe: @escaping () async -> RequestOutcome) -> Connectivity {
         Connectivity(defaults: d ?? defaults(), now: { clock.now },
                      wait: { s in clock.waits.append(s); clock.now = clock.now.addingTimeInterval(s) },
-                     probe: probe)
+                     probe: probe, applyOfflineMode: { _ in })
     }
 
     func testOfflineModePersistsAndNeverTurnsItselfOff() {
@@ -145,5 +145,32 @@ final class ConnectivityTests: XCTestCase {
         c.record(.response(latency: 0.1))
         c.pathChanged(satisfied: false)
         XCTAssertTrue(c.proof.streak.isEmpty)
+    }
+
+    func testOfflineModeIsPassedOnAndStopsRequests() async {
+        var applied: [Bool] = []
+        let d = defaults()
+        let c = Connectivity(defaults: d, probe: { .noResponse }, applyOfflineMode: { applied.append($0) })
+        c.offlineMode = true
+        c.offlineMode = true  // no change, not passed on again
+        c.offlineMode = false
+        XCTAssertEqual(applied, [false, true, false])
+
+        let api = UntappdAPI.shared
+        let was = api.isOffline
+        defer { api.isOffline = was }
+        api.isOffline = true
+        do {
+            _ = try await api.data(.userInfo("nobody"))
+            XCTFail("sent a request in offline mode")
+        } catch {
+            guard case APIError.offline = error else { return XCTFail("unexpected \(error)") }
+        }
+        do {
+            _ = try await Algolia.searchBeers("jaipur")
+            XCTFail("searched Algolia in offline mode")
+        } catch {
+            guard case APIError.offline = error else { return XCTFail("unexpected \(error)") }
+        }
     }
 }
