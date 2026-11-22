@@ -348,6 +348,7 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        PendingReminders.register()
         return true
     }
 
