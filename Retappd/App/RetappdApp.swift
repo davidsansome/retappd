@@ -90,32 +90,35 @@ struct RootTabs: View {
 
     var body: some View {
         // The system tab bar is hidden; each tab's root screen carries the Taproom bar instead.
-        TabView(selection: $page) {
-            Tab("Activity", systemImage: "list.bullet.rectangle", value: .feed) {
-                NavigationStack(path: $feedPath) {
-                    FeedView(model: feed).safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
-                        .beerAndBreweryDestinations()
-                        .navigationDestination(for: NotificationsRoute.self) { _ in
-                            NotificationsView(unread: unread, openCheckin: { await showCheckin($0) }, openFriends: openFriends)
-                        }
+        VStack(spacing: 0) {
+            CheckinQueueBanner(queue: CheckinQueue.shared)
+            TabView(selection: $page) {
+                Tab("Activity", systemImage: "list.bullet.rectangle", value: .feed) {
+                    NavigationStack(path: $feedPath) {
+                        FeedView(model: feed).safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
+                            .beerAndBreweryDestinations()
+                            .navigationDestination(for: NotificationsRoute.self) { _ in
+                                NotificationsView(unread: unread, openCheckin: { await showCheckin($0) }, openFriends: openFriends)
+                            }
+                    }
+                    .toolbarVisibility(.hidden, for: .tabBar)
                 }
-                .toolbarVisibility(.hidden, for: .tabBar)
-            }
-            Tab("Discover", systemImage: "mappin.and.ellipse", value: .discover) {
-                NavigationStack(path: $discoverPath) {
-                    DiscoverView(model: discover, searchRequests: searchRequests, scanRequests: scanRequests)
-                        .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
-                        .beerAndBreweryDestinations()
+                Tab("Discover", systemImage: "mappin.and.ellipse", value: .discover) {
+                    NavigationStack(path: $discoverPath) {
+                        DiscoverView(model: discover, searchRequests: searchRequests, scanRequests: scanRequests)
+                            .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
+                            .beerAndBreweryDestinations()
+                    }
+                    .toolbarVisibility(.hidden, for: .tabBar)
                 }
-                .toolbarVisibility(.hidden, for: .tabBar)
-            }
-            Tab("Me", systemImage: "person.crop.circle", value: .profile) {
-                NavigationStack(path: $profilePath) {
-                    ProfileView(username: username, model: profile) { profilePath.append(ProfileRoute.settings) }
-                        .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
-                        .beerAndBreweryDestinations()
+                Tab("Me", systemImage: "person.crop.circle", value: .profile) {
+                    NavigationStack(path: $profilePath) {
+                        ProfileView(username: username, model: profile) { profilePath.append(ProfileRoute.settings) }
+                            .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
+                            .beerAndBreweryDestinations()
+                    }
+                    .toolbarVisibility(.hidden, for: .tabBar)
                 }
-                .toolbarVisibility(.hidden, for: .tabBar)
             }
         }
         .environment(discover)

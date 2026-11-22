@@ -349,7 +349,14 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         PendingReminders.register()
+        CheckinQueue.shared.start()
         return true
+    }
+
+    func application(_ application: UIApplication,
+                     handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        CheckinQueue.shared.handleBackgroundSessionEvents(identifier: identifier, completionHandler: completionHandler)
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {

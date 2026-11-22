@@ -44,8 +44,6 @@ struct CheckInSheet: View {
     /// shop back removes it, so it's looked up first if the checkin came without one.
     @State private var shopLoaded = true
     @State private var busy = false
-    /// Set once the checkin is saved but something after it (the photo upload) failed.
-    @State private var finished = false
     @State private var error: String?
     @State private var preselectedServing = false
 
@@ -466,7 +464,7 @@ struct CheckInSheet: View {
     }
 
     private var submitButton: some View {
-        let offline = connectivity.offlineMode && !finished
+        let offline = connectivity.offlineMode
         // A new check-in can be saved for later; an edit has to wait for the network.
         let savesForLater = offline && editing == nil
         return VStack(spacing: 8) {
@@ -481,7 +479,7 @@ struct CheckInSheet: View {
                     .foregroundStyle(Taproom.muted)
                     .multilineTextAlignment(.center)
             }
-            if let pending, !finished {
+            if let pending {
                 Button("Remove from list", role: .destructive) {
                     PendingCheckins.shared.remove(pending.id)
                     dismiss()
@@ -491,13 +489,13 @@ struct CheckInSheet: View {
                 .frame(minHeight: 36)
                 .disabled(busy)
             }
-            Button(action: finished ? { dismiss() } : savesForLater ? saveForLater : submit) {
+            Button(action: savesForLater ? saveForLater : submit) {
                 if busy {
                     ProgressView().tint(Taproom.background)
                 } else if savesForLater {
                     Label("Save for later", systemImage: "bookmark")
                 } else {
-                    Text(finished ? "Done" : editing == nil ? "Check in" : "Save")
+                    Text(editing == nil ? "Check in" : "Save")
                 }
             }
             .buttonStyle(TaproomPrimaryButton())
@@ -680,111 +678,86 @@ struct CheckInSheet: View {
     }
 
     private func submit() {
-        busy = true
         error = nil
-        let image = photo
-        Task {
-            defer { busy = false }
-            let jpeg: Data? = if let image { await Task.detached { CheckinPhoto.jpeg(image) }.value } else { nil }
-            if let editing {
-                await save(editing, jpeg: jpeg)
+        if let editing {
+            if shopLoaded {
+                enqueueEdit(editing)
             } else {
-                await add(jpeg: jpeg)
+                busy = true
+                Task {
+                    defer { busy = false }
+                    await save(editing)
+                }
             }
+        } else if let v = venue, v.foursquareId == nil, let id = v.venueId {
+            busy = true
+            Task {
+                defer { busy = false }
+                await resolveVenueAndAdd(v, id: id)
+            }
+        } else {
+            add()
         }
     }
 
-    private func add(jpeg: Data?) async {
+    private func resolveVenueAndAdd(_ initial: Venue, id: Int) async {
+        var v = initial
+        if let info = try? await UntappdAPI.shared.fetch(.venueInfo(id), as: VenueInfo.self), let full = info.venue {
+            v.merge(full)
+        }
+        guard v.foursquareId != nil else {
+            error = "Couldn't look up \(v.name). Pick the venue again from the list."
+            return
+        }
+        venue = v
+        add()
+    }
+
+    private func add() {
         guard let beer else { return }
         // A saved check-in is posted from where it was saved.
         let loc = pending?.location ?? location.location
-        // Venues from your history may lack the Foursquare id `checkin/add` needs.
-        if var v = venue, v.foursquareId == nil, let id = v.venueId {
-            if let info = try? await UntappdAPI.shared.fetch(.venueInfo(id), as: VenueInfo.self), let full = info.venue {
-                v.merge(full)
-            }
-            guard v.foursquareId != nil else {
-                error = "Couldn't look up \(v.name). Pick the venue again from the list."
-                return
-            }
-            venue = v
-        }
-        let req = APIRequest.checkin(beer: beer.bid, foursquareId: venue?.foursquareId,
-                                     lat: loc?.coordinate.latitude, lng: loc?.coordinate.longitude,
-                                     rating: rating, shout: Self.lateShout(shout, savedAt: pending?.savedAt),
-                                     containerId: serving?.id,
-                                     taggedUserIds: tagged.map(\.id), purchaseFoursquareId: shop?.foursquareId,
-                                     flavorIds: flavors.map(\.id), isPhoto: jpeg != nil)
-        let r: CheckinAddResponse
-        do {
-            r = try await UntappdAPI.shared.fetch(req, as: CheckinAddResponse.self)
-        } catch {
-            self.error = error.localizedDescription
-            return
-        }
-        // Imperative rather than `.sensoryFeedback`: the sheet dismisses right away, which could tear the view down first.
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        let draft = NewCheckinDraft(
+            beerBid: beer.bid,
+            foursquareId: venue?.foursquareId,
+            lat: loc?.coordinate.latitude,
+            lng: loc?.coordinate.longitude,
+            rating: rating,
+            shout: Self.lateShout(shout, savedAt: pending?.savedAt),
+            containerId: serving?.id,
+            taggedUserIds: tagged.map(\.id),
+            purchaseFoursquareId: shop?.foursquareId,
+            flavorIds: flavors.map(\.id)
+        )
+        let username = discover.me?.userName ?? UserDefaults.standard.string(forKey: "username") ?? ""
+        CheckinQueue.shared.enqueueNew(draft, beerName: beer.name, breweryName: beer.brewery,
+                                       username: username, photo: photo)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         // Searches will show the tick from now on, whichever list the beer turns up in.
         var had = beer
         had.hasHad = true
-        await LocalIndex.shared.add(beers: [had])
         HadBeers.shared.add(beer.bid)
-        if let venue { VenueHistory.shared.record(venue, checkinId: r.checkinId) }
         if let pending { PendingCheckins.shared.remove(pending.id) }
-        let uploaded = await upload(jpeg, r, checkinId: r.checkinId)
-        NotificationCenter.default.post(name: .didCheckIn, object: nil)
-        if uploaded { dismiss() }
+        Task { await LocalIndex.shared.add(beers: [had]) }
+        dismiss()
     }
 
-    private func save(_ original: Checkin, jpeg: Data?) async {
-        let trimmed = shout.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func save(_ original: Checkin) async {
         if !shopLoaded { await loadEditedShop() }
         guard shopLoaded else {
             // Saving now would remove the checkin's shop, if it has one.
             error = "Couldn't load this checkin's shop. Check your connection and try again."
             return
         }
-        let req = APIRequest.editCheckin(original, rating: rating, shout: trimmed, containerId: serving?.id,
-                                         purchaseFoursquareId: shop?.foursquareId, isPhoto: jpeg != nil)
-        let r: CheckinAddResponse
-        do {
-            r = try await UntappdAPI.shared.fetch(req, as: CheckinAddResponse.self)
-        } catch {
-            self.error = error.localizedDescription
-            return
-        }
-        // The edit response has no `checkin_id`.
-        let uploaded = await upload(jpeg, r, checkinId: original.id)
-        var updated = original
-        updated.rating = rating > 0 ? rating : nil
-        // Untappd leaves the comment alone when it's sent empty.
-        updated.comment = trimmed.isEmpty ? original.comment : trimmed
-        updated.servingType = serving?.name ?? original.servingType
-        updated.retailVenue = shop
-        updated.retailVenueKnown = true
-        if jpeg != nil, uploaded, let d = r.photoDestinationURL {
-            updated.photo = Checkin.Photo(small: d, medium: d, large: d)
-        }
-        NotificationCenter.default.post(name: .checkinEdited, object: updated)
-        if uploaded { dismiss() }
+        enqueueEdit(original)
     }
 
-    /// Uploads the photo, if there is one, to where the checkin response said, then tells Untappd
-    /// to attach it to the checkin. Returns false (leaving the screen up with an error) if that
-    /// fails: the checkin itself is already saved.
-    private func upload(_ jpeg: Data?, _ r: CheckinAddResponse, checkinId: Int?) async -> Bool {
-        guard let jpeg else { return true }
-        do {
-            guard let url = r.photoUploadURL, let destination = r.photoDestinationURL, let checkinId
-            else { throw APIError.decoding }
-            try await UntappdAPI.shared.uploadPhoto(jpeg, to: url)
-            _ = try await UntappdAPI.shared.data(.photoUploadComplete(checkinId: checkinId, destination: destination))
-            return true
-        } catch {
-            self.error = "Your checkin was saved, but the photo couldn't be uploaded."
-            finished = true
-            return false
-        }
+    private func enqueueEdit(_ original: Checkin) {
+        let username = discover.me?.userName ?? UserDefaults.standard.string(forKey: "username") ?? ""
+        CheckinQueue.shared.enqueueEdit(original, rating: rating, shout: shout, serving: serving,
+                                        shop: shop, username: username, photo: photo)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        dismiss()
     }
 }
 

@@ -166,6 +166,7 @@ final class AuthStore {
         // sign-in straight afterwards can't pick up this account's list.
         HadBeers.shared.clear()
         VenueHistory.shared.clear()
+        CheckinQueue.shared.cancelAllForSignOut()
         deleteToken()
         defaults.removeObject(forKey: "username")
         setAPIToken(nil)
