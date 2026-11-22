@@ -270,8 +270,156 @@ extension APIRequest {
         ])
     }
 
+    /// The user's Wish List and custom lists (`GET /v4/custom_lists/userlists/{username}`).
+    /// `API.md` only captured this with `bid` (which adds `is_in_list` to each list); verified
+    /// live on 2026-11-21 that `bid` is optional and the endpoint also works for other users'
+    /// usernames (returning their Wish List and public lists).
+    static func userLists(_ username: String, bid: Int? = nil, offset: Int = 0, limit: Int = 25) -> APIRequest {
+        var q: [String: String] = ["limit": "\(limit)"]
+        if let bid { q["bid"] = "\(bid)" }
+        if offset > 0 { q["offset"] = "\(offset)" }
+        return APIRequest(path: "/v4/custom_lists/userlists/\(username)", query: q)
+    }
+
+    /// Items in a Wish List or custom list (`GET /v4/custom_lists/view/{listId}`).
+    /// Not in `untappd-private-api/docs/API.md`; verified live on 2026-11-21: returns
+    /// `{total_count, list, count, items, pagination}` where each beer item carries
+    /// `list_item_id`, `item_id`, `item_type`, `beer`, and `brewery`.
+    static func customListDetail(_ listId: Int, offset: Int = 0, limit: Int = 25) -> APIRequest {
+        var q: [String: String] = ["limit": "\(limit)"]
+        if offset > 0 { q["offset"] = "\(offset)" }
+        return APIRequest(path: "/v4/custom_lists/view/\(listId)", query: q)
+    }
+
+    /// Detailed metadata for a single custom-list item (`GET /v4/custom_lists/viewitemenhanced/{id}`).
+    static func customListItem(_ listItemId: Int) -> APIRequest {
+        APIRequest(path: "/v4/custom_lists/viewitemenhanced/\(listItemId)")
+    }
+
+    /// Adds a beer to a custom list (`POST /v4/custom_lists/additemenhanced/{id}`).
+    static func addBeerToList(_ listId: Int, bid: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/custom_lists/additemenhanced/\(listId)", form: [
+            "item_id": "\(bid)",
+            "item_type": "beer",
+        ])
+    }
+
+    /// Removes a beer from a custom list (`POST /v4/custom_lists/removeitem/{id}`).
+    /// Not in `untappd-private-api/docs/API.md`; verified live on 2026-11-21: takes `bid` in the
+    /// form body and returns `{result: "success", item_id}`.
+    static func removeBeerFromList(_ listId: Int, bid: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/custom_lists/removeitem/\(listId)", form: [
+            "bid": "\(bid)",
+        ])
+    }
+
+    /// Updates an item's enhanced metadata within a custom list (`POST /v4/custom_lists/upsertitem/{id}`).
+    static func upsertListItem(
+        _ listItemId: Int,
+        quantity: Int = 1,
+        notes: String = "",
+        containerId: Int? = nil,
+        purchaseDate: String = "",
+        bottledDate: String = "",
+        bestByDate: String = "",
+        purchaseLocationId: String = "",
+        purchasePrice: String = ""
+    ) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/custom_lists/upsertitem/\(listItemId)", form: [
+            "best_by_date": bestByDate,
+            "bottled_date": bottledDate,
+            "container": containerId.map(String.init) ?? "",
+            "notes": notes,
+            "purchase_date": purchaseDate,
+            "purchase_location_id": purchaseLocationId,
+            "purchase_price": purchasePrice,
+            "quantity": "\(quantity)",
+        ])
+    }
+
+    /// Adds a beer to the signed-in user's Wish List (`POST /v4/user/wishlist/add`).
+    /// Not in `untappd-private-api/docs/API.md`; verified live on 2026-11-21: takes `bid`,
+    /// returns `{result: "success", action: "add", beer: ...}` and updates `beer/info`'s `wish_list`.
+    static func addToWishlist(_ bid: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/user/wishlist/add", form: ["bid": "\(bid)"])
+    }
+
+    /// Removes a beer from the signed-in user's Wish List (`POST /v4/user/wishlist/delete`).
+    /// Not in `untappd-private-api/docs/API.md`; verified live on 2026-11-21: takes `bid` and
+    /// returns `{result: "success", action: "remove", beer: ...}`.
+    static func removeFromWishlist(_ bid: Int) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/user/wishlist/delete", form: ["bid": "\(bid)"])
+    }
+
+    /// Toggles wishlist notification subscription (`POST /v4/beer/subscribewish`).
+    static func subscribeWishlist(_ on: Bool) -> APIRequest {
+        APIRequest(method: .post, path: "/v4/beer/subscribewish", form: ["toggle_option": on ? "on" : "off"])
+    }
+
+    /// Beers the account is subscribed to (`GET /v4/beer/subscribes`), including
+    /// `wish_list_subscribe_status`.
+    static func beerSubscribes() -> APIRequest {
+        APIRequest(path: "/v4/beer/subscribes", query: [
+            "breweries": "true", "brewery_id": "", "countries": "true", "country_id": "",
+            "q": "", "sort": "date", "styles": "true", "type_id": "",
+        ])
+    }
+
     static func userInfo(_ username: String) -> APIRequest {
         APIRequest(path: "/v4/user/info/\(username)", query: ["compact": "true"])
+    }
+
+    /// Paginated list of unique beers a user has checked in (`GET /v4/user/beers/{username}`).
+    /// Filter params are left empty rather than sending every id (which triggers HTTP 414).
+    static func userBeers(_ username: String, query: String = "", sort: String = "date",
+                          offset: Int = 0, timezoneOffset: String = gmtOffsetString()) -> APIRequest {
+        var q = [
+            "brewery_id": "",
+            "container_id": "",
+            "country_id": "",
+            "q": query,
+            "rating_score": "",
+            "region_id": "",
+            "sort": sort,
+            "timezoneOffset": timezoneOffset,
+            "type_id": "",
+        ]
+        if offset > 0 { q["offset"] = "\(offset)" }
+        return APIRequest(path: "/v4/user/beers/\(username)", query: q)
+    }
+
+    /// Summary of a user's badges across categories (`GET /v4/user/badges/{username}?method=index`).
+    static func userBadgesIndex(_ username: String, limit: Int = 3) -> APIRequest {
+        APIRequest(path: "/v4/user/badges/\(username)", query: [
+            "limit": "\(limit)",
+            "method": "index",
+            "mode": "v2",
+        ])
+    }
+
+    /// Paginated list of a user's badges in one category (`GET /v4/user/badges/{username}?method=full`).
+    static func userBadges(_ username: String, segment: UserBadgeSegment, sort: String = "unlocked",
+                           offset: Int = 0, limit: Int = 25) -> APIRequest {
+        APIRequest(path: "/v4/user/badges/\(username)", query: [
+            "limit": "\(limit)",
+            "method": "full",
+            "mode": "v2",
+            "offset": "\(offset)",
+            "segment": segment.rawValue,
+            "sort": sort,
+        ])
+    }
+
+    /// Paginated list of venues a user has checked in at (`GET /v4/user/venues/{username}`).
+    static func userVenues(_ username: String, sort: String = "date", verifiedOnly: Bool = false,
+                           offset: Int = 0) -> APIRequest {
+        var q = [
+            "categories": "1",
+            "sort": sort,
+            "verifiedVenueOnly": verifiedOnly ? "true" : "false",
+        ]
+        if offset > 0 { q["offset"] = "\(offset)" }
+        return APIRequest(path: "/v4/user/venues/\(username)", query: q)
     }
 
     /// Every beer id the signed-in user has had, in one response (no per-beer details). Behind `HadBeers`.
@@ -342,12 +490,41 @@ extension APIRequest {
         return APIRequest(path: "/v4/venue/checkins/\(venueId)", query: q)
     }
 
-    static func venueMenu(_ venueId: Int, limit: Int = 100) -> APIRequest {
+    /// A venue's digital beer menu sections and items. Non-empty `sort` values weren't captured in
+    /// `untappd-private-api`, so callers default to `""` and apply client-side sorting when needed.
+    static func venueMenu(
+        _ venueId: Int,
+        limit: Int = 100,
+        query: String = "",
+        hasNotHadBefore: Bool = false,
+        sort: String = "",
+        styles: [String] = [],
+        servingStyles: [String] = [],
+        brewery: String = "",
+        countries: [String] = [],
+        menuId: Int? = nil,
+        flattenWhenFiltering: Bool = true
+    ) -> APIRequest {
         APIRequest(method: .post, path: "/v4/menus/sections", form: [
-            "brewery": "", "countries": "", "flatten_when_filtering": "true", "has_not_had_before": "false",
-            "limit": "\(limit)", "menu_id": "", "q": "", "serving_styles": "", "sort": "", "styles": "",
-            "types": "", "untappd_community_awards": "false", "venue_id": "\(venueId)",
+            "brewery": brewery,
+            "countries": countries.joined(separator: ","),
+            "flatten_when_filtering": flattenWhenFiltering ? "true" : "false",
+            "has_not_had_before": hasNotHadBefore ? "true" : "false",
+            "limit": "\(limit)",
+            "menu_id": menuId.map(String.init) ?? "",
+            "q": query,
+            "serving_styles": servingStyles.joined(separator: ","),
+            "sort": sort,
+            "styles": styles.joined(separator: ","),
+            "types": "",
+            "untappd_community_awards": "false",
+            "venue_id": "\(venueId)",
         ])
+    }
+
+    /// Available filter options (styles, breweries, countries, menus) for a venue's digital menu.
+    static func venueMenuFilters(_ venueId: Int) -> APIRequest {
+        APIRequest(path: "/v4/menus/filters", query: ["venue_id": "\(venueId)"])
     }
 
     /// Venue details. With `compact=venue_menu_compact`, `recently_added` lists the beers on
@@ -466,11 +643,26 @@ extension APIRequest {
         APIRequest(path: "/v4/brewery/info/\(id)", query: ["collaborations": "true", "dist_pref": "m", "radius": "10"])
     }
 
-    /// A brewery's beers, most popular first. The docs capture the filters but no paging; `offset`
-    /// is the public API's parameter for it and is assumed to work here.
-    static func breweryBeers(_ id: Int, offset: Int = 0) -> APIRequest {
-        var q = ["hasNotHadBefore": "false", "q": "", "showAllBeers": "false", "sort": "most_popular",
-                 "styles": "true", "type_id": ""]
+    /// A brewery's beers, with optional search, "haven't had" filter, sort key, and style id
+    /// (`type_id`). The docs capture the filter parameters but no paging; `offset` is the public
+    /// API's parameter for it and is assumed to work here.
+    static func breweryBeers(
+        _ id: Int,
+        offset: Int = 0,
+        query: String = "",
+        hasNotHadBefore: Bool = false,
+        sort: String = "most_popular",
+        styleId: Int? = nil,
+        showAllBeers: Bool = false
+    ) -> APIRequest {
+        var q = [
+            "hasNotHadBefore": hasNotHadBefore ? "true" : "false",
+            "q": query,
+            "showAllBeers": showAllBeers ? "true" : "false",
+            "sort": sort,
+            "styles": "true",
+            "type_id": styleId.map(String.init) ?? "",
+        ]
         if offset > 0 { q["offset"] = "\(offset)" }
         return APIRequest(path: "/v4/brewery/beer_list/\(id)", query: q)
     }

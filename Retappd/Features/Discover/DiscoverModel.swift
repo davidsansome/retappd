@@ -201,6 +201,16 @@ final class DiscoverModel {
         }
     }
 
+    /// The friends in `friendsNearby`, closest first (most recent first at the same venue), each
+    /// once: the check-in sheet offers them to tag after the recently tagged ones.
+    var nearbyFriends: [User] {
+        var seen = Set<Int>()
+        return friendsNearby
+            .sorted { ($0.distance ?? .infinity, $1.latest) < ($1.distance ?? .infinity, $0.latest) }
+            .flatMap { $0.checkins.compactMap(\.user) }
+            .filter { seen.insert($0.id).inserted }
+    }
+
     /// Candidate venues for the check-in sheet, best guess first.
     var checkInVenues: [Venue] {
         var out: [Venue] = [.atHome]
