@@ -56,4 +56,15 @@ final class PendingCheckinsTests: XCTestCase {
         XCTAssertEqual(item.accuracy, 65)
         XCTAssertEqual(item.location?.coordinate.longitude, -0.12)
     }
+
+    func testLateShoutAfterTheGracePeriod() {
+        let saved = Date(timeIntervalSince1970: 1_000_000)
+        let soon = saved.addingTimeInterval(59 * 60)
+        let late = saved.addingTimeInterval(61 * 60)
+        XCTAssertEqual(CheckInSheet.lateShout("Lovely", savedAt: saved, now: soon), "Lovely")
+        XCTAssertEqual(CheckInSheet.lateShout("Lovely", savedAt: saved, now: late), "LCI\nLovely")
+        XCTAssertEqual(CheckInSheet.lateShout("", savedAt: saved, now: late), "LCI")
+        XCTAssertEqual(CheckInSheet.lateShout("LCI\nLovely", savedAt: saved, now: late), "LCI\nLovely")
+        XCTAssertEqual(CheckInSheet.lateShout("Lovely", savedAt: nil, now: late), "Lovely")
+    }
 }
