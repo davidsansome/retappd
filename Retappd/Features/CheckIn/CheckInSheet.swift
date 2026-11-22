@@ -418,33 +418,66 @@ struct CheckInSheet: View {
 
     private var submitButton: some View {
         let offline = connectivity.offlineMode && !finished
+        // A new check-in can be saved for later; an edit has to wait for the network.
+        let savesForLater = offline && editing == nil
         return VStack(spacing: 8) {
-            if offline {
-                Text("Offline mode is on. Turn it off at the top to check in.")
+            if savesForLater {
+                Text("You're offline. This is saved on your phone with the time and roughly where you are.")
+                    .font(.caption)
+                    .foregroundStyle(Taproom.muted)
+                    .multilineTextAlignment(.center)
+            } else if offline {
+                Text("Offline mode is on. Turn it off at the top to save changes.")
                     .font(.caption)
                     .foregroundStyle(Taproom.muted)
                     .multilineTextAlignment(.center)
             }
-            Button(action: finished ? { dismiss() } : submit) {
+            Button(action: finished ? { dismiss() } : savesForLater ? saveForLater : submit) {
                 if busy {
                     ProgressView().tint(Taproom.background)
+                } else if savesForLater {
+                    Label("Save for later", systemImage: "bookmark")
                 } else {
                     Text(finished ? "Done" : editing == nil ? "Check in" : "Save")
                 }
             }
             .buttonStyle(TaproomPrimaryButton())
             .keyboardShortcut(.return, modifiers: .command)
-            .disabled(busy || offline)
+            .disabled(busy || (offline && !savesForLater))
         }
         .taproomBottomBar()
     }
 
+    /// Offline: keeps everything filled in so far, with the time and rough location, to finish
+    /// once the connection is back.
+    private func saveForLater() {
+        guard let beer, editing == nil else { return }
+        busy = true
+        let image = photo
+        Task {
+            defer { busy = false }
+            let jpeg: Data? = if let image { await Task.detached { CheckinPhoto.jpeg(image) }.value } else { nil }
+            var item = PendingCheckin(username: "", savedAt: .now, beer: beer, venue: venue, rating: rating,
+                                      shout: shout, servingId: serving?.id, servingName: serving?.name)
+            item.setLocation(location.location)
+            guard PendingCheckins.shared.add(item, photo: jpeg) != nil else {
+                error = "Couldn't save this for later."
+                return
+            }
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            dismiss()
+        }
+    }
+
     // MARK: Venues
 
-    /// Untappd at Home, then the venue you're at or picked, then your recent venues.
+    /// Untappd at Home, then the venue you're at or picked, then (offline) places you've
+    /// checked in at near here, then your recent venues.
     private var chipVenues: [Venue] {
         var out: [Venue] = [.atHome]
-        for v in [extraVenue].compactMap({ $0 }) + options.recentVenues where !out.contains(where: { $0.id == v.id }) {
+        let visitedNearby = connectivity.offlineMode
+            ? location.location.map { VenueHistory.shared.nearby($0, limit: 4) } ?? [] : []
+        for v in [extraVenue].compactMap({ $0 }) + visitedNearby + options.recentVenues where !out.contains(where: { $0.id == v.id }) {
             out.append(v)
         }
         return out

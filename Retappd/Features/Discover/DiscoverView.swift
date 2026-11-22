@@ -15,6 +15,8 @@ struct DiscoverView: View {
     @State private var containerWidth: CGFloat = 0
     @State private var selectedVenue: Venue?
     @State private var connectivity = Connectivity.shared
+    /// The search last saved for later, so its card can say so.
+    @State private var savedQuery: String?
 
     private var isSplit: Bool { containerWidth >= .twoColumnThreshold }
 
@@ -251,6 +253,43 @@ struct DiscoverView: View {
         if !rest.isEmpty {
             TaproomSection(direct.isEmpty ? "Venues" : "More venues") { venueRows(rest.prefix(15)) }
         }
+
+        if connectivity.offlineMode || model.isSlow {
+            TaproomSection("Not here?") { saveSearchCard }
+        }
+    }
+
+    /// Offline (or stuck): keep the search, the time and roughly where you are, to finish later.
+    @ViewBuilder private var saveSearchCard: some View {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let saved = savedQuery == q
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(saved ? "Saved “\(q)” for later" : "Save “\(q)” for later")
+                    .font(.headline)
+                Text(saved
+                     ? "It's in your list to check in once you're back online."
+                     : "We'll keep the search, the time and roughly where you are, and remind you once you're back online.")
+                    .font(.footnote).foregroundStyle(Taproom.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !saved {
+                Button {
+                    var item = PendingCheckin(username: "", savedAt: .now, query: q)
+                    item.setLocation(location.location)
+                    if PendingCheckins.shared.add(item) != nil {
+                        savedQuery = q
+                    }
+                } label: {
+                    Label("Save for later", systemImage: "bookmark")
+                }
+                .buttonStyle(TaproomOutlineButton())
+                .sensoryFeedback(.success, trigger: savedQuery)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Taproom.glassRim, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])))
     }
 }
 

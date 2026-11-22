@@ -173,6 +173,12 @@ row) for lists of many checkins at one place, grouped under recency labels
   "Add friend", or a muted line when they're already a friend, followed, or a request is pending
   either way ("Friend request sent. Waiting for them to accept."). When they asked you (waiting,
   or rejected by you), the muted line is followed by an Accept button.
+- **Offline.** With offline mode on (`TaproomOfflineSwitch`), Discover leads with a `TaproomNotice`
+  and its search ends in a "Not here?" section: a card with a 1.5pt dashed `glassRim` outline,
+  "Save “query” for later" in headline type over a muted footnote, and a `TaproomOutlineButton`
+  "Save for later" (bookmark icon), which turns into a "Saved" message once tapped. The check-in
+  screen's main button becomes "Save for later" with a muted caption above it, and its venue chips
+  add places you've checked in at nearby (`VenueHistory`).
 - **Settings** use cards of switch rows (`Toggle` tinted amber), chips for multi-select options
   and tiles with previews for the theme.
 
