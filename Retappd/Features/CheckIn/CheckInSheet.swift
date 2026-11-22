@@ -8,6 +8,8 @@ struct CheckInSheet: View {
     let beer: BeerLite?
     /// The user's own checkin being edited; nil when making a new one.
     let editing: Checkin?
+    /// A check-in saved for later that this finishes; removed from the list once it's posted.
+    let pending: PendingCheckin?
     @State var venue: Venue?
     @Environment(\.dismiss) private var dismiss
     @Environment(LocationProvider.self) private var location
@@ -48,6 +50,7 @@ struct CheckInSheet: View {
     init(beer: BeerLite, venue: Venue?) {
         self.beer = beer
         editing = nil
+        pending = nil
         let v = venue?.foursquareId != nil ? venue : nil
         _venue = State(initialValue: v)
         _extraVenue = State(initialValue: v)
@@ -57,6 +60,7 @@ struct CheckInSheet: View {
     init(editing checkin: Checkin) {
         beer = checkin.beerLite
         editing = checkin
+        pending = nil
         _venue = State(initialValue: nil)
         _rating = State(initialValue: checkin.rating ?? 0)
         _shout = State(initialValue: checkin.comment ?? "")
@@ -66,10 +70,36 @@ struct CheckInSheet: View {
         _shopLoaded = State(initialValue: checkin.retailVenueKnown && checkin.retailVenue.map { $0.foursquareId != nil } ?? true)
     }
 
+    /// Finishes a check-in saved for later, as `beer` (the saved one, or one found for a saved
+    /// search): what was filled in comes back, and it's posted from where it was saved.
+    init(pending item: PendingCheckin, beer: BeerLite) {
+        self.beer = beer
+        editing = nil
+        pending = item
+        _venue = State(initialValue: item.venue)
+        _extraVenue = State(initialValue: item.venue)
+        _rating = State(initialValue: item.rating)
+        _shout = State(initialValue: item.shout)
+        _photo = State(initialValue: PendingCheckins.shared.photo(for: item).flatMap(UIImage.init(data:)))
+    }
+
+    /// Untappd hides check-ins that give their own time from friends' feeds, so a late one is
+    /// posted now, and its shout starts "LCI" (late check-in) once it's more than this late.
+    static let lateCheckInGrace: TimeInterval = 60 * 60
+
+    /// The shout to post for a check-in saved at `savedAt`: "LCI" and a newline in front once
+    /// it's past the grace period (and not already there).
+    static func lateShout(_ shout: String, savedAt: Date?, now: Date = .now) -> String {
+        guard let savedAt, now.timeIntervalSince(savedAt) > lateCheckInGrace else { return shout }
+        if shout == "LCI" || shout.hasPrefix("LCI\n") { return shout }
+        return shout.isEmpty ? "LCI" : "LCI\n" + shout
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
+                    if let pending { savedLine(pending) }
                     hero
                     comment
                     // The official app's order: serving, friends, venue, flavours, shop.
@@ -137,6 +167,16 @@ struct CheckInSheet: View {
     }
 
     // MARK: Sections
+
+    private func savedLine(_ item: PendingCheckin) -> some View {
+        Label {
+            Text("Saved \(item.savedAt.formatted(.relative(presentation: .named))), \(item.savedAt.formatted(date: .omitted, time: .shortened))")
+        } icon: {
+            Image(systemName: "bookmark.fill").foregroundStyle(Taproom.amber)
+        }
+        .font(.footnote)
+        .foregroundStyle(Taproom.muted)
+    }
 
     private var hero: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -433,6 +473,16 @@ struct CheckInSheet: View {
                     .foregroundStyle(Taproom.muted)
                     .multilineTextAlignment(.center)
             }
+            if let pending, !finished {
+                Button("Remove from list", role: .destructive) {
+                    PendingCheckins.shared.remove(pending.id)
+                    dismiss()
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Taproom.destructive)
+                .frame(minHeight: 36)
+                .disabled(busy)
+            }
             Button(action: finished ? { dismiss() } : savesForLater ? saveForLater : submit) {
                 if busy {
                     ProgressView().tint(Taproom.background)
@@ -476,8 +526,9 @@ struct CheckInSheet: View {
     /// checked in at near here, then your recent venues.
     private var chipVenues: [Venue] {
         var out: [Venue] = [.atHome]
-        let visitedNearby = connectivity.offlineMode
-            ? location.location.map { VenueHistory.shared.nearby($0, limit: 4) } ?? [] : []
+        // A saved check-in suggests places near where it was saved, not where you are now.
+        let near = pending?.location ?? (connectivity.offlineMode ? location.location : nil)
+        let visitedNearby = near.map { VenueHistory.shared.nearby($0, limit: 4) } ?? []
         for v in [extraVenue].compactMap({ $0 }) + visitedNearby + options.recentVenues where !out.contains(where: { $0.id == v.id }) {
             out.append(v)
         }
@@ -597,9 +648,16 @@ struct CheckInSheet: View {
 
     /// Selects the edited checkin's serving type once the list of types has loaded.
     private func preselectServing() {
-        guard !preselectedServing, let name = editing?.servingType else { return }
-        guard let match = options.servingTypes.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame })
-        else { return }
+        guard !preselectedServing else { return }
+        let match: ServingType?
+        if let id = pending?.servingId {
+            match = options.servingTypes.first { $0.id == id }
+        } else if let name = editing?.servingType {
+            match = options.servingTypes.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        } else {
+            return
+        }
+        guard let match else { return }
         serving = match
         preselectedServing = true
     }
@@ -621,10 +679,23 @@ struct CheckInSheet: View {
 
     private func add(jpeg: Data?) async {
         guard let beer else { return }
-        let loc = location.location
+        // A saved check-in is posted from where it was saved.
+        let loc = pending?.location ?? location.location
+        // Venues from your history may lack the Foursquare id `checkin/add` needs.
+        if var v = venue, v.foursquareId == nil, let id = v.venueId {
+            if let info = try? await UntappdAPI.shared.fetch(.venueInfo(id), as: VenueInfo.self), let full = info.venue {
+                v.merge(full)
+            }
+            guard v.foursquareId != nil else {
+                error = "Couldn't look up \(v.name). Pick the venue again from the list."
+                return
+            }
+            venue = v
+        }
         let req = APIRequest.checkin(beer: beer.bid, foursquareId: venue?.foursquareId,
                                      lat: loc?.coordinate.latitude, lng: loc?.coordinate.longitude,
-                                     rating: rating, shout: shout, containerId: serving?.id,
+                                     rating: rating, shout: Self.lateShout(shout, savedAt: pending?.savedAt),
+                                     containerId: serving?.id,
                                      taggedUserIds: tagged.map(\.id), purchaseFoursquareId: shop?.foursquareId,
                                      flavorIds: flavors.map(\.id), isPhoto: jpeg != nil)
         let r: CheckinAddResponse
@@ -642,6 +713,7 @@ struct CheckInSheet: View {
         await LocalIndex.shared.add(beers: [had])
         HadBeers.shared.add(beer.bid)
         if let venue { VenueHistory.shared.record(venue, checkinId: r.checkinId) }
+        if let pending { PendingCheckins.shared.remove(pending.id) }
         let uploaded = await upload(jpeg, r, checkinId: r.checkinId)
         NotificationCenter.default.post(name: .didCheckIn, object: nil)
         if uploaded { dismiss() }

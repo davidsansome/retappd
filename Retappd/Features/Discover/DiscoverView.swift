@@ -17,6 +17,16 @@ struct DiscoverView: View {
     @State private var connectivity = Connectivity.shared
     /// The search last saved for later, so its card can say so.
     @State private var savedQuery: String?
+    /// A saved check-in being finished.
+    @State private var finishing: Finishing?
+    /// A saved search whose beer is being looked for: the next beer tapped finishes it.
+    @State private var finding: PendingCheckin?
+
+    private struct Finishing: Identifiable {
+        var item: PendingCheckin
+        var beer: BeerLite
+        var id: UUID { item.id }
+    }
 
     private var isSplit: Bool { containerWidth >= .twoColumnThreshold }
 
@@ -46,6 +56,14 @@ struct DiscoverView: View {
         // Venues, and the checkins and people on their pages.
         .modifier(CheckinDestinations(enabled: true, me: model.me))
         .checkInPresentation(item: $checkInBeer) { CheckInSheet(beer: $0, venue: model.here.first) }
+        .checkInPresentation(item: $finishing) { CheckInSheet(pending: $0.item, beer: $0.beer) }
+        .onChange(of: finishing == nil) { _, closed in
+            // Back from finishing a saved search: stop looking for it if it was posted.
+            if closed, let f = finding, !PendingCheckins.shared.items.contains(where: { $0.id == f.id }) {
+                finding = nil
+                query = ""
+            }
+        }
         .sheet(isPresented: $scanning, onDismiss: {
             // Open the check-in once the scanner has gone, as only one modal shows at a time.
             if let b = scannedBeer { scannedBeer = nil; checkInBeer = b }
@@ -127,6 +145,13 @@ struct DiscoverView: View {
 
     /// The offline banner, or the offer to go offline when a search is taking too long.
     @ViewBuilder private var connectionNotice: some View {
+        if let f = finding {
+            TaproomNotice(systemImage: "bookmark.fill", title: "Finding “\(f.query ?? "")”",
+                          message: "Pick the beer to finish the check-in you saved \(f.savedAt.formatted(.relative(presentation: .named))).") {
+                Button("Stop looking") { finding = nil }
+                    .buttonStyle(TaproomOutlineButton())
+            }
+        }
         if connectivity.offlineMode {
             TaproomNotice(systemImage: "clock.arrow.circlepath", title: "Offline mode is on",
                           message: "Search shows beers and venues this phone already knows. Turn it off at the top when you have a good connection.")
@@ -152,6 +177,13 @@ struct DiscoverView: View {
     // MARK: Nearby
 
     @ViewBuilder private var nearbyContent: some View {
+        ToCheckInSection(
+            onCheckIn: { item in if let b = item.beer { finishing = Finishing(item: item, beer: b) } },
+            onFind: { item in
+                finding = item
+                query = item.query ?? ""
+            })
+
         if location.isDenied {
             Label("Location access is off. Turn it on in Settings to see venues near you, or search above.",
                   systemImage: "location.slash")
@@ -242,7 +274,9 @@ struct DiscoverView: View {
             }
             VStack(spacing: 0) {
                 ForEach(model.beerResults.prefix(20)) { b in
-                    Button { checkInBeer = b } label: { BeerRow(beer: b) }
+                    Button {
+                        if let f = finding { finishing = Finishing(item: f, beer: b) } else { checkInBeer = b }
+                    } label: { BeerRow(beer: b) }
                         .buttonStyle(TaproomRowStyle())
                         .taproomRowDivider()
                         .accessibilityHint("Checks in this beer")
