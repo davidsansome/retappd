@@ -1,8 +1,10 @@
 import SwiftUI
 
-/// Discover's "To check in" list: check-ins saved for later while offline. It appears only once
-/// offline mode is off and real Untappd responses have proven the connection good
-/// (`Connectivity.prove`), so a flaky signal doesn't put you in front of a check-in that fails.
+/// Discover's "To check in" list: check-ins saved for later while offline. The rows to finish them
+/// appear only once offline mode is off and real Untappd responses have proven the connection
+/// good (`Connectivity.prove`), so a flaky signal doesn't put you in front of a check-in that
+/// fails. Turning offline mode off yourself counts as that proof (`Connectivity.userWentOnline`).
+/// Until then it shows how many are waiting, and why.
 struct ToCheckInSection: View {
     /// Finish this saved check-in (it has a beer).
     var onCheckIn: (PendingCheckin) -> Void
@@ -16,27 +18,56 @@ struct ToCheckInSection: View {
 
     var body: some View {
         Group {
-            if proven && !connectivity.offlineMode && !items.isEmpty {
+            if !items.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 6) {
                         Text("To check in").font(Taproom.sectionLabel)
                         TaproomCountBadge(count: items.count)
                     }
-                    VStack(spacing: 0) {
-                        ForEach(items) { item in
-                            row(item)
-                            if item.id != items.last?.id {
-                                Rectangle().fill(Taproom.border).frame(height: 1)
-                            }
-                        }
+                    if connectivity.offlineMode || !(proven || connectivity.userWentOnline) {
+                        waiting
+                    } else {
+                        list
                     }
-                    .taproomCard()
-                    Text("Check-ins post at the time you finish them. Ones more than an hour late start “LCI”.")
-                        .font(.caption).foregroundStyle(Taproom.muted)
                 }
             }
         }
         .task(id: ProofKey(waiting: !items.isEmpty, offline: connectivity.offlineMode)) { await waitForProof() }
+    }
+
+    /// Before the connection is proven: say why the list isn't offered yet, so switching back
+    /// online doesn't look like it did nothing.
+    private var waiting: some View {
+        HStack(spacing: 10) {
+            if connectivity.offlineMode {
+                Image(systemName: "wifi.slash").foregroundStyle(Taproom.muted).accessibilityHidden(true)
+                Text("Saved for when you're back online. Turn offline mode off to finish them.")
+            } else {
+                ProgressView().controlSize(.small)
+                Text("Checking your connection is steady before you finish these. This takes about a minute.")
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.footnote).foregroundStyle(Taproom.muted)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .taproomCard()
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder private var list: some View {
+        VStack(spacing: 0) {
+            ForEach(items) { item in
+                row(item)
+                if item.id != items.last?.id {
+                    Rectangle().fill(Taproom.border).frame(height: 1)
+                }
+            }
+        }
+        .taproomCard()
+        Text("Check-ins post at the time you finish them. Ones more than an hour late start “LCI”.")
+            .font(.caption).foregroundStyle(Taproom.muted)
     }
 
     private struct ProofKey: Equatable {

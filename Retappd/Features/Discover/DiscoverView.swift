@@ -85,6 +85,15 @@ struct DiscoverView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
                 connectionNotice
+                // Above search results too: a saved search leaves its text in the field.
+                if finding == nil {
+                    ToCheckInSection(
+                        onCheckIn: { item in if let b = item.beer { finishing = Finishing(item: item, beer: b) } },
+                        onFind: { item in
+                            finding = item
+                            query = item.query ?? ""
+                        })
+                }
                 if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     nearbyContent
                 } else {
@@ -177,13 +186,6 @@ struct DiscoverView: View {
     // MARK: Nearby
 
     @ViewBuilder private var nearbyContent: some View {
-        ToCheckInSection(
-            onCheckIn: { item in if let b = item.beer { finishing = Finishing(item: item, beer: b) } },
-            onFind: { item in
-                finding = item
-                query = item.query ?? ""
-            })
-
         if location.isDenied {
             Label("Location access is off. Turn it on in Settings to see venues near you, or search above.",
                   systemImage: "location.slash")
