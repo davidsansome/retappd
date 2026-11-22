@@ -87,18 +87,56 @@ struct TaproomChip: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.subheadline.weight(.medium))
+            .taproomChipLabel(on: on, leading: leading, dashed: dashed)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+extension View {
+    /// Capsule chip styling matching `TaproomChip`, for `Menu` labels (e.g. Sort and Style pickers)
+    /// where SwiftUI ignores a `ButtonStyle` on the outer menu.
+    func taproomChipLabel(on: Bool, leading: CGFloat = 12, trailing: CGFloat = 12, dashed: Bool = false) -> some View {
+        font(.subheadline.weight(.medium))
             .foregroundStyle(on ? Taproom.onAmber : Taproom.ink)
             .padding(.leading, leading)
-            .padding(.trailing, 12)
+            .padding(.trailing, trailing)
             .frame(minHeight: 34)
             .background(on ? Taproom.amber : dashed ? Color.clear : Taproom.card, in: Capsule())
             .overlay {
                 Capsule().strokeBorder(on ? Taproom.amber : dashed ? Taproom.muted : Taproom.border,
                                        style: StrokeStyle(lineWidth: 1, dash: dashed ? [4, 3] : []))
             }
-            .opacity(configuration.isPressed ? 0.7 : 1)
             .contentShape(Capsule())
+    }
+}
+
+/// Empty state shown when search or filter chips hide every item in a list, with a "Clear filters" action.
+struct TaproomEmptyFilterView: View {
+    var title = "No matching beers"
+    var message = "Try adjusting your search or filters."
+    var clearButtonIdentifier: String? = nil
+    let onClear: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.title2)
+                .foregroundStyle(Taproom.muted)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.headline)
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(Taproom.muted)
+                .multilineTextAlignment(.center)
+            Button("Clear filters", action: onClear)
+                .buttonStyle(TaproomOutlineButton())
+                .frame(maxWidth: 220)
+                .padding(.top, 4)
+                .accessibilityIdentifier(clearButtonIdentifier ?? "")
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
     }
 }
 
@@ -445,6 +483,7 @@ struct TaproomSearchField: View {
     /// The leading icon, e.g. `location` for a "where" field.
     var systemImage = "magnifyingglass"
     var capitalization: TextInputAutocapitalization = .never
+    var fieldIdentifier: String? = nil
     @FocusState private var focused: Bool
     @State private var handledRequests = 0
 
@@ -457,6 +496,7 @@ struct TaproomSearchField: View {
                     .submitLabel(.search)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(capitalization)
+                    .accessibilityIdentifier(fieldIdentifier ?? "")
                 if !text.isEmpty {
                     Button("Clear", systemImage: "xmark.circle.fill") { text = "" }
                         .labelStyle(.iconOnly).foregroundStyle(Taproom.muted)
@@ -694,6 +734,7 @@ struct TaproomTabBar<Value: Hashable, Action: View>: View {
 struct TaproomSegmented<Value: Hashable>: View {
     let options: [(value: Value, title: String)]
     @Binding var selection: Value
+    var accessibilityID: ((Value) -> String)? = nil
 
     var body: some View {
         HStack(spacing: 2) {
@@ -711,6 +752,7 @@ struct TaproomSegmented<Value: Hashable>: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
+                .optionalAccessibilityID(accessibilityID?(option.value))
             }
         }
         .padding(2)
@@ -895,7 +937,8 @@ enum ExternalLinks {
     }
 }
 
-/// One or two rating columns side by side ("Everyone" beside "You" or "Your average").
+/// One or two rating columns side by side ("Everyone" beside "You" or "Your average"),
+/// with an optional full-width footer row underneath (e.g. "Friends" on a beer page).
 struct TaproomRatingCard: View {
     struct Column {
         let title: String
@@ -904,20 +947,28 @@ struct TaproomRatingCard: View {
         var caption: String? = nil
         var isLoading: Bool = false
         var isCaptionLoading: Bool = false
+        var accessibilityID: String? = nil
     }
 
     let leading: Column
     var trailing: Column? = nil
+    var footer: Column? = nil
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            column(leading)
-            if let trailing {
-                Rectangle().fill(Taproom.border).frame(width: 1)
-                column(trailing)
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
+                column(leading)
+                if let trailing {
+                    Rectangle().fill(Taproom.border).frame(width: 1)
+                    column(trailing)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            if let footer {
+                Rectangle().fill(Taproom.border).frame(height: 1)
+                footerRow(footer)
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
         .taproomCard()
         .accessibilityElement(children: .contain)
     }
@@ -953,6 +1004,50 @@ struct TaproomRatingCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .optionalAccessibilityID(c.accessibilityID)
+    }
+
+    private func footerRow(_ c: Column) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(c.title).font(.caption.weight(.semibold)).foregroundStyle(Taproom.muted)
+                if let caption = c.caption {
+                    Text(caption).font(.caption).foregroundStyle(Taproom.muted)
+                        .redacted(reason: (c.isLoading || c.isCaptionLoading) ? .placeholder : [])
+                        .accessibilityHidden(c.isLoading || c.isCaptionLoading)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if c.isLoading {
+                HStack(alignment: .lastTextBaseline, spacing: 26 * 0.16) {
+                    Text("3.80")
+                        .font(.system(size: 26, weight: .heavy).monospacedDigit())
+                        .tracking(-26 * 0.03)
+                        .redacted(reason: .placeholder)
+                    FilledGlass(rating: 0, lineWidth: 1.5)
+                        .frame(height: 26 * 0.8)
+                        .alignmentGuide(.lastTextBaseline) { $0[.bottom] }
+                }
+                .fixedSize()
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(c.title): loading")
+            } else if let rating = c.rating, rating > 0 {
+                TaproomRating(rating: rating, size: 26)
+            } else {
+                Text(c.empty).font(.system(size: 18, weight: .heavy)).tracking(-0.3).foregroundStyle(Taproom.muted)
+                    .accessibilityLabel("\(c.title): \(c.empty)")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .combine)
+        .optionalAccessibilityID(c.accessibilityID)
+    }
+}
+
+private extension View {
+    @ViewBuilder func optionalAccessibilityID(_ id: String?) -> some View {
+        if let id { accessibilityIdentifier(id) } else { self }
     }
 }
 

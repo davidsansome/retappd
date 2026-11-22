@@ -454,6 +454,18 @@ struct Checkin: Decodable, Hashable, Identifiable {
         var image: URL?
         /// The `lg` size of `badge_image`, when there is one.
         var largeImage: URL?
+
+        init(id: Int, badgeId: Int?, userBadgeId: Int? = nil, name: String, description: String? = nil,
+             image: URL? = nil, largeImage: URL? = nil) {
+            self.id = id
+            self.badgeId = badgeId
+            self.userBadgeId = userBadgeId
+            self.name = name
+            self.description = description
+            self.image = image
+            self.largeImage = largeImage
+        }
+
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: AnyKey.self)
             badgeId = c.int("badge_id")
@@ -740,11 +752,18 @@ struct FriendRequestResult: Decodable {
 struct CheckinPage: Decodable {
     var checkins: [Checkin]
     var nextMaxId: Int?
+    /// Aggregate rating returned by beer check-in feeds (`rating.rating_score` / `rating.rating_count`),
+    /// notably friends' average rating when `type=friends`.
+    var ratingScore: Double?
+    var ratingCount: Int?
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
         checkins = c.items("checkins")
         nextMaxId = c.nested("pagination")?.int("max_id")
+        let r = c.nested("rating")
+        ratingScore = r?.double("rating_score").flatMap { $0 > 0 ? $0 : nil }
+        ratingCount = r?.int("rating_count")
     }
 }
 
@@ -936,6 +955,15 @@ struct MenuSections: Decodable {
         var menuName: String?
         var name: String?
         var items: [Item]
+        var totalCount: Int?
+        var lastPage: Bool?
+
+        /// True when the server has more items in this section than were returned in this response.
+        var isTruncated: Bool {
+            if lastPage == false { return true }
+            if let totalCount, totalCount > items.count { return true }
+            return false
+        }
 
         /// Section heading, leaving out a menu name that's just the venue's name again.
         func title(venueName: String? = nil) -> String {
@@ -946,12 +974,24 @@ struct MenuSections: Decodable {
             }
         }
 
+        init(id: Int, menuName: String? = nil, name: String? = nil, items: [Item],
+             totalCount: Int? = nil, lastPage: Bool? = nil) {
+            self.id = id
+            self.menuName = menuName
+            self.name = name
+            self.items = items
+            self.totalCount = totalCount
+            self.lastPage = lastPage
+        }
+
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: AnyKey.self)
             id = c.int("section_id") ?? 0
             menuName = c.text("menu_name")
             name = c.text("section_name")
             items = c.list("items")
+            totalCount = c.int("total_count")
+            lastPage = c.bool("last_page")
         }
     }
 
@@ -963,6 +1003,13 @@ struct MenuSections: Decodable {
 
         /// The number shown on the venue's menu: its tap number, else its 1-based menu position.
         var menuNumber: String? { tapNumber ?? position.map { "\($0 + 1)" } }
+
+        init(id: Int, beer: BeerLite?, tapNumber: String? = nil, position: Int? = nil) {
+            self.id = id
+            self.beer = beer
+            self.tapNumber = tapNumber
+            self.position = position
+        }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: AnyKey.self)
@@ -986,9 +1033,51 @@ struct MenuSections: Decodable {
         }
     }
 
+    init(sections: [Section]) {
+        self.sections = sections
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
         sections = c.list("sections")
+    }
+}
+
+/// `/v4/menus/filters`: available filter facets (styles, breweries, countries) for a venue's digital menu.
+struct VenueMenuFilters: Decodable {
+    var totalBeer: Int?
+    var styles: [FilterOption]
+    var breweries: [FilterOption]
+    var countries: [FilterOption]
+
+    struct FilterOption: Identifiable, Hashable, Sendable {
+        var id: String { name }
+        var name: String
+        var count: Int
+    }
+
+    init(totalBeer: Int? = nil, styles: [FilterOption] = [], breweries: [FilterOption] = [], countries: [FilterOption] = []) {
+        self.totalBeer = totalBeer
+        self.styles = styles
+        self.breweries = breweries
+        self.countries = countries
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        totalBeer = c.int("total_beer")
+        let f = c.nested("filters")
+        styles = Self.decodeMap(f, key: "styles")
+        breweries = Self.decodeMap(f, key: "breweries")
+        countries = Self.decodeMap(f, key: "countries")
+    }
+
+    private static func decodeMap(_ container: KeyedDecodingContainer<AnyKey>?, key: String) -> [FilterOption] {
+        guard let map = try? container?.decodeIfPresent([String: Int].self, forKey: AnyKey(key)) else { return [] }
+        return map
+            .filter { !$0.key.isEmpty && $0.value > 0 }
+            .map { FilterOption(name: $0.key, count: $0.value) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 }
 
@@ -1251,8 +1340,10 @@ struct AlgoliaBeerHits: Decodable {
 
 // MARK: - Account settings
 
-/// The parts of `/v4/account/usersettings` that the API lets us change.
+/// The parts of `/v4/account/usersettings` that the API lets us change, plus the canonical
+/// `user_name` for the authenticated token.
 struct AccountSettings: Decodable {
+    var userName: String?
     var isPrivate: Bool
     var isSearchable: Bool
     var publicToasts: Bool
@@ -1278,6 +1369,7 @@ struct AccountSettings: Decodable {
         let root = try decoder.container(keyedBy: AnyKey.self)
         let u = root.nested("user") ?? root
         let s = u.nested("settings")
+        userName = u.text("user_name")
         isPrivate = u.bool("is_private") ?? false
         isSearchable = s?.bool("is_search") ?? true
         publicToasts = s?.bool("public_toasts") ?? true

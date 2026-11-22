@@ -340,10 +340,11 @@ struct CheckInSheet: View {
         }
     }
 
-    /// Friends you're likely to tag as one-tap chips, then anyone else you tagged from the full
-    /// list, then "…" for the full list. Chips stay put when tapped; they just turn amber.
+    /// Friends you're likely to tag as one-tap chips (recently tagged, then friends checking in
+    /// nearby), then anyone else you tagged from the full list, then "…" for the full list. Chips
+    /// stay put when tapped; they just turn amber.
     private var friendChips: some View {
-        let suggested = options.suggestedFriends()
+        let suggested = options.suggestedFriends(nearby: discover.nearbyFriends)
         let others = tagged.filter { t in !suggested.contains { $0.id == t.id } }
         return FlowLayout(spacing: 6) {
             ForEach(suggested + others) { u in
@@ -701,24 +702,32 @@ struct FlavorPicker: View {
 
 struct FriendPicker: View {
     @Binding var selected: [User]
+    @Environment(DiscoverModel.self) private var discover
     @State private var options = CheckInOptions.shared
     @State private var filter = ""
 
     var body: some View {
         let recentIds = Set(options.recentlyTagged.map(\.id))
         let recent = User.filter(options.recentlyTagged, matching: filter)
+        let nearby = User.filter(options.nearbyFriends(discover.nearbyFriends), matching: filter)
+            .filter { !recentIds.contains($0.id) }
+        let shownIds = recentIds.union(nearby.map(\.id))
         let all = User.filter(options.allFriends, matching: filter)
-        let rest = filter.isEmpty ? all : all.filter { !recentIds.contains($0.id) }
+        let rest = filter.isEmpty ? all : all.filter { !shownIds.contains($0.id) }
+        let featured = !recent.isEmpty || !nearby.isEmpty
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Taproom.sectionSpacing) {
                 if !recent.isEmpty {
                     TaproomSection("Recently tagged") { rows(recent) }
                 }
-                TaproomSection(recent.isEmpty ? "Friends" : "All friends") {
+                if !nearby.isEmpty {
+                    TaproomSection("Nearby") { rows(nearby) }
+                }
+                TaproomSection(featured ? "All friends" : "Friends") {
                     rows(rest)
                     if options.loadingFriends {
                         ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
-                    } else if recent.isEmpty && rest.isEmpty {
+                    } else if !featured && rest.isEmpty {
                         Text(filter.isEmpty ? "No friends yet." : "No friends found.")
                             .foregroundStyle(Taproom.muted)
                     }
