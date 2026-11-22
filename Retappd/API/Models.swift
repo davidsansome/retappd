@@ -767,48 +767,6 @@ struct CheckinPage: Decodable {
     }
 }
 
-/// One page of `GET /v4/user/venues/{username}`: the venues a user has checked in at, newest
-/// visit first, paged with `offset`. See that endpoint in untappd-private-api. The venue objects
-/// carry no `foursquare` block in the captured samples, so `Venue.foursquareId` is nil here.
-struct UserVenuesPage: Decodable {
-    struct Item: Decodable, Hashable {
-        var venue: Venue
-        var visits: Int
-        var lastVisit: Date?
-        var recentCheckinId: Int?
-
-        init(venue: Venue, visits: Int = 1, lastVisit: Date? = nil, recentCheckinId: Int? = nil) {
-            self.venue = venue
-            self.visits = visits
-            self.lastVisit = lastVisit
-            self.recentCheckinId = recentCheckinId
-        }
-
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: AnyKey.self)
-            guard let v = c.obj("venue", Venue.self) else {
-                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "no venue"))
-            }
-            venue = v
-            visits = c.int("total_count") ?? 1
-            lastVisit = UntappdDate.parse(c.string("recent_visit"))
-            recentCheckinId = c.int("recent_checkin_id")
-        }
-    }
-
-    var items: [Item]
-    /// How many venues the user has checked in at, across every page.
-    var totalCount: Int?
-
-    init(items: [Item], totalCount: Int? = nil) { self.items = items; self.totalCount = totalCount }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: AnyKey.self)
-        items = c.items("venues")
-        totalCount = c.int("total_count")
-    }
-}
-
 // MARK: - Venue endpoints
 
 struct VenueAround: Decodable {

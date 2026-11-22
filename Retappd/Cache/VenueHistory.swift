@@ -142,7 +142,7 @@ final class VenueHistory {
                 break  // keep what this sync has read so far; the rest next time
             }
             guard gen == generation, currentUser() == user else { return }
-            total = p.totalCount ?? total
+            total = p.totalCount
             if p.items.isEmpty { reachedEnd = true; break }
             for item in p.items {
                 guard let id = item.venue.venueId else { continue }
@@ -151,7 +151,7 @@ final class VenueHistory {
                     reachedEnd = true
                     break pages
                 }
-                seen[id] = Entry(venue: item.venue, visits: item.visits, lastVisit: item.lastVisit,
+                seen[id] = Entry(venue: item.venue, visits: item.visitCount, lastVisit: item.recentVisit,
                                  recentCheckinId: item.recentCheckinId)
             }
             offset += p.items.count
