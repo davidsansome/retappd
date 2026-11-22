@@ -284,9 +284,25 @@ final class CheckInOptions {
         return out
     }
 
-    /// Friends to offer as one-tap chips: recently tagged ones, else the first of the rest.
-    func suggestedFriends(limit: Int = 5) -> [User] {
-        Array(orderedFriends.prefix(limit))
+    /// Friends to offer as one-tap chips: up to `limit` recently tagged ones, then up to `limit`
+    /// of `nearby` (friends checking in near you, closest first) not already offered, topped up
+    /// to `limit` from the rest alphabetically.
+    func suggestedFriends(limit: Int = 5, nearby: [User] = []) -> [User] {
+        var out = Array(recentlyTagged.prefix(limit))
+        var ids = Set(out.map(\.id))
+        let near = nearbyFriends(nearby).filter { !ids.contains($0.id) }.prefix(limit)
+        out += near
+        ids.formUnion(near.map(\.id))
+        for u in orderedFriends where out.count < limit && ids.insert(u.id).inserted {
+            out.append(u)
+        }
+        return out
+    }
+
+    /// `nearby` without duplicates or anyone just removed or blocked (whom the feed may still
+    /// show), in the order given.
+    func nearbyFriends(_ nearby: [User]) -> [User] {
+        dedupe(nearby)
     }
 
     func loadFlavorTags() async {
