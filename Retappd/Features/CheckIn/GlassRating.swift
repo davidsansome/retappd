@@ -254,7 +254,7 @@ struct GlassRating: View {
                 DragGesture(minimumDistance: 0)
                     .onChanged { v in
                         guard h > 0 else { return }
-                        beginUserInteraction()
+                        if !pouring { beginUserInteraction() }
                         rating = snap(Double((h - v.location.y) / (h * maxFill)) * 5)
                         if !pouring { pouring = true }
                         if touchStart == nil { touchStart = .now }

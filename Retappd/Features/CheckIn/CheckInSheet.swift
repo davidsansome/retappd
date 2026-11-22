@@ -44,6 +44,7 @@ struct CheckInSheet: View {
     /// shop back removes it, so it's looked up first if the checkin came without one.
     @State private var shopLoaded = true
     @State private var busy = false
+    @State private var submitted = false
     @State private var error: String?
     @State private var preselectedServing = false
 
@@ -487,7 +488,7 @@ struct CheckInSheet: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Taproom.destructive)
                 .frame(minHeight: 36)
-                .disabled(busy)
+                .disabled(busy || submitted)
             }
             Button(action: savesForLater ? saveForLater : submit) {
                 if busy {
@@ -500,7 +501,7 @@ struct CheckInSheet: View {
             }
             .buttonStyle(TaproomPrimaryButton())
             .keyboardShortcut(.return, modifiers: .command)
-            .disabled(busy || (offline && !savesForLater))
+            .disabled(busy || submitted || (offline && !savesForLater))
         }
         .taproomBottomBar()
     }
@@ -678,9 +679,11 @@ struct CheckInSheet: View {
     }
 
     private func submit() {
+        guard !busy, !submitted else { return }
         error = nil
         if let editing {
             if shopLoaded {
+                submitted = true
                 enqueueEdit(editing)
             } else {
                 busy = true
@@ -696,6 +699,7 @@ struct CheckInSheet: View {
                 await resolveVenueAndAdd(v, id: id)
             }
         } else {
+            submitted = true
             add()
         }
     }
@@ -710,6 +714,7 @@ struct CheckInSheet: View {
             return
         }
         venue = v
+        submitted = true
         add()
     }
 
@@ -733,12 +738,8 @@ struct CheckInSheet: View {
         CheckinQueue.shared.enqueueNew(draft, beerName: beer.name, breweryName: beer.brewery,
                                        username: username, photo: photo)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        // Searches will show the tick from now on, whichever list the beer turns up in.
-        var had = beer
-        had.hasHad = true
-        HadBeers.shared.add(beer.bid)
         if let pending { PendingCheckins.shared.remove(pending.id) }
-        Task { await LocalIndex.shared.add(beers: [had]) }
+        Task { await LocalIndex.shared.add(beers: [beer]) }
         dismiss()
     }
 
@@ -749,6 +750,7 @@ struct CheckInSheet: View {
             error = "Couldn't load this checkin's shop. Check your connection and try again."
             return
         }
+        submitted = true
         enqueueEdit(original)
     }
 

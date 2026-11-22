@@ -555,6 +555,24 @@ extension APIRequest {
     /// checkin's shop, so `purchaseFoursquareId` must be the shop to keep, or nil to remove it.
     static func editCheckin(_ checkin: Checkin, rating: Double, shout: String, containerId: Int?,
                             purchaseFoursquareId: String?, isPhoto: Bool = false) -> APIRequest {
+        editCheckin(
+            checkinId: checkin.id,
+            beerBid: checkin.beerLite?.bid,
+            venueFoursquareId: checkin.venue?.foursquareId,
+            venueLat: checkin.venue?.lat,
+            venueLng: checkin.venue?.lng,
+            rating: rating,
+            shout: shout,
+            containerId: containerId,
+            purchaseFoursquareId: purchaseFoursquareId,
+            isPhoto: isPhoto
+        )
+    }
+
+    static func editCheckin(checkinId: Int, beerBid: Int?, venueFoursquareId: String?,
+                            venueLat: Double?, venueLng: Double?, rating: Double, shout: String,
+                            containerId: Int?, purchaseFoursquareId: String?,
+                            isPhoto: Bool = false) -> APIRequest {
         let tz = TimeZone.current
         var form = [
             "rating": rating > 0 ? String(format: "%.2f", rating) : "0",
@@ -567,16 +585,14 @@ extension APIRequest {
             "timezone": tz.identifier,
             "purchase_foursquare_id": purchaseFoursquareId ?? "",
         ]
-        if let bid = checkin.beerLite?.bid { form["bid"] = "\(bid)" }
+        if let beerBid { form["bid"] = "\(beerBid)" }
         if let containerId { form["container_id"] = "\(containerId)" }
-        if let v = checkin.venue {
-            if let f = v.foursquareId { form["foursquare_id"] = f }
-            if let lat = v.lat, let lng = v.lng {
-                form["geolat"] = String(format: "%.6f", lat)
-                form["geolng"] = String(format: "%.6f", lng)
-            }
+        if let venueFoursquareId { form["foursquare_id"] = venueFoursquareId }
+        if let venueLat, let venueLng {
+            form["geolat"] = String(format: "%.6f", venueLat)
+            form["geolng"] = String(format: "%.6f", venueLng)
         }
-        return APIRequest(method: .post, path: "/v4/checkin/edit/\(checkin.id)", form: form)
+        return APIRequest(method: .post, path: "/v4/checkin/edit/\(checkinId)", form: form)
     }
 
     static func addComment(_ text: String, to checkinId: Int) -> APIRequest {

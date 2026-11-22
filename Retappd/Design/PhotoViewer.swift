@@ -99,17 +99,20 @@ struct PhotoViewer: View {
         .accessibilityAction(.escape) { dismiss() }
         .presentationBackground(.clear)
         .task(id: url) {
-            async let full = ImagePipeline.shared.image(url, maxPixel: 2400)
-            if let placeholder, placeholder != url,
-               ImagePipeline.shared.cached(url, maxPixel: 2400) == nil {
-                Task {
-                    if let ph = await ImagePipeline.shared.image(placeholder, maxPixel: 1000) {
-                        placeholderImage = ph
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    if let loaded = await ImagePipeline.shared.image(url, maxPixel: 2400) {
+                        await MainActor.run { fullImage = loaded }
                     }
                 }
-            }
-            if let loaded = await full {
-                fullImage = loaded
+                if let placeholder, placeholder != url,
+                   ImagePipeline.shared.cached(url, maxPixel: 2400) == nil {
+                    group.addTask {
+                        if let ph = await ImagePipeline.shared.image(placeholder, maxPixel: 1000) {
+                            await MainActor.run { placeholderImage = ph }
+                        }
+                    }
+                }
             }
         }
     }

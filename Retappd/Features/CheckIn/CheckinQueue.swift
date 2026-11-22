@@ -153,6 +153,7 @@ struct SystemBackgroundTaskBeginner: BackgroundTaskBeginner {
 /// even if the user locks their phone or the OS suspends/terminates Retappd.
 final class BackgroundURLSessionTransport: NSObject, CheckinBackgroundTransport, URLSessionDataDelegate, @unchecked Sendable {
     static let sessionIdentifier = "com.davidsansome.retappd.checkin-upload"
+    static let resourceTimeout: TimeInterval = 15 * 60
 
     weak var delegate: CheckinBackgroundTransportDelegate?
 
@@ -169,6 +170,7 @@ final class BackgroundURLSessionTransport: NSObject, CheckinBackgroundTransport,
         config.sessionSendsLaunchEvents = true
         config.waitsForConnectivity = true
         config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = Self.resourceTimeout
         return URLSession(configuration: config, delegate: self, delegateQueue: delegateQueue)
     }()
 
@@ -244,26 +246,18 @@ final class BackgroundURLSessionTransport: NSObject, CheckinBackgroundTransport,
 
 extension APIRequest {
     static func editCheckin(draft: EditCheckinDraft, isPhoto: Bool) -> APIRequest {
-        let tz = TimeZone.current
-        var form = [
-            "rating": draft.rating > 0 ? String(format: "%.2f", draft.rating) : "0",
-            "shout": draft.shout,
-            "checkin_tags": "",
-            "flavor_profiles": "",
-            "is_photo": isPhoto ? "true" : "false",
-            "photo_file_ext": "jpg",
-            "gmt_offset": gmtOffsetString(for: tz),
-            "timezone": tz.identifier,
-            "purchase_foursquare_id": draft.purchaseFoursquareId ?? "",
-        ]
-        if let bid = draft.beerBid { form["bid"] = "\(bid)" }
-        if let containerId = draft.containerId { form["container_id"] = "\(containerId)" }
-        if let f = draft.venueFoursquareId { form["foursquare_id"] = f }
-        if let lat = draft.venueLat, let lng = draft.venueLng {
-            form["geolat"] = String(format: "%.6f", lat)
-            form["geolng"] = String(format: "%.6f", lng)
-        }
-        return APIRequest(method: .post, path: "/v4/checkin/edit/\(draft.checkinId)", form: form)
+        editCheckin(
+            checkinId: draft.checkinId,
+            beerBid: draft.beerBid,
+            venueFoursquareId: draft.venueFoursquareId,
+            venueLat: draft.venueLat,
+            venueLng: draft.venueLng,
+            rating: draft.rating,
+            shout: draft.shout,
+            containerId: draft.containerId,
+            purchaseFoursquareId: draft.purchaseFoursquareId,
+            isPhoto: isPhoto
+        )
     }
 }
 
@@ -292,6 +286,7 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
     @ObservationIgnored private let notificationAuthStatus: () async -> UNAuthorizationStatus
     @ObservationIgnored private let scheduleFailureNotification: (UUID, String) -> Void
     @ObservationIgnored private let onSuccessHaptic: () -> Void
+    @ObservationIgnored private let onCheckinSaved: @MainActor (Int) -> Void
     @ObservationIgnored private let onDiscardUnsavedCheckin: () -> Void
     @ObservationIgnored private let toastDuration: Duration
 
@@ -326,7 +321,8 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         },
         scheduleFailureNotification: @escaping (UUID, String) -> Void = CheckinQueue.defaultScheduleFailureNotification,
         onSuccessHaptic: @escaping () -> Void = { UINotificationFeedbackGenerator().notificationOccurred(.success) },
-        onDiscardUnsavedCheckin: @escaping () -> Void = { Task { await HadBeers.shared.refresh(force: true) } },
+        onCheckinSaved: @escaping @MainActor (Int) -> Void = { HadBeers.shared.add($0) },
+        onDiscardUnsavedCheckin: @escaping () -> Void = {},
         toastDuration: Duration = .seconds(2)
     ) {
         self.transport = transport
@@ -340,6 +336,7 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         self.notificationAuthStatus = notificationAuthStatus
         self.scheduleFailureNotification = scheduleFailureNotification
         self.onSuccessHaptic = onSuccessHaptic
+        self.onCheckinSaved = onCheckinSaved
         self.onDiscardUnsavedCheckin = onDiscardUnsavedCheckin
         self.toastDuration = toastDuration
         self.transport.delegate = self
@@ -423,12 +420,15 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
 
             switch job.phase {
             case .preparing:
-                if job.hasPhoto && !FileManager.default.fileExists(atPath: photoFileURL(for: job.id).path) {
+                let lostPhoto = job.hasPhoto && !FileManager.default.fileExists(atPath: photoFileURL(for: job.id).path)
+                if lostPhoto {
                     jobs[i].hasPhoto = false
                 }
                 jobs[i].phase = .failed(
                     step: .checkin,
-                    message: "Check-in was interrupted before it could be sent. Tap Retry to try again."
+                    message: lostPhoto
+                        ? "Check-in was interrupted and its photo couldn't be recovered. Retry will check in without the photo."
+                        : "Check-in was interrupted before it could be sent. Tap Retry to try again."
                 )
                 changed = true
 
@@ -544,6 +544,10 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
                 startStep3(jobID: id, checkinId: checkinId, destinationURL: destinationURL)
             }
         }
+    }
+
+    func cancel(_ id: UUID) {
+        discard(id)
     }
 
     func discard(_ id: UUID) {
@@ -786,6 +790,10 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         } catch {
             markFailed(jobID: job.id, step: .checkin, message: error.localizedDescription)
             return
+        }
+
+        if case .new = job.kind {
+            onCheckinSaved(job.beerBid)
         }
 
         guard job.hasPhoto else {

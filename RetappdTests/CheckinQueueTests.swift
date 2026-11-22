@@ -19,6 +19,7 @@ private final class MockCheckinTransport: CheckinBackgroundTransport {
     var activeTaskList: [ActiveBackgroundTask] = []
     var holdActiveTasks = false
     private var activeTasksContinuation: CheckedContinuation<[ActiveBackgroundTask], Never>?
+    var isHoldingActiveTasks: Bool { activeTasksContinuation != nil }
     var cancelledJobIDs: [UUID] = []
     var cancelAllCount = 0
 
@@ -111,6 +112,7 @@ final class CheckinQueueTests: XCTestCase {
     private var authStatus: UNAuthorizationStatus = .authorized
     private var scheduledNotifications: [(UUID, String)] = []
     private var hapticCount = 0
+    private var savedBeerIDs: [Int] = []
     private var unauthorizedCount = 0
 
     override func setUp() {
@@ -124,6 +126,7 @@ final class CheckinQueueTests: XCTestCase {
         authStatus = .authorized
         scheduledNotifications = []
         hapticCount = 0
+        savedBeerIDs = []
         unauthorizedCount = 0
     }
 
@@ -150,6 +153,7 @@ final class CheckinQueueTests: XCTestCase {
                 self?.scheduledNotifications.append((id, beer))
             },
             onSuccessHaptic: { [weak self] in self?.hapticCount += 1 },
+            onCheckinSaved: { [weak self] bid in self?.savedBeerIDs.append(bid) },
             onDiscardUnsavedCheckin: {},
             toastDuration: .milliseconds(50)
         )
@@ -196,9 +200,13 @@ final class CheckinQueueTests: XCTestCase {
 
     private func waitForUploads(in transport: MockCheckinTransport? = nil, count: Int) async {
         let t = transport ?? self.transport!
-        for _ in 0..<100 {
-            if t.uploads.count >= count { return }
-            try? await Task.sleep(for: .milliseconds(5))
+        await waitUntil { t.uploads.count >= count }
+    }
+
+    private func waitUntil(timeout: Duration = .seconds(2), condition: () -> Bool) async {
+        let deadline = ContinuousClock.now + timeout
+        while !condition() && ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(2))
         }
     }
 
@@ -585,14 +593,17 @@ final class CheckinQueueTests: XCTestCase {
             tempDir.appendingPathComponent(jobID.uuidString).appendingPathComponent("photo.jpg"),
             tempDir.appendingPathComponent(jobID.uuidString).appendingPathComponent("step1.form"),
         ]
+        var checkedAttributes = 0
         for file in filesToCheck {
             XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "Missing \(file.lastPathComponent)")
             let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
             if let protection = attrs[.protectionKey] as? FileProtectionType {
+                checkedAttributes += 1
                 XCTAssertEqual(protection, .completeUntilFirstUserAuthentication,
                                "Unexpected protection on \(file.lastPathComponent)")
             }
         }
+        try XCTSkipIf(checkedAttributes == 0, "File protection attributes are not exposed on this simulator filesystem")
     }
 
     // MARK: (k) cancelAllForSignOut cancels & wipes jobs
@@ -605,7 +616,7 @@ final class CheckinQueueTests: XCTestCase {
         XCTAssertEqual(queue.jobs.count, 1)
 
         queue.cancelAllForSignOut()
-        try? await Task.sleep(for: .milliseconds(20))
+        await waitUntil { self.transport.cancelAllCount == 1 }
 
         XCTAssertTrue(queue.jobs.isEmpty)
         XCTAssertNil(queue.completedToast)
@@ -675,7 +686,7 @@ final class CheckinQueueTests: XCTestCase {
                                      username: "alice", photo: nil)
         await waitForUploads(count: 1)
         transport.complete(taskDescription: transport.uploads[0].taskDescription, error: URLError(.timedOut))
-        try? await Task.sleep(for: .milliseconds(30))
+        await waitUntil { !self.scheduledNotifications.isEmpty }
 
         XCTAssertEqual(scheduledNotifications.count, 1)
         XCTAssertEqual(scheduledNotifications[0].0, jobID)
@@ -685,8 +696,12 @@ final class CheckinQueueTests: XCTestCase {
         authStatus = .denied
         queue.retry(jobID)
         transport.complete(taskDescription: transport.uploads[1].taskDescription, error: URLError(.timedOut))
-        try? await Task.sleep(for: .milliseconds(30))
+        await waitUntil { self.queueFailed(queue, jobID) }
         XCTAssertEqual(scheduledNotifications.count, 1)
+    }
+
+    private func queueFailed(_ queue: CheckinQueue, _ jobID: UUID) -> Bool {
+        queue.jobs.first { $0.id == jobID }?.isFailed == true
     }
 
     // MARK: Delegate / reconcile race ordering & background completion handler
@@ -704,7 +719,7 @@ final class CheckinQueueTests: XCTestCase {
         transport2.holdActiveTasks = true
         let queue2 = makeQueue(transport: transport2)
         queue2.start()
-        try? await Task.sleep(for: .milliseconds(15))
+        await waitUntil { transport2.isHoldingActiveTasks }
 
         // Step 1 completes while reconcile() is awaiting activeTasks() -> transitions to Step 2.
         let step1JSON = #"{"meta":{"code":200},"response":{"checkin_id":601,"photo_upload":{"url":"https://s3.test/601","destination_url":"https://cdn.test/601.jpg"}}}"#
@@ -779,7 +794,7 @@ final class CheckinQueueTests: XCTestCase {
         )
 
         queue.start()
-        try? await Task.sleep(for: .milliseconds(15))
+        await waitUntil { transport2.isHoldingActiveTasks }
 
         // Enqueue a new check-in while reconcile() is suspended awaiting activeTasks().
         let newJobID = queue.enqueueNew(sampleDraft(), beerName: "Fresh", breweryName: "Brew",
@@ -810,6 +825,7 @@ final class CheckinQueueTests: XCTestCase {
         transport2.holdActiveTasks = true
 
         var releaseAuthStatus: CheckedContinuation<UNAuthorizationStatus, Never>?
+        var authStatusRequested = false
         let queue2 = CheckinQueue(
             transport: transport2,
             storageDirectory: tempDir,
@@ -818,7 +834,8 @@ final class CheckinQueueTests: XCTestCase {
             notificationCenter: center,
             isAppActive: { false },
             notificationAuthStatus: {
-                await withCheckedContinuation { releaseAuthStatus = $0 }
+                authStatusRequested = true
+                return await withCheckedContinuation { releaseAuthStatus = $0 }
             },
             scheduleFailureNotification: { [weak self] id, beer in
                 self?.scheduledNotifications.append((id, beer))
@@ -831,12 +848,12 @@ final class CheckinQueueTests: XCTestCase {
         queue2.handleBackgroundSessionEvents(identifier: BackgroundURLSessionTransport.sessionIdentifier) {
             completionCalled = true
         }
-        try? await Task.sleep(for: .milliseconds(15))
+        await waitUntil { transport2.isHoldingActiveTasks }
 
         // Step 1 fails in background (spawns async notificationAuthStatus check) and session finishes events.
         transport2.complete(taskDescription: step1Desc, error: URLError(.timedOut))
         transport2.finishBackgroundEvents()
-        try? await Task.sleep(for: .milliseconds(15))
+        await waitUntil { authStatusRequested }
 
         // Completion handler MUST stay held while reconcile() and notification check are still running.
         XCTAssertFalse(completionCalled)
@@ -848,8 +865,77 @@ final class CheckinQueueTests: XCTestCase {
 
         // Release notification auth check -> notification scheduled, then completion handler fires.
         releaseAuthStatus?.resume(returning: .authorized)
-        try? await Task.sleep(for: .milliseconds(25))
+        await waitUntil { completionCalled }
         XCTAssertEqual(scheduledNotifications.count, 1)
         XCTAssertTrue(completionCalled)
+    }
+
+    func testOnCheckinSavedFiresOnlyAfterStep1SucceedsAndCancelStopsJob() async {
+        let queue = makeQueue()
+        let jobID = queue.enqueueNew(sampleDraft(bid: 777), beerName: "Pils", breweryName: "Brew",
+                                     username: "alice", photo: nil)
+        await waitForUploads(count: 1)
+        XCTAssertTrue(savedBeerIDs.isEmpty, "Must not mark beer had before Step 1 succeeds")
+
+        // Fail Step 1 -> still not saved
+        transport.complete(taskDescription: transport.uploads[0].taskDescription, error: URLError(.notConnectedToInternet))
+        XCTAssertTrue(savedBeerIDs.isEmpty)
+
+        // Retry Step 1 and succeed -> now marks had
+        queue.retry(jobID)
+        XCTAssertEqual(transport.uploads.count, 2)
+        transport.complete(
+            taskDescription: transport.uploads[1].taskDescription,
+            status: 200,
+            json: #"{"meta":{"code":200},"response":{"result":"success","checkin_id":888}}"#
+        )
+        XCTAssertEqual(savedBeerIDs, [777])
+
+        // Active job cancel removes job and cancels transport tasks
+        let jobID2 = queue.enqueueNew(sampleDraft(bid: 888), beerName: "Stout", breweryName: "Brew",
+                                      username: "alice", photo: nil)
+        await waitForUploads(count: 3)
+        queue.cancel(jobID2)
+        await waitUntil { self.transport.cancelledJobIDs.contains(jobID2) }
+        XCTAssertTrue(queue.jobs.isEmpty)
+        XCTAssertTrue(transport.cancelledJobIDs.contains(jobID2))
+    }
+
+    func testInterruptedPreparingWithMissingPhotoWarnsUser() async throws {
+        var releaseEncoder: CheckedContinuation<Data?, Never>?
+        let transport1 = MockCheckinTransport()
+        let queue1 = CheckinQueue(
+            transport: transport1,
+            storageDirectory: tempDir,
+            backgroundTasks: bgTasks,
+            imageEncoder: { _ in
+                await withCheckedContinuation { releaseEncoder = $0 }
+            },
+            tokenProvider: { "test-token" },
+            notificationCenter: center
+        )
+        let jobID = queue1.enqueueNew(sampleDraft(), beerName: "Porter", breweryName: "Brew",
+                                      username: "alice", photo: sampleImage())
+        await waitUntil { releaseEncoder != nil }
+        XCTAssertEqual(queue1.jobs.first?.phase, .preparing)
+
+        // Simulate app kill before photo.jpg was written; relaunch reconcile must mark photo lost.
+        let transport2 = MockCheckinTransport()
+        let queue2 = makeQueue(transport: transport2)
+        queue2.start()
+        await queue2.reconcile()
+
+        XCTAssertEqual(queue2.jobs.first?.id, jobID)
+        XCTAssertEqual(queue2.jobs.first?.hasPhoto, false)
+        XCTAssertEqual(queue2.jobs.first?.phase, .failed(
+            step: .checkin,
+            message: "Check-in was interrupted and its photo couldn't be recovered. Retry will check in without the photo."
+        ))
+        releaseEncoder?.resume(returning: nil)
+    }
+
+    func testBackgroundTransportHasBoundedResourceTimeout() {
+        XCTAssertGreaterThan(BackgroundURLSessionTransport.resourceTimeout, 0)
+        XCTAssertLessThanOrEqual(BackgroundURLSessionTransport.resourceTimeout, 30 * 60)
     }
 }
