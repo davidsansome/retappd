@@ -1298,8 +1298,10 @@ struct AlgoliaBeerHits: Decodable {
 
 // MARK: - Account settings
 
-/// The parts of `/v4/account/usersettings` that the API lets us change.
+/// The parts of `/v4/account/usersettings` that the API lets us change, plus the canonical
+/// `user_name` for the authenticated token.
 struct AccountSettings: Decodable {
+    var userName: String?
     var isPrivate: Bool
     var isSearchable: Bool
     var publicToasts: Bool
@@ -1325,6 +1327,7 @@ struct AccountSettings: Decodable {
         let root = try decoder.container(keyedBy: AnyKey.self)
         let u = root.nested("user") ?? root
         let s = u.nested("settings")
+        userName = u.text("user_name")
         isPrivate = u.bool("is_private") ?? false
         isSearchable = s?.bool("is_search") ?? true
         publicToasts = s?.bool("public_toasts") ?? true

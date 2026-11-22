@@ -331,10 +331,16 @@ final class CheckInOptions {
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
-    /// Reads the account's settings in the background (called at startup) to learn the rating step.
-    func loadAccountSettings() async {
+    /// Reads the account's settings in the background (called at startup) to learn the rating step
+    /// and canonical username.
+    @discardableResult
+    func loadAccountSettings() async -> AccountSettings? {
         let apply = { (a: AccountSettings) in self.setRatingBump(a.ratingBump) }
-        if let a = try? await cacheThenNetwork(.userSettings, as: AccountSettings.self, onCached: apply) { apply(a) }
+        guard let a = try? await cacheThenNetwork(.userSettings, as: AccountSettings.self, onCached: apply) else {
+            return nil
+        }
+        apply(a)
+        return a
     }
 
     /// Called when the rating bump setting is known or changed (e.g. from Settings).
