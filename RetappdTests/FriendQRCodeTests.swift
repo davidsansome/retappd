@@ -4,12 +4,12 @@ import CoreImage
 
 final class FriendQRCodeTests: XCTestCase {
     func testCanonicalNamecardURL() {
-        XCTAssertEqual(FriendQRCode.url(forUserID: 631038).absoluteString,
-                       "https://untappd.com/qr/namecard/631038")
+        XCTAssertEqual(FriendQRCode.url(forUserID: 123456).absoluteString,
+                       "https://untappd.com/qr/namecard/123456")
     }
 
     func testRenderedQRCodeRoundTripsThroughCoreImageDetector() throws {
-        let url = FriendQRCode.url(forUserID: 631038)
+        let url = FriendQRCode.url(forUserID: 123456)
         let image = try XCTUnwrap(FriendQRCode.renderQRCode(for: url))
         let cgImage = try XCTUnwrap(image.cgImage)
 
@@ -17,22 +17,22 @@ final class FriendQRCodeTests: XCTestCase {
                                                 options: [CIDetectorAccuracy: CIDetectorAccuracyHigh]))
         let features = detector.features(in: CIImage(cgImage: cgImage))
         let payloads = features.compactMap { ($0 as? CIQRCodeFeature)?.messageString }
-        XCTAssertEqual(payloads, ["https://untappd.com/qr/namecard/631038"])
+        XCTAssertEqual(payloads, ["https://untappd.com/qr/namecard/123456"])
     }
 
     func testParsesValidUntappdQRPayloads() {
-        XCTAssertEqual(FriendQRCode.parse("https://untappd.com/qr/namecard/631038"), .userID(631038))
-        XCTAssertEqual(FriendQRCode.parse("  http://www.untappd.com/qr/namecard/631038/  "), .userID(631038))
-        XCTAssertEqual(FriendQRCode.parse("https://UNTAPPD.COM/qr/namecard/631038?v=2"), .userID(631038))
-        XCTAssertEqual(FriendQRCode.parse("https://untappd.com/user/davidsansome"), .username("davidsansome"))
-        XCTAssertEqual(FriendQRCode.parse("https://www.untappd.com/user/Jackdup_/"), .username("Jackdup_"))
-        XCTAssertEqual(FriendQRCode.parse("untappd://user/davidsansome/0"), .username("davidsansome"))
+        XCTAssertEqual(FriendQRCode.parse("https://untappd.com/qr/namecard/123456"), .userID(123456))
+        XCTAssertEqual(FriendQRCode.parse("  http://www.untappd.com/qr/namecard/123456/  "), .userID(123456))
+        XCTAssertEqual(FriendQRCode.parse("https://UNTAPPD.COM/qr/namecard/123456?v=2"), .userID(123456))
+        XCTAssertEqual(FriendQRCode.parse("https://untappd.com/user/sampleuser"), .username("sampleuser"))
+        XCTAssertEqual(FriendQRCode.parse("https://www.untappd.com/user/HopLover_/"), .username("HopLover_"))
+        XCTAssertEqual(FriendQRCode.parse("untappd://user/sampleuser/0"), .username("sampleuser"))
     }
 
     func testRejectsNonFriendQRPayloads() {
         XCTAssertNil(FriendQRCode.parse(""))
         XCTAssertNil(FriendQRCode.parse("not a url"))
-        XCTAssertNil(FriendQRCode.parse("https://example.com/qr/namecard/631038"))
+        XCTAssertNil(FriendQRCode.parse("https://example.com/qr/namecard/123456"))
         XCTAssertNil(FriendQRCode.parse("https://untappd.com/qr/namecard/0"))
         XCTAssertNil(FriendQRCode.parse("https://untappd.com/qr/namecard/-42"))
         XCTAssertNil(FriendQRCode.parse("https://untappd.com/qr/namecard/abc"))
@@ -43,17 +43,17 @@ final class FriendQRCodeTests: XCTestCase {
     func testExtractsUsernameFromNamecardHTML() {
         let html = """
         <div class="beer-detail">
-            <a href="/user/davidsansome" class="a-btn">Continue</a>
+            <a href="/user/sampleuser" class="a-btn">Continue</a>
         </div>
         <script>
             var pageType = "user";
-            var id = "davidsansome";
+            var id = "sampleuser";
         </script>
         """
-        XCTAssertEqual(FriendQRCode.extractUsername(fromNamecardHTML: html), "davidsansome")
+        XCTAssertEqual(FriendQRCode.extractUsername(fromNamecardHTML: html), "sampleuser")
 
-        let scriptOnly = #"var pageType = "user"; var id = "Jackdup_";"#
-        XCTAssertEqual(FriendQRCode.extractUsername(fromNamecardHTML: scriptOnly), "Jackdup_")
+        let scriptOnly = #"var pageType = "user"; var id = "HopLover_";"#
+        XCTAssertEqual(FriendQRCode.extractUsername(fromNamecardHTML: scriptOnly), "HopLover_")
 
         XCTAssertNil(FriendQRCode.extractUsername(fromNamecardHTML: "<html><body>Nothing here</body></html>"))
     }
@@ -65,25 +65,26 @@ final class FriendQRCodeTests: XCTestCase {
     }
 
     func testResolveUserIDVerifiesReturnedProfileMatchesUID() async throws {
-        let expected = try makeProfile(id: 631038, username: "davidsansome")
+        let expected = try makeProfile(id: 123456, username: "sampleuser")
         let resolved = try await FriendQRCode.resolve(
-            .userID(631038),
+            .userID(123456),
             fetchNamecardHTML: { url in
-                XCTAssertEqual(url.absoluteString, "https://untappd.com/qr/namecard/631038")
-                return #"<a href="/user/davidsansome">Continue</a>"#
+                XCTAssertEqual(url.absoluteString, "https://untappd.com/qr/namecard/123456")
+                return #"<a href="/user/sampleuser">Continue</a>"#
             },
             fetchUserInfo: { name in
-                XCTAssertEqual(name, "davidsansome")
+                XCTAssertEqual(name, "sampleuser")
                 return expected
             }
         )
-        XCTAssertEqual(resolved?.id, 631038)
-        XCTAssertEqual(resolved?.userName, "davidsansome")
+        XCTAssertEqual(resolved?.id, 123456)
+        XCTAssertEqual(resolved?.userName, "sampleuser")
     }
 
     func testResolveUnknownUserIDRejectsYouFallback() async throws {
-        // Untappd's /qr/namecard/<unknown> returns /user/You, which is a real account with uid 240437.
-        let youProfile = try makeProfile(id: 240437, username: "You")
+        // Untappd's /qr/namecard/<unknown> falls back to /user/You, a real account whose uid won't
+        // match the requested one; the uid check must reject it.
+        let youProfile = try makeProfile(id: 1002, username: "You")
         let resolved = try await FriendQRCode.resolve(
             .userID(9_999_999_999),
             fetchNamecardHTML: { _ in #"<a href="/user/You">Continue</a>"# },

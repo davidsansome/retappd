@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Client-side sort orders for a venue's digital menu. (`POST /v4/menus/sections` only captured an
-/// empty `sort` value in `untappd-private-api`, so sorting is applied locally.)
+/// Client-side sort orders for a venue's digital menu. (Non-empty `sort` values for
+/// `POST /v4/menus/sections` haven't been verified against the API, so sorting is applied locally.)
 enum VenueMenuSort: String, CaseIterable, Identifiable, Sendable {
     case menuOrder = ""
     case highestRated = "highest_rated"

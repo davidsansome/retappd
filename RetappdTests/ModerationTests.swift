@@ -3,31 +3,31 @@ import XCTest
 
 final class ModerationTests: XCTestCase {
     func testWebURLs() {
-        XCTAssertEqual(UntappdWebURL.flagCheckin(1616041773)?.absoluteString,
-                       "https://untappd.com/checkin/flag/1616041773")
-        XCTAssertEqual(UntappdWebURL.reportUser("DrunkenMaster98")?.absoluteString,
-                       "https://untappd.com/report/user?username=DrunkenMaster98")
+        XCTAssertEqual(UntappdWebURL.flagCheckin(987654321)?.absoluteString,
+                       "https://untappd.com/checkin/flag/987654321")
+        XCTAssertEqual(UntappdWebURL.reportUser("sample_user98")?.absoluteString,
+                       "https://untappd.com/report/user?username=sample_user98")
         XCTAssertEqual(UntappdWebURL.reportUser("a b&c")?.absoluteString,
                        "https://untappd.com/report/user?username=a%20b%26c")
     }
 
     func testBlockAndMuteRequests() {
-        let block = APIRequest.toggleBlockUser(6647432)
+        let block = APIRequest.toggleBlockUser(1002)
         XCTAssertEqual(block.method, .post)
         XCTAssertEqual(block.path, "/v4/account/block")
-        XCTAssertEqual(block.form, ["target_id": "6647432"])
+        XCTAssertEqual(block.form, ["target_id": "1002"])
 
-        let muteWeek = APIRequest.muteUser(6647432, days: 7)
+        let muteWeek = APIRequest.muteUser(1002, days: 7)
         XCTAssertEqual(muteWeek.method, .post)
-        XCTAssertEqual(muteWeek.path, "/v4/user/mute/6647432")
+        XCTAssertEqual(muteWeek.path, "/v4/user/mute/1002")
         XCTAssertEqual(muteWeek.form, ["period_of_time": "7"])
 
-        let muteForever = APIRequest.muteUser(6647432, days: 0)
+        let muteForever = APIRequest.muteUser(1002, days: 0)
         XCTAssertEqual(muteForever.form, ["period_of_time": "0"])
 
-        let unmute = APIRequest.unmuteUser(6647432)
+        let unmute = APIRequest.unmuteUser(1002)
         XCTAssertEqual(unmute.method, .post)
-        XCTAssertEqual(unmute.path, "/v4/user/unmute/6647432")
+        XCTAssertEqual(unmute.path, "/v4/user/unmute/1002")
         XCTAssertEqual(unmute.form, [:])
     }
 
@@ -82,10 +82,10 @@ final class ModerationTests: XCTestCase {
               {
                 "created_at": "Sat, 21 Nov 2026 12:07:46 +0000",
                 "user": {
-                  "uid": 13425056,
-                  "user_name": "retappd-test-2",
-                  "first_name": "Test 2",
-                  "last_name": "Account",
+                  "uid": 1003,
+                  "user_name": "sample_user_2",
+                  "first_name": "Sample",
+                  "last_name": "User",
                   "user_avatar": "https://example.com/a.jpg"
                 }
               }
@@ -95,9 +95,9 @@ final class ModerationTests: XCTestCase {
         """.utf8))
         XCTAssertEqual(response.items.count, 1)
         let item = try XCTUnwrap(response.items.first)
-        XCTAssertEqual(item.id, 13425056)
-        XCTAssertEqual(item.user.userName, "retappd-test-2")
-        XCTAssertEqual(item.user.displayName, "Test 2 Account")
+        XCTAssertEqual(item.id, 1003)
+        XCTAssertEqual(item.user.userName, "sample_user_2")
+        XCTAssertEqual(item.user.displayName, "Sample User")
         XCTAssertNotNil(item.createdAt)
     }
 

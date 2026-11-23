@@ -505,12 +505,11 @@ final class DecodingTests: XCTestCase {
     }
 
     func testFriendBadges() throws {
-        // Shape of a live response (the test accounts' Newbie badge), plus a level entry as the
-        // docs describe for level badges.
+        // Shape of a live response (a non-levelable badge), plus a levelable badge entry.
         let json = """
         {"meta":{"code":200},"response":{"count":2,"items":[
-          {"created_at":"Wed, 18 Nov 2026 09:47:02 +0000","user_badge_id":1438263300,"is_levelable":false,
-           "current_level":0,"user":{"first_name":"Test 2","last_name":"T","user_name":"retappd-test-2",
+          {"created_at":"Wed, 18 Nov 2026 09:47:02 +0000","user_badge_id":100500,"is_levelable":false,
+           "current_level":0,"user":{"first_name":"Sample","last_name":"F","user_name":"sample_friend",
            "is_supporter":0,"user_avatar":"https://x/a.jpg","flair":null}},
           {"created_at":"Sat, 14 Nov 2026 14:17:57 +0000","user_badge_id":0,"is_levelable":true,
            "current_level":12,"user":{"first_name":"","last_name":"","user_name":"lev","user_avatar":""}},
@@ -520,11 +519,11 @@ final class DecodingTests: XCTestCase {
         let list = try UntappdAPI.decode(FriendBadgeList.self, from: Data(json.utf8))
         XCTAssertEqual(list.count, 2)
         XCTAssertFalse(list.isParent)
-        XCTAssertEqual(list.items.map(\.user.userName), ["retappd-test-2", "lev"])
+        XCTAssertEqual(list.items.map(\.user.userName), ["sample_friend", "lev"])
         XCTAssertNil(list.items[0].level)
-        XCTAssertEqual(list.items[0].userBadgeId, 1438263300)
+        XCTAssertEqual(list.items[0].userBadgeId, 100500)
         XCTAssertNotNil(list.items[0].earnedAt)
-        XCTAssertEqual(list.items[0].user.displayName, "Test 2 T")
+        XCTAssertEqual(list.items[0].user.displayName, "Sample F")
         XCTAssertEqual(list.items[1].level, 12)
         XCTAssertNil(list.items[1].userBadgeId)
         XCTAssertEqual(list.items[1].user.displayName, "lev")

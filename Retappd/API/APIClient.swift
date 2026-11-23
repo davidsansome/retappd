@@ -273,7 +273,7 @@ extension APIRequest {
     }
 
     /// Items in a Wish List or custom list (`GET /v4/custom_lists/view/{listId}`).
-    /// Not in `untappd-private-api/docs/API.md`; verified live on 2026-11-21: returns
+    /// Verified live on 2026-11-21: returns
     /// `{total_count, list, count, items, pagination}` where each beer item carries
     /// `list_item_id`, `item_id`, `item_type`, `beer`, and `brewery`.
     static func customListDetail(_ listId: Int, offset: Int = 0, limit: Int = 25) -> APIRequest {
@@ -296,7 +296,7 @@ extension APIRequest {
     }
 
     /// Removes a beer from a custom list (`POST /v4/custom_lists/removeitem/{id}`).
-    /// Not in `untappd-private-api/docs/API.md`; verified live on 2026-11-21: takes `bid` in the
+    /// Verified live on 2026-11-21: takes `bid` in the
     /// form body and returns `{result: "success", item_id}`.
     static func removeBeerFromList(_ listId: Int, bid: Int) -> APIRequest {
         APIRequest(method: .post, path: "/v4/custom_lists/removeitem/\(listId)", form: [
@@ -329,14 +329,14 @@ extension APIRequest {
     }
 
     /// Adds a beer to the signed-in user's Wish List (`POST /v4/user/wishlist/add`).
-    /// Not in `untappd-private-api/docs/API.md`; verified live on 2026-11-21: takes `bid`,
+    /// Verified live on 2026-11-21: takes `bid`,
     /// returns `{result: "success", action: "add", beer: ...}` and updates `beer/info`'s `wish_list`.
     static func addToWishlist(_ bid: Int) -> APIRequest {
         APIRequest(method: .post, path: "/v4/user/wishlist/add", form: ["bid": "\(bid)"])
     }
 
     /// Removes a beer from the signed-in user's Wish List (`POST /v4/user/wishlist/delete`).
-    /// Not in `untappd-private-api/docs/API.md`; verified live on 2026-11-21: takes `bid` and
+    /// Verified live on 2026-11-21: takes `bid` and
     /// returns `{result: "success", action: "remove", beer: ...}`.
     static func removeFromWishlist(_ bid: Int) -> APIRequest {
         APIRequest(method: .post, path: "/v4/user/wishlist/delete", form: ["bid": "\(bid)"])
@@ -481,8 +481,8 @@ extension APIRequest {
         return APIRequest(path: "/v4/venue/checkins/\(venueId)", query: q)
     }
 
-    /// A venue's digital beer menu sections and items. Non-empty `sort` values weren't captured in
-    /// `untappd-private-api`, so callers default to `""` and apply client-side sorting when needed.
+    /// A venue's digital beer menu sections and items. Non-empty `sort` values haven't been
+    /// verified against the API, so callers default to `""` and apply client-side sorting when needed.
     static func venueMenu(
         _ venueId: Int,
         limit: Int = 100,
@@ -614,7 +614,7 @@ extension APIRequest {
     }
 
     /// The beers Untappd's users have given barcode `upc` (digits as printed), most trusted first.
-    /// What the official app calls on a scan (documented in untappd-private-api).
+    /// Matches what the official app calls on a scan.
     static func checkBarcode(_ upc: String) -> APIRequest {
         APIRequest(path: "/v4/beer/checkbarcodemultiple", query: ["upc": upc])
     }
@@ -769,9 +769,8 @@ extension APIRequest {
         APIRequest(method: .post, path: "/v4/user/unmute/\(uid)", form: [:])
     }
 
-    /// Users the signed-in account has blocked. Not in `untappd-private-api/docs/API.md`;
-    /// verified live on 2026-11-21: returns `{count, items}` where each item has `created_at`
-    /// and `user`.
+    /// Users the signed-in account has blocked. Verified live on 2026-11-21: returns
+    /// `{count, items}` where each item has `created_at` and `user`.
     static let blockedUsers = APIRequest(path: "/v4/user/blockusers")
 
     /// Friends the signed-in account has muted (`GET /v4/user/muteusers`): returns `{count, items}`
@@ -821,7 +820,6 @@ extension APIRequest {
         // and keeps it out of every friend feed (`checkin/recent`), even when the time is now.
         // Without it the server uses the current time. No `request_id` either: the official app
         // sends a MongoDB ObjectId, but Untappd doesn't need one (Metabeer never sends it).
-        // See `POST /v4/checkin/add` in untappd-private-api.
         var form = [
             "bid": "\(beer)",
             "rating": rating > 0 ? String(format: "%.2f", rating) : "0",

@@ -20,10 +20,10 @@ final class AuthStoreTests: XCTestCase {
 
     func testAccountSettingsDecodesUserName() throws {
         let json = """
-        {"meta":{"code":200},"response":{"user":{"uid":13425055,"user_name":"retappd-test-1","is_private":1}}}
+        {"meta":{"code":200},"response":{"user":{"uid":1001,"user_name":"sample_user","is_private":1}}}
         """
         let settings = try decodeSettings(json)
-        XCTAssertEqual(settings.userName, "retappd-test-1")
+        XCTAssertEqual(settings.userName, "sample_user")
     }
 
     func testSignInWithEmailResolvesCanonicalUsernameWhenXAuthReturnsEmail() async throws {
@@ -32,10 +32,10 @@ final class AuthStoreTests: XCTestCase {
         var apiToken: String?
 
         let xauth = try decodeXAuth("""
-        {"meta":{"code":200},"response":{"access_token":"tok-1","username":"retappd-test-1@davidsansome.com","two_factor_enabled":0}}
+        {"meta":{"code":200},"response":{"access_token":"tok-1","username":"tester@example.com","two_factor_enabled":0}}
         """)
         let settings = try decodeSettings("""
-        {"meta":{"code":200},"response":{"user":{"uid":13425055,"user_name":"retappd-test-1"}}}
+        {"meta":{"code":200},"response":{"user":{"uid":1001,"user_name":"sample_user"}}}
         """)
 
         let auth = AuthStore(
@@ -50,11 +50,11 @@ final class AuthStoreTests: XCTestCase {
             fetchUserSettings: { settings }
         )
 
-        try await auth.signIn(username: "retappd-test-1@davidsansome.com", password: "secret")
+        try await auth.signIn(username: "tester@example.com", password: "secret")
 
         XCTAssertTrue(auth.isSignedIn)
-        XCTAssertEqual(auth.username, "retappd-test-1")
-        XCTAssertEqual(defaults.string(forKey: "username"), "retappd-test-1")
+        XCTAssertEqual(auth.username, "sample_user")
+        XCTAssertEqual(defaults.string(forKey: "username"), "sample_user")
         XCTAssertEqual(storedToken, "tok-1")
         XCTAssertEqual(apiToken, "tok-1")
     }
@@ -68,7 +68,7 @@ final class AuthStoreTests: XCTestCase {
         {"meta":{"code":200},"response":{"access_token":"tok-2","two_factor_enabled":0}}
         """)
         let settings = try decodeSettings("""
-        {"meta":{"code":200},"response":{"user":{"uid":13425055,"user_name":"retappd-test-1"}}}
+        {"meta":{"code":200},"response":{"user":{"uid":1001,"user_name":"sample_user"}}}
         """)
 
         let auth = AuthStore(
@@ -83,10 +83,10 @@ final class AuthStoreTests: XCTestCase {
             fetchUserSettings: { settings }
         )
 
-        try await auth.signIn(username: "retappd-test-1@davidsansome.com", password: "secret")
+        try await auth.signIn(username: "tester@example.com", password: "secret")
 
-        XCTAssertEqual(auth.username, "retappd-test-1")
-        XCTAssertEqual(defaults.string(forKey: "username"), "retappd-test-1")
+        XCTAssertEqual(auth.username, "sample_user")
+        XCTAssertEqual(defaults.string(forKey: "username"), "sample_user")
     }
 
     func testSignInWithEmailFailsRatherThanSavingEmailWhenUserSettingsFails() async throws {
@@ -95,7 +95,7 @@ final class AuthStoreTests: XCTestCase {
         var apiToken: String?
 
         let xauth = try decodeXAuth("""
-        {"meta":{"code":200},"response":{"access_token":"tok-3","username":"retappd-test-1@davidsansome.com","two_factor_enabled":0}}
+        {"meta":{"code":200},"response":{"access_token":"tok-3","username":"tester@example.com","two_factor_enabled":0}}
         """)
 
         let auth = AuthStore(
@@ -111,7 +111,7 @@ final class AuthStoreTests: XCTestCase {
         )
 
         do {
-            try await auth.signIn(username: "retappd-test-1@davidsansome.com", password: "secret")
+            try await auth.signIn(username: "tester@example.com", password: "secret")
             XCTFail("Expected signIn to throw when only an email is available and usersettings fails")
         } catch {}
 
@@ -128,7 +128,7 @@ final class AuthStoreTests: XCTestCase {
         var apiToken: String?
 
         let xauth = try decodeXAuth("""
-        {"meta":{"code":200},"response":{"access_token":"tok-4","username":"retappd-test-1","two_factor_enabled":0}}
+        {"meta":{"code":200},"response":{"access_token":"tok-4","username":"sample_user","two_factor_enabled":0}}
         """)
 
         let auth = AuthStore(
@@ -143,20 +143,20 @@ final class AuthStoreTests: XCTestCase {
             fetchUserSettings: { throw APIError.http(503) }
         )
 
-        try await auth.signIn(username: "retappd-test-1@davidsansome.com", password: "secret")
+        try await auth.signIn(username: "tester@example.com", password: "secret")
 
-        XCTAssertEqual(auth.username, "retappd-test-1")
+        XCTAssertEqual(auth.username, "sample_user")
         XCTAssertEqual(storedToken, "tok-4")
     }
 
     func testRefreshUsernameIfNeededRepairsSavedEmail() async throws {
         let defaults = makeDefaults()
-        defaults.set("retappd-test-1@davidsansome.com", forKey: "username")
+        defaults.set("tester@example.com", forKey: "username")
         var storedToken: String? = "existing-tok"
         var apiToken: String?
 
         let settings = try decodeSettings("""
-        {"meta":{"code":200},"response":{"user":{"uid":13425055,"user_name":"retappd-test-1"}}}
+        {"meta":{"code":200},"response":{"user":{"uid":1001,"user_name":"sample_user"}}}
         """)
 
         let auth = AuthStore(
@@ -171,19 +171,19 @@ final class AuthStoreTests: XCTestCase {
             fetchUserSettings: { settings }
         )
 
-        XCTAssertEqual(auth.username, "retappd-test-1@davidsansome.com")
+        XCTAssertEqual(auth.username, "tester@example.com")
         XCTAssertFalse(AuthStore.isValidUsername(auth.username))
 
         try await auth.refreshUsernameIfNeeded()
 
-        XCTAssertEqual(auth.username, "retappd-test-1")
-        XCTAssertEqual(defaults.string(forKey: "username"), "retappd-test-1")
+        XCTAssertEqual(auth.username, "sample_user")
+        XCTAssertEqual(defaults.string(forKey: "username"), "sample_user")
         XCTAssertTrue(AuthStore.isValidUsername(auth.username))
     }
 
     func testReconcileUsernameIgnoresEmailsAndUpdatesValidCanonicalName() throws {
         let defaults = makeDefaults()
-        defaults.set("Retappd-Test-1", forKey: "username")
+        defaults.set("Sample_User", forKey: "username")
         let storedToken: String? = "existing-tok"
 
         let auth = AuthStore(
@@ -198,11 +198,11 @@ final class AuthStoreTests: XCTestCase {
             fetchUserSettings: { throw APIError.http(500) }
         )
 
-        auth.reconcileUsername("retappd-test-1@davidsansome.com")
-        XCTAssertEqual(auth.username, "Retappd-Test-1")
+        auth.reconcileUsername("tester@example.com")
+        XCTAssertEqual(auth.username, "Sample_User")
 
-        auth.reconcileUsername("retappd-test-1")
-        XCTAssertEqual(auth.username, "retappd-test-1")
-        XCTAssertEqual(defaults.string(forKey: "username"), "retappd-test-1")
+        auth.reconcileUsername("sample_user")
+        XCTAssertEqual(auth.username, "sample_user")
+        XCTAssertEqual(defaults.string(forKey: "username"), "sample_user")
     }
 }

@@ -1,8 +1,8 @@
 import Foundation
 
-/// `/v4/beer/info/{bid}`: one beer in full. The docs in untappd-private-api show only some of
-/// its 43 keys; the rest here (`has_had`, the brewery's `location`) are read defensively and may
-/// be missing. `stats.user_count` is taken to be the signed-in user's own checkins of the beer,
+/// `/v4/beer/info/{bid}`: one beer in full. Some optional fields (`has_had`, the brewery's
+/// `location`) are read defensively and may be missing. `stats.user_count` is taken to be the
+/// signed-in user's own checkins of the beer,
 /// as in the public API.
 struct BeerInfo: Decodable {
     var bid: Int

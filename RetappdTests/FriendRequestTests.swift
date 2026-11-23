@@ -8,9 +8,9 @@ final class FriendRequestTests: XCTestCase {
         let pending = APIRequest.pendingFriendRequests
         XCTAssertEqual(pending.method, .get)
         XCTAssertEqual(pending.path, "/v4/user/pending")
-        let reject = APIRequest.rejectFriendRequest(13425055)
+        let reject = APIRequest.rejectFriendRequest(1001)
         XCTAssertEqual(reject.method, .post)
-        XCTAssertEqual(reject.path, "/v4/friend/reject/13425055")
+        XCTAssertEqual(reject.path, "/v4/friend/reject/1001")
         let req = UntappdAPI.shared.urlRequest(reject)
         XCTAssertEqual(req.httpMethod, "POST")
     }
@@ -19,12 +19,12 @@ final class FriendRequestTests: XCTestCase {
     func testDecodesPendingList() throws {
         let list = try UntappdAPI.decode(PendingRequestList.self, from: Data("""
         {"meta":{"code":200},"response":{"count":1,"items":[{"created_at":"Wed, 18 Nov 2026 13:54:38 +0000",
-         "user":{"uid":13425055,"user_name":"retappd-test-1","first_name":"Retappd","last_name":"One",
+         "user":{"uid":1001,"user_name":"sample_user","first_name":"Sample","last_name":"User",
                  "user_avatar":"https://x/a.jpg","location":"","bio":"","is_supporter":0,"flair":null}}]}}
         """.utf8))
         XCTAssertEqual(list.requests.count, 1)
-        XCTAssertEqual(list.requests[0].id, 13425055)
-        XCTAssertEqual(list.requests[0].user.userName, "retappd-test-1")
+        XCTAssertEqual(list.requests[0].id, 1001)
+        XCTAssertEqual(list.requests[0].user.userName, "sample_user")
         XCTAssertNil(list.requests[0].location)
         XCTAssertNotNil(list.requests[0].createdAt)
     }
@@ -32,7 +32,7 @@ final class FriendRequestTests: XCTestCase {
     func testDecodesRejectResponse() throws {
         let r = try UntappdAPI.decode(FriendRequestResult.self, from: Data("""
         {"meta":{"code":200},"response":{"result":"success","request_type":"reject","friendship_type":"friend",
-         "target_user":{"uid":13425055,"user_name":"retappd-test-1"}}}
+         "target_user":{"uid":1001,"user_name":"sample_user"}}}
         """.utf8))
         XCTAssertEqual(r.requestType, "reject")
         XCTAssertEqual(r.friendshipType, "friend")

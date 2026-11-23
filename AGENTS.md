@@ -1,9 +1,8 @@
 # Retappd
 
 An iOS app (SwiftUI, iOS 18+) for Untappd, talking to Untappd's private v4 API the way the
-official Android app does. The API is documented in the separate `untappd-private-api`
-repository (`docs/API.md`, `docs/openapi.yaml`); check there before guessing an endpoint's
-fields, and say so in a comment when something wasn't captured.
+official Android app does. Note in a comment whenever an endpoint's fields or behaviour haven't
+been verified against a live response.
 
 ## Design
 

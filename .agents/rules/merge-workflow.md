@@ -10,6 +10,6 @@ In `untappd-v2`, finished work lands by rebasing the branch onto `main`, fast-fo
 - **How to apply:** When the user asks to land, merge, or ship a branch:
   1. `git fetch origin`
   2. Rebase the branch onto `origin/main`
-  3. Fast-forward `main` (it is usually checked out in the main checkout at `/Users/david/untappd-v2`, so check its working tree is clean first, then run `git -C /Users/david/untappd-v2 merge --ff-only <branch>`)
+  3. Fast-forward `main` (it is usually checked out in the main checkout, so check its working tree is clean first, then run `git -C <main-checkout> merge --ff-only <branch>`)
   4. `git push origin main`
 - Still wait for the user to ask before pushing.

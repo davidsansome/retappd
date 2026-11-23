@@ -8,7 +8,7 @@ Security design: [SECURITY.md](SECURITY.md).
 - `src/api.ts` endpoints (POST/PATCH/DELETE `/v1/devices`), validation, per-IP rate limit (D1 counter), device cap
 - `src/poll.ts` scheduled poll (every minute) and daily cleanup + key rewrap
 - `src/untappd.ts` **all Untappd API knowledge** (uid lookup, count poll, notification fetch, new-item detection,
-  message formatting), based on the measured behaviour in `untappd-private-api/docs/API.md`.
+  message formatting).
 - `src/apns.ts` `ApnsSender` interface + `FetchApnsSender` (ES256 JWT, 50 min cache)
 - `src/crypto.ts` envelope encryption, rewrap, device secrets
 - `migrations/` D1 schema

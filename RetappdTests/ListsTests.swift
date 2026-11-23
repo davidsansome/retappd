@@ -89,7 +89,7 @@ final class ListsTests: XCTestCase {
           "response": {
             "total_count": 2,
             "list": {
-              "list_id": 11024053,
+              "list_id": 42001,
               "list_name": "Test list",
               "is_public": 0,
               "is_owner": true,
@@ -102,7 +102,7 @@ final class ListsTests: XCTestCase {
               {
                 "created_at": "Sat, 21 Nov 2026 12:53:59 +0000",
                 "item_id": 5826548,
-                "list_item_id": 81539691,
+                "list_item_id": 90001,
                 "item_type": "beer",
                 "beer": {
                   "bid": 5826548,
@@ -126,24 +126,24 @@ final class ListsTests: XCTestCase {
               },
               {
                 "item_id": 999,
-                "list_item_id": 81539692,
+                "list_item_id": 90002,
                 "item_type": "venue"
               }
             ],
-            "pagination": {"next_url": "https://api.untappd.com/v4/custom_lists/view/11024053?offset=25", "max_id": ""}
+            "pagination": {"next_url": "https://api.untappd.com/v4/custom_lists/view/42001?offset=25", "max_id": ""}
           }
         }
         """
         let decoded = try UntappdAPI.decode(CustomListDetailResponse.self, from: Data(json.utf8))
         XCTAssertEqual(decoded.totalCount, 2)
-        XCTAssertEqual(decoded.list?.id, 11024053)
+        XCTAssertEqual(decoded.list?.id, 42001)
         XCTAssertEqual(decoded.list?.isOwner, true)
         XCTAssertEqual(decoded.list?.ownerUsername, "sampleuser")
         XCTAssertNotNil(decoded.nextURL)
         XCTAssertEqual(decoded.items.count, 2)
 
         let first = decoded.items[0]
-        XCTAssertEqual(first.listItemId, 81539691)
+        XCTAssertEqual(first.listItemId, 90001)
         XCTAssertEqual(first.beer?.bid, 5826548)
         XCTAssertEqual(first.beer?.name, "American Amber")
         XCTAssertEqual(first.beer?.brewery, "Chuck and Son's Brewing Co.")

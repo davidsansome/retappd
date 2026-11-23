@@ -1,8 +1,8 @@
-// Everything that knows Untappd's API shape lives here (see docs/API.md in untappd-private-api).
+// Everything that knows Untappd's API shape lives here.
 import type { NotifType } from "./env";
 
 const BASE = "https://api.untappd.com";
-// Static app credentials baked into the official Android APK (docs/API.md, "Authentication").
+// Static app credentials baked into the official Android APK.
 const CLIENT_ID = "20B24F8EF10B1A76BBF23B39528B7AB770FFB264";
 const CLIENT_SECRET = "10E493969C8A985966F106DC1542E85230B53A26";
 

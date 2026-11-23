@@ -2,16 +2,15 @@ import XCTest
 @testable import Retappd
 
 final class FriendsTests: XCTestCase {
-    // Shaped like the sample in docs/API.md for GET /v4/user/friends (the docs truncate each user,
-    // so the names here are made up).
+    // Shaped like GET /v4/user/friends with synthetic user records.
     private let json = """
     {"meta":{"code":200},"response":{"found":3,"count":3,"items":[
       {"friendship_hash":"a","created_at":"Sat, 04 Jul 2026 05:10:03 +0000","mutual_friends":{"count":0,"items":[]},
-       "user":{"uid":6825036,"user_name":"Jackdup_","location":"Sydney","bio":"","is_supporter":0,
-               "first_name":"Jack","last_name":"Dup","relationship":"friends","user_avatar":"https://x/a.jpg"}},
+       "user":{"uid":1001,"user_name":"HopLover_","location":"Portland","bio":"","is_supporter":0,
+               "first_name":"Pat","last_name":"Morgan","relationship":"friends","user_avatar":"https://x/a.jpg"}},
       {"friendship_hash":"b","created_at":"Sun, 05 Jul 2026 00:36:37 +0000","mutual_friends":{"count":0,"items":[]},
-       "user":{"uid":6974987,"user_name":"adam_shaw_1519","location":"","bio":"",
-               "first_name":"Adam","last_name":"Shaw","relationship":"friends"}},
+       "user":{"uid":1002,"user_name":"sam_river_42","location":"","bio":"",
+               "first_name":"Sam","last_name":"River","relationship":"friends"}},
       {"friendship_hash":"c","created_at":"Mon, 01 Jun 2026 10:00:00 +0000",
        "user":{"uid":7,"user_name":"zed","first_name":"Zoë","last_name":""}}
     ],"pagination":{"next_url":"https://api.untappd.com/v4/user/friends/sampleuser?utv=4.0.0&limit=10&offset=10","offset":10,"max_id":false}}}
@@ -25,8 +24,8 @@ final class FriendsTests: XCTestCase {
         let p = try page()
         XCTAssertEqual(p.found, 3)
         XCTAssertEqual(p.friends.count, 3)
-        XCTAssertEqual(p.friends[0].user.userName, "Jackdup_")
-        XCTAssertEqual(p.friends[0].location, "Sydney")
+        XCTAssertEqual(p.friends[0].user.userName, "HopLover_")
+        XCTAssertEqual(p.friends[0].location, "Portland")
         XCTAssertNil(p.friends[1].location)  // empty string
         XCTAssertNotNil(p.friends[0].createdAt)
         XCTAssertEqual(p.friends[2].user.displayName, "Zoë")
@@ -34,7 +33,7 @@ final class FriendsTests: XCTestCase {
 
     func testSortsNewestFriendshipFirst() throws {
         let names = Friend.sortedByRecent(try page().friends).map(\.user.userName)
-        XCTAssertEqual(names, ["adam_shaw_1519", "Jackdup_", "zed"])
+        XCTAssertEqual(names, ["sam_river_42", "HopLover_", "zed"])
     }
 
     func testUndatedFriendsSortLast() throws {
@@ -46,14 +45,14 @@ final class FriendsTests: XCTestCase {
     func testFilterMatchesUsernameFirstAndLastName() throws {
         let friends = try page().friends
         XCTAssertEqual(Friend.filter(friends, matching: "").count, 3)
-        XCTAssertEqual(Friend.filter(friends, matching: "SHAW").map(\.user.userName), ["adam_shaw_1519"])
-        XCTAssertEqual(Friend.filter(friends, matching: "jack").map(\.user.userName), ["Jackdup_"])
-        XCTAssertEqual(Friend.filter(friends, matching: "dup").map(\.user.userName), ["Jackdup_"])
-        XCTAssertEqual(Friend.filter(friends, matching: "adam sh").map(\.user.userName), ["adam_shaw_1519"])
+        XCTAssertEqual(Friend.filter(friends, matching: "RIVER").map(\.user.userName), ["sam_river_42"])
+        XCTAssertEqual(Friend.filter(friends, matching: "pat").map(\.user.userName), ["HopLover_"])
+        XCTAssertEqual(Friend.filter(friends, matching: "morgan").map(\.user.userName), ["HopLover_"])
+        XCTAssertEqual(Friend.filter(friends, matching: "sam ri").map(\.user.userName), ["sam_river_42"])
         XCTAssertEqual(Friend.filter(friends, matching: "zoe").map(\.user.userName), ["zed"])  // accents ignored
-        XCTAssertEqual(Friend.filter(friends, matching: "@jackdup").map(\.user.userName), ["Jackdup_"])
+        XCTAssertEqual(Friend.filter(friends, matching: "@hoplover").map(\.user.userName), ["HopLover_"])
         XCTAssertTrue(Friend.filter(friends, matching: "nobody").isEmpty)
-        XCTAssertEqual(User.filter(friends.map(\.user), matching: "dup").map(\.userName), ["Jackdup_"])
+        XCTAssertEqual(User.filter(friends.map(\.user), matching: "morgan").map(\.userName), ["HopLover_"])
     }
 
     // MARK: - FriendPager & CheckInOptions
@@ -202,11 +201,11 @@ final class FriendsTests: XCTestCase {
         XCTAssertEqual(store.friends.map(\.id), Array(1...29))
     }
 
-    // Sample from docs/API.md for POST /v4/friend/request/{id}.
+    // Sample for POST /v4/friend/request/{id}.
     func testFollowResponseIsWordedAsFollowing() throws {
         let json = """
         {"meta":{"code":200},"response":{"result":"success","request_type":"follow","friendship_type":"follow",
-         "target_user":{"uid":8867567,"user_name":"KicksBrewing","first_name":"Jane","last_name":"Doe"}}}
+         "target_user":{"uid":2001,"user_name":"ExampleBrewing","first_name":"Jane","last_name":"Doe"}}}
         """
         let r = try UntappdAPI.decode(FriendRequestResult.self, from: Data(json.utf8))
         XCTAssertTrue(r.isFollow)
@@ -231,7 +230,7 @@ final class FriendsTests: XCTestCase {
     func testPersonRequestResponseIsAFriendRequest() throws {
         let r = try UntappdAPI.decode(FriendRequestResult.self, from: Data("""
         {"meta":{"code":200},"response":{"result":"success","request_type":"request","friendship_type":"friend",
-         "target_user":{"uid":13425056,"user_name":"retappd-test-2","is_private":1,"contact":[]}}}
+         "target_user":{"uid":2002,"user_name":"sample_friend","is_private":1,"contact":[]}}}
         """.utf8))
         XCTAssertFalse(r.isFollow)
         XCTAssertEqual(r.requestType, "request")
@@ -316,7 +315,7 @@ final class FriendsTests: XCTestCase {
     }
 
     func testUsernameNormalizing() {
-        XCTAssertEqual(Friends.normalized("  @Jackdup_ "), "Jackdup_")
+        XCTAssertEqual(Friends.normalized("  @HopLover_ "), "HopLover_")
         XCTAssertNil(Friends.normalized("   "))
         XCTAssertNil(Friends.normalized("a/b"))
         XCTAssertNil(Friends.normalized("two words"))
