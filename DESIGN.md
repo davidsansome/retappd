@@ -126,12 +126,22 @@ row) for lists of many checkins at one place, grouped under recency labels
   `TaproomPageTabs` for Menu (sections as chips) and Check-ins (Everyone / Friends chips).
   A beer leads with its brewery (a link), name, style / ABV / IBU and a 96pt label carrying the
   `HadCorner` if you've had it, then a card with everyone's rating beside yours (with a full-width
-  Friends average row underneath when friends have rated it), a stats card,
+  Friends average row underneath when friends have rated it; the row carries a chevron and opens
+  the friends' ratings page, via `TaproomRatingCard`'s `footerLink`), a stats card,
   About (expandable), Flavours (passive chips) and recent check-ins as cards with an All / Friends
   `TaproomSegmented` toggle, with "Check in"
   pinned at the bottom (hidden when the page was opened from inside the check-in screen). A
   brewery leads with its name over its type and location beside its logo, then ratings, stats, About,
   "Find them" link rows, and `TaproomPageTabs` for Beers (`BeerRow`s, "Show N more") and Check-ins.
+- **Friends' ratings** (pushed from the Friends row of a beer's ratings card) leads with the
+  brewery, the beer's name in heavy type and "Friends' ratings", with the friends' average
+  (`TaproomRating`, 34pt) and its count on the right. Then one `.taproomCard()` per friend,
+  newest check-in first: a header row (avatar, name, "@username · 3 check-ins", their rating
+  with a muted "Average of 2" under it when they rated more than once, chevron; opens their
+  profile), then a row per check-in under a 1pt
+  `border` line, with the venue and city (muted "No location" when there's none), the date and
+  serving in muted footnote, and that check-in's rating; each opens the check-in. Rows use
+  `TaproomRowStyle`, with the card clipped to its corners so the pressed highlight stays inside.
 - **Badges.** Every badge in the app (the "Earned the … badge" line on a feed card, the rows under
   "Badges earned" on a check-in) opens its page with `NavigationLink(value: BeerBreweryRoute.badge…)`.
   The page leads with the badge's picture, name (without the earner's "(Level N)") and description,

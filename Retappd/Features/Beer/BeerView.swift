@@ -365,7 +365,8 @@ struct BeerView: View {
                     caption: model.friendsRatingCaption,
                     accessibilityID: "beer.ratings.friends"
                 )
-            }
+            },
+            footerLink: BeerBreweryRoute.friendRatings(model.beer)
         )
     }
 
