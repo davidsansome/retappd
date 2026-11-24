@@ -587,6 +587,12 @@ struct ServingType: Decodable, Hashable, Identifiable {
     var name: String
     var position: Int
 
+    init(id: Int, name: String, position: Int) {
+        self.id = id
+        self.name = name
+        self.position = position
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
         guard let id = c.int("container_id") else {
@@ -595,6 +601,41 @@ struct ServingType: Decodable, Hashable, Identifiable {
         self.id = id
         name = c.string("container_name") ?? ""
         position = c.int("container_position") ?? id
+    }
+}
+
+extension ServingType {
+    /// The serving styles offered for a spirit, in the order the official app lists a whisky's.
+    ///
+    /// `/v4/checkin/serving_types` only ever returns beer's twelve (ids 1–12): it ignored every
+    /// parameter tried in Nov 2026 (`bid`, `beer_id`, `parent_style_id`, `type`, `drink_type`,
+    /// `category`, `is_beer`, a path id), so the official app must carry these itself. The ids
+    /// come from 350 real spirit check-ins (`/v4/beer/checkins/<bid>`), where these six were by
+    /// far the most used; Taster is beer's id 8. Not verified by posting a check-in with them.
+    static let spirits: [ServingType] = [
+        ServingType(id: 16, name: "Neat", position: 1),
+        ServingType(id: 8, name: "Taster", position: 2),
+        ServingType(id: 17, name: "Rocks", position: 3),
+        ServingType(id: 13, name: "Cocktail", position: 4),
+        ServingType(id: 18, name: "Mixer", position: 5),
+        ServingType(id: 19, name: "Shot", position: 6),
+    ]
+
+    /// Whether a drink's style ("Spirit - Whiskey - Scotch - Single Malt") makes it a spirit
+    /// (Untappd's parent style 85). Every spirit style starts "Spirit".
+    static func isSpirit(style: String?) -> Bool {
+        guard let style else { return false }
+        let s = style.trimmingCharacters(in: .whitespaces).lowercased()
+        guard s.hasPrefix("spirit") else { return false }
+        // "Spirit" as a whole word, so a beer style starting "Spirited" doesn't count.
+        return s.dropFirst("spirit".count).first.map { !$0.isLetter } ?? true
+    }
+
+    /// The serving styles to offer for a drink: the spirit ones for a spirit, otherwise
+    /// `beerTypes` (what `/v4/checkin/serving_types` returns), which wine, cider, mead and the
+    /// rest use too.
+    static func choices(forStyle style: String?, beerTypes: [ServingType]) -> [ServingType] {
+        isSpirit(style: style) ? spirits : beerTypes
     }
 }
 
