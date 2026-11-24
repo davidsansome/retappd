@@ -632,6 +632,10 @@ extension ServingType {
         ServingType(id: 1, name: "Can", position: 4),
         ServingType(id: 12, name: "Box", position: 5),
         ServingType(id: 13, name: "Cocktail", position: 6),
+        // TODO: the official app also offers Spritz and Frozen after Cocktail, in that order.
+        // Their ids are unknown: none of ~620 wine check-ins read in Nov 2026 used them (ids
+        // 14, 15 and 20+ never appeared). To find them, check a wine in as Spritz or Frozen in
+        // the official app and read that check-in's `serving_types.container_id`.
     ]
 
     /// Whether a drink's style starts with `kind` as a whole word: "Spirit - Whiskey - Scotch"
