@@ -136,8 +136,9 @@ row) for lists of many checkins at one place, grouped under recency labels
 - **Friends' ratings** (pushed from the Friends row of a beer's ratings card) leads with the
   brewery, the beer's name in heavy type and "Friends' ratings", with the friends' average
   (`TaproomRating`, 34pt) and its count on the right. Then one `.taproomCard()` per friend,
-  newest check-in first: a header row (avatar, name, "@username · 3 check-ins · average of 2",
-  their average rating, chevron; opens their profile), then a row per check-in under a 1pt
+  newest check-in first: a header row (avatar, name, "@username · 3 check-ins", their rating
+  with a muted "Average of 2" under it when they rated more than once, chevron; opens their
+  profile), then a row per check-in under a 1pt
   `border` line, with the venue and city (muted "No location" when there's none), the date and
   serving in muted footnote, and that check-in's rating; each opens the check-in. Rows use
   `TaproomRowStyle`, with the card clipped to its corners so the pressed highlight stays inside.

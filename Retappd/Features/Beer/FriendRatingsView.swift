@@ -249,7 +249,12 @@ private struct FriendRatingCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if let r = friend.rating {
-                TaproomRating(rating: r, size: 26)
+                VStack(alignment: .trailing, spacing: 0) {
+                    TaproomRating(rating: r, size: 26)
+                    if friend.ratedCount > 1 {
+                        Text("Average of \(friend.ratedCount.formatted())").font(.caption2).foregroundStyle(Taproom.muted)
+                    }
+                }
             } else {
                 Text("Not rated").font(.system(size: 17, weight: .heavy)).tracking(-0.3).foregroundStyle(Taproom.muted)
             }
@@ -268,7 +273,6 @@ private struct FriendRatingCard: View {
         var parts = ["@" + friend.user.userName]
         let n = friend.checkins.count
         parts.append(n == 1 ? "1 check-in" : "\(n.formatted()) check-ins")
-        if friend.ratedCount > 1 { parts.append("average of \(friend.ratedCount.formatted())") }
         return parts.joined(separator: " · ")
     }
 }
@@ -292,7 +296,7 @@ private struct CheckinLine: View {
             if let r = checkin.rating {
                 TaproomRating(rating: r, size: 20)
             } else {
-                Text("No rating").font(.footnote).foregroundStyle(Taproom.muted)
+                Text("Not rated").font(.footnote).foregroundStyle(Taproom.muted)
             }
             Image(systemName: "chevron.right")
                 .font(.system(size: 11, weight: .bold)).foregroundStyle(Taproom.glassRim)
