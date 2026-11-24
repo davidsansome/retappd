@@ -1017,6 +1017,9 @@ struct TaproomRatingCard: View {
     let leading: Column
     var trailing: Column? = nil
     var footer: Column? = nil
+    /// A `NavigationLink` value for the footer row. When set, the whole row opens it, with a
+    /// chevron on the right (the beer page's Friends row opens the friends' ratings page).
+    var footerLink: (any Hashable)? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1030,9 +1033,14 @@ struct TaproomRatingCard: View {
             .fixedSize(horizontal: false, vertical: true)
             if let footer {
                 Rectangle().fill(Taproom.border).frame(height: 1)
-                footerRow(footer)
+                if let footerLink {
+                    linkedFooterRow(footer, value: footerLink)
+                } else {
+                    footerRow(footer)
+                }
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: 16))
         .taproomCard()
         .accessibilityElement(children: .contain)
     }
@@ -1071,7 +1079,17 @@ struct TaproomRatingCard: View {
         .optionalAccessibilityID(c.accessibilityID)
     }
 
-    private func footerRow(_ c: Column) -> some View {
+    /// The footer row as a link. Takes the value's concrete type so `NavigationLink(value:)`
+    /// pushes it as that type, matching the stack's `navigationDestination(for:)`.
+    private func linkedFooterRow<V: Hashable>(_ c: Column, value: V) -> AnyView {
+        AnyView(
+            NavigationLink(value: value) { footerRow(c, showsChevron: true) }
+                .buttonStyle(TaproomRowStyle())
+                .accessibilityAddTraits(.isLink)
+        )
+    }
+
+    private func footerRow(_ c: Column, showsChevron: Bool = false) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(c.title).font(.caption.weight(.semibold)).foregroundStyle(Taproom.muted)
@@ -1101,7 +1119,13 @@ struct TaproomRatingCard: View {
                 Text(c.empty).font(.system(size: 18, weight: .heavy)).tracking(-0.3).foregroundStyle(Taproom.muted)
                     .accessibilityLabel("\(c.title): \(c.empty)")
             }
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold)).foregroundStyle(Taproom.glassRim)
+                    .accessibilityHidden(true)
+            }
         }
+        .foregroundStyle(Taproom.ink)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
