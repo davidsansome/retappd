@@ -319,13 +319,18 @@ struct CheckInSheet: View {
         }
     }
 
+    /// The serving styles that suit this drink: a spirit gets Neat, Rocks and so on, not Draft.
+    private var servingChoices: [ServingType] {
+        ServingType.choices(forStyle: beer?.style, beerTypes: options.servingTypes)
+    }
+
     private var servingChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                if options.servingTypes.isEmpty {
+                if servingChoices.isEmpty {
                     ProgressView().frame(height: 34)
                 }
-                ForEach(options.servingTypes) { t in
+                ForEach(servingChoices) { t in
                     let on = serving?.id == t.id
                     Button { serving = on ? nil : t } label: {
                         HStack(spacing: 5) {
@@ -667,9 +672,9 @@ struct CheckInSheet: View {
         guard !preselectedServing else { return }
         let match: ServingType?
         if let id = pending?.servingId {
-            match = options.servingTypes.first { $0.id == id }
+            match = servingChoices.first { $0.id == id }
         } else if let name = editing?.servingType {
-            match = options.servingTypes.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+            match = servingChoices.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
         } else {
             return
         }

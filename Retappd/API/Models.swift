@@ -587,6 +587,12 @@ struct ServingType: Decodable, Hashable, Identifiable {
     var name: String
     var position: Int
 
+    init(id: Int, name: String, position: Int) {
+        self.id = id
+        self.name = name
+        self.position = position
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
         guard let id = c.int("container_id") else {
@@ -595,6 +601,63 @@ struct ServingType: Decodable, Hashable, Identifiable {
         self.id = id
         name = c.string("container_name") ?? ""
         position = c.int("container_position") ?? id
+    }
+}
+
+extension ServingType {
+    // `/v4/checkin/serving_types` only ever returns beer's twelve (ids 1–12): it ignored every
+    // parameter tried in Nov 2026 (`bid`, `beer_id`, `parent_style_id`, `type`, `drink_type`,
+    // `category`, `is_beer`, a path id), so the official app must carry other drinks' lists
+    // itself. These lists follow the order the official app shows. Ids above 12 come from real
+    // check-ins (`/v4/beer/checkins/<bid>`); none has been verified by posting a check-in.
+
+    /// A spirit's serving styles, as the official app lists a whisky's. Neat, Rocks, Cocktail,
+    /// Mixer and Shot were by far the most used in 350 spirit check-ins.
+    static let spirits: [ServingType] = [
+        ServingType(id: 16, name: "Neat", position: 1),
+        ServingType(id: 8, name: "Taster", position: 2),
+        ServingType(id: 17, name: "Rocks", position: 3),
+        ServingType(id: 13, name: "Cocktail", position: 4),
+        ServingType(id: 18, name: "Mixer", position: 5),
+        ServingType(id: 19, name: "Shot", position: 6),
+    ]
+
+    /// A wine's serving styles, as the official app lists them, minus Spritz and Frozen, whose
+    /// ids haven't turned up in any check-in yet. Bottle is beer's id 2 (Untappd draws it as a
+    /// wine bottle for wine).
+    static let wines: [ServingType] = [
+        ServingType(id: 2, name: "Bottle", position: 1),
+        ServingType(id: 8, name: "Taster", position: 2),
+        ServingType(id: 3, name: "Draft", position: 3),
+        ServingType(id: 1, name: "Can", position: 4),
+        ServingType(id: 12, name: "Box", position: 5),
+        ServingType(id: 13, name: "Cocktail", position: 6),
+        // TODO: the official app also offers Spritz and Frozen after Cocktail, in that order.
+        // Their ids are unknown: none of ~620 wine check-ins read in Nov 2026 used them (ids
+        // 14, 15 and 20+ never appeared). To find them, check a wine in as Spritz or Frozen in
+        // the official app and read that check-in's `serving_types.container_id`.
+    ]
+
+    /// Whether a drink's style starts with `kind` as a whole word: "Spirit - Whiskey - Scotch"
+    /// is a spirit (Untappd's parent style 85), "Wine - Champagne Blend" a wine (87), but a
+    /// beer style starting "Spirited" is neither.
+    static func style(_ style: String?, isKind kind: String) -> Bool {
+        guard let style else { return false }
+        let s = style.trimmingCharacters(in: .whitespaces).lowercased()
+        guard s.hasPrefix(kind) else { return false }
+        return s.dropFirst(kind.count).first.map { !$0.isLetter } ?? true
+    }
+
+    static func isSpirit(style: String?) -> Bool { self.style(style, isKind: "spirit") }
+    static func isWine(style: String?) -> Bool { self.style(style, isKind: "wine") }
+
+    /// The serving styles to offer for a drink: a spirit's or a wine's own list, otherwise
+    /// `beerTypes` (what `/v4/checkin/serving_types` returns), which cider, mead and the rest
+    /// use too.
+    static func choices(forStyle style: String?, beerTypes: [ServingType]) -> [ServingType] {
+        if isSpirit(style: style) { return spirits }
+        if isWine(style: style) { return wines }
+        return beerTypes
     }
 }
 
