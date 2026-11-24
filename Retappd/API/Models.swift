@@ -605,13 +605,14 @@ struct ServingType: Decodable, Hashable, Identifiable {
 }
 
 extension ServingType {
-    /// The serving styles offered for a spirit, in the order the official app lists a whisky's.
-    ///
-    /// `/v4/checkin/serving_types` only ever returns beer's twelve (ids 1–12): it ignored every
-    /// parameter tried in Nov 2026 (`bid`, `beer_id`, `parent_style_id`, `type`, `drink_type`,
-    /// `category`, `is_beer`, a path id), so the official app must carry these itself. The ids
-    /// come from 350 real spirit check-ins (`/v4/beer/checkins/<bid>`), where these six were by
-    /// far the most used; Taster is beer's id 8. Not verified by posting a check-in with them.
+    // `/v4/checkin/serving_types` only ever returns beer's twelve (ids 1–12): it ignored every
+    // parameter tried in Nov 2026 (`bid`, `beer_id`, `parent_style_id`, `type`, `drink_type`,
+    // `category`, `is_beer`, a path id), so the official app must carry other drinks' lists
+    // itself. These lists follow the order the official app shows. Ids above 12 come from real
+    // check-ins (`/v4/beer/checkins/<bid>`); none has been verified by posting a check-in.
+
+    /// A spirit's serving styles, as the official app lists a whisky's. Neat, Rocks, Cocktail,
+    /// Mixer and Shot were by far the most used in 350 spirit check-ins.
     static let spirits: [ServingType] = [
         ServingType(id: 16, name: "Neat", position: 1),
         ServingType(id: 8, name: "Taster", position: 2),
@@ -621,21 +622,38 @@ extension ServingType {
         ServingType(id: 19, name: "Shot", position: 6),
     ]
 
-    /// Whether a drink's style ("Spirit - Whiskey - Scotch - Single Malt") makes it a spirit
-    /// (Untappd's parent style 85). Every spirit style starts "Spirit".
-    static func isSpirit(style: String?) -> Bool {
+    /// A wine's serving styles, as the official app lists them, minus Spritz and Frozen, whose
+    /// ids haven't turned up in any check-in yet. Bottle is beer's id 2 (Untappd draws it as a
+    /// wine bottle for wine).
+    static let wines: [ServingType] = [
+        ServingType(id: 2, name: "Bottle", position: 1),
+        ServingType(id: 8, name: "Taster", position: 2),
+        ServingType(id: 3, name: "Draft", position: 3),
+        ServingType(id: 1, name: "Can", position: 4),
+        ServingType(id: 12, name: "Box", position: 5),
+        ServingType(id: 13, name: "Cocktail", position: 6),
+    ]
+
+    /// Whether a drink's style starts with `kind` as a whole word: "Spirit - Whiskey - Scotch"
+    /// is a spirit (Untappd's parent style 85), "Wine - Champagne Blend" a wine (87), but a
+    /// beer style starting "Spirited" is neither.
+    static func style(_ style: String?, isKind kind: String) -> Bool {
         guard let style else { return false }
         let s = style.trimmingCharacters(in: .whitespaces).lowercased()
-        guard s.hasPrefix("spirit") else { return false }
-        // "Spirit" as a whole word, so a beer style starting "Spirited" doesn't count.
-        return s.dropFirst("spirit".count).first.map { !$0.isLetter } ?? true
+        guard s.hasPrefix(kind) else { return false }
+        return s.dropFirst(kind.count).first.map { !$0.isLetter } ?? true
     }
 
-    /// The serving styles to offer for a drink: the spirit ones for a spirit, otherwise
-    /// `beerTypes` (what `/v4/checkin/serving_types` returns), which wine, cider, mead and the
-    /// rest use too.
+    static func isSpirit(style: String?) -> Bool { self.style(style, isKind: "spirit") }
+    static func isWine(style: String?) -> Bool { self.style(style, isKind: "wine") }
+
+    /// The serving styles to offer for a drink: a spirit's or a wine's own list, otherwise
+    /// `beerTypes` (what `/v4/checkin/serving_types` returns), which cider, mead and the rest
+    /// use too.
     static func choices(forStyle style: String?, beerTypes: [ServingType]) -> [ServingType] {
-        isSpirit(style: style) ? spirits : beerTypes
+        if isSpirit(style: style) { return spirits }
+        if isWine(style: style) { return wines }
+        return beerTypes
     }
 }
 

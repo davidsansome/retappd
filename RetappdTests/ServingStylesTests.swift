@@ -25,14 +25,22 @@ final class ServingStylesTests: XCTestCase {
 
     func testBeerAndOtherDrinksKeepTheAPIList() throws {
         let beer = try beerTypes()
-        for style in ["IPA - American", "Stout - Irish Dry", "Cider - Dry", "Wine - Champagne Blend",
-                      "Mead - Braggot", "RTD - Spritz", nil] {
+        for style in ["IPA - American", "Stout - Irish Dry", "Cider - Dry", "Mead - Braggot",
+                      "RTD - Spritz", "Sake - Other", "Winter Ale", nil] {
             XCTAssertEqual(ServingType.choices(forStyle: style, beerTypes: beer), beer, "\(style ?? "nil")")
         }
+    }
+
+    func testWineGetsWineStyles() throws {
+        let choices = ServingType.choices(forStyle: "Wine - Sauvignon Blanc", beerTypes: try beerTypes())
+        XCTAssertEqual(choices.map(\.name), ["Bottle", "Taster", "Draft", "Can", "Box", "Cocktail"])
+        XCTAssertEqual(choices.map(\.id), [2, 8, 3, 1, 12, 13])
     }
 
     func testSpiritDetectionIgnoresCaseAndSpace() {
         XCTAssertTrue(ServingType.isSpirit(style: " spirit - Rum"))
         XCTAssertFalse(ServingType.isSpirit(style: "Spirited Pale Ale"))
+        XCTAssertTrue(ServingType.isWine(style: "wine - Rosé"))
+        XCTAssertFalse(ServingType.isWine(style: "Winter Warmer"))
     }
 }
