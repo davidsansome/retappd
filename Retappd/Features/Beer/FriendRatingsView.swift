@@ -137,7 +137,10 @@ struct FriendRatingsView: View {
     @State private var listID = UUID()
     @Environment(DiscoverModel.self) private var discover
 
-    init(beer: BeerLite) { _model = State(initialValue: FriendRatingsModel(beer: beer)) }
+    /// `model` is for tests and previews, to show the page without the network.
+    init(beer: BeerLite, model: FriendRatingsModel? = nil) {
+        _model = State(initialValue: model ?? FriendRatingsModel(beer: beer))
+    }
 
     var body: some View {
         ScrollView {
