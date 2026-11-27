@@ -36,6 +36,7 @@ export interface FriendRequest {
   at: number; // ms epoch
   uid: number;
   actor: string;
+  imageUrl?: string;
 }
 
 async function call(token: string, path: string, params: Record<string, string> = {}) {
@@ -94,6 +95,26 @@ const clip = (v: unknown, n: number) => {
   return chars.length > n ? chars.slice(0, n - 1).join("") + "\u2026" : s;
 };
 
+const MAX_IMAGE_URL_LEN = 512;
+
+function isPlaceholderImage(u: URL): boolean {
+  const file = (u.pathname.split("/").pop() ?? "").toLowerCase();
+  if (file.startsWith("badge-") && file.includes("default")) return true;
+  if (file.startsWith("default_avatar")) return true;
+  return false;
+}
+
+function imageUrl(v: unknown): string | undefined {
+  if (typeof v !== "string" || v.length === 0 || v.length > MAX_IMAGE_URL_LEN) return undefined;
+  try {
+    const u = new URL(v);
+    if (u.protocol !== "https:" || !u.hostname || isPlaceholderImage(u)) return undefined;
+    return u.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 function displayName(u?: { first_name?: string; last_name?: string; user_name?: string }): string {
   const name = u?.first_name ? `${u.first_name}${u.last_name ? " " + Array.from(u.last_name)[0] : ""}` : (u?.user_name ?? "Someone");
   return clip(name, 40); // keeps alert bodies short
@@ -108,7 +129,10 @@ export async function pollCounts(token: string): Promise<{ counts: Counts; reque
   const requests: FriendRequest[] = [];
   for (const i of json?.response?.items ?? []) {
     const at = Date.parse(i?.created_at);
-    if (Number.isFinite(at) && Number.isInteger(i?.user?.uid)) requests.push({ at, uid: i.user.uid, actor: displayName(i.user) });
+    if (Number.isFinite(at) && Number.isInteger(i?.user?.uid)) {
+      const avatar = imageUrl(i?.user?.user_avatar);
+      requests.push({ at, uid: i.user.uid, actor: displayName(i.user), ...(avatar ? { imageUrl: avatar } : {}) });
+    }
   }
   return { counts: parseCounts(json), requests };
 }
@@ -119,7 +143,7 @@ export interface NotificationItem {
   notification_type: string; // toast | comment | checkinFriendTag (seen); checkinTag | commentTag | promo (never seen)
   count?: number;
   users?: { created_at?: string; user?: { first_name?: string; last_name?: string; user_name?: string } }[];
-  meta?: { beer?: { beer_name?: string } };
+  meta?: { beer?: { beer_name?: string; beer_label?: string } };
 }
 
 /**
@@ -162,6 +186,7 @@ export interface FormattedMessage {
   checkinId?: number;
   actor: string;
   body: string;
+  imageUrl?: string;
 }
 
 export function classify(t: string): NotifType | null {
@@ -188,9 +213,10 @@ export function formatMessage(item: NotificationItem): FormattedMessage | null {
     comment_tag: `${actor} mentioned you on ${beer ?? "a check-in"}`,
     friend_request: `${actor} sent you a friend request`,
   }[type];
-  return { type, checkinId: item.checkin_id, actor, body };
+  const img = imageUrl(item.meta?.beer?.beer_label);
+  return { type, checkinId: item.checkin_id, actor, body, ...(img ? { imageUrl: img } : {}) };
 }
 
 export function formatFriendRequest(r: FriendRequest): FormattedMessage {
-  return { type: "friend_request", actor: r.actor, body: `${r.actor} sent you a friend request` };
+  return { type: "friend_request", actor: r.actor, body: `${r.actor} sent you a friend request`, ...(r.imageUrl ? { imageUrl: r.imageUrl } : {}) };
 }

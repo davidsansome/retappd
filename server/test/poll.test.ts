@@ -149,6 +149,37 @@ describe("polling", () => {
     expect(apns.sent).toHaveLength(1);
   });
 
+  it("includes mutable-content and image_url for beer labels and friend avatars, ignoring invalid URLs", async () => {
+    await register();
+    await poll(T1);
+    const label = "https://assets.untappd.com/site/beer_logos/beer-6755412_99dd9_sm.jpeg";
+    const avatar = "https://assets.untappd.com/profile/d69c518c5952972463003f5d0d59c99d_100x100.jpg";
+    u.items = [
+      item("toast", 10, T1 + 70_000, "Jamie", "Smith", "Late Nights III", label),
+      item("comment", 11, T1 + 80_000, "Ann", "Lee", "Pale Ale", "http://insecure.example/beer.jpg"),
+      item("checkinFriendTag", 12, T1 + 90_000, "Bo", "Ng", "IPA", "https://assets.untappd.com/" + "a".repeat(600)),
+      item("toast", 13, T1 + 92_000, "Cy", "Dee", "Lager", "https://assets.untappd.com/site/assets/images/temp/badge-beer-default.png"),
+    ];
+    u.counts = { toasts: 2, comments: 1, others: 1, friends: 1 };
+    u.pending = [pendingReq(T1 + 95_000, 9, "Pat", "Quinn", avatar)];
+    await poll(T1 + 120_000);
+    expect(apns.sent).toHaveLength(5);
+    expect(apns.sent[0].payload).toEqual({
+      aps: { alert: { body: "Jamie S toasted your Late Nights III" }, "thread-id": "checkin-10", "mutable-content": 1 },
+      retappd: { type: "toast", checkin_id: 10, actor: "Jamie S", image_url: label },
+    });
+    expect(apns.sent[1].payload.aps["mutable-content"]).toBeUndefined();
+    expect(apns.sent[1].payload.retappd.image_url).toBeUndefined();
+    expect(apns.sent[2].payload.aps["mutable-content"]).toBeUndefined();
+    expect(apns.sent[2].payload.retappd.image_url).toBeUndefined();
+    expect(apns.sent[3].payload.aps["mutable-content"]).toBeUndefined();
+    expect(apns.sent[3].payload.retappd.image_url).toBeUndefined();
+    expect(apns.sent[4].payload).toEqual({
+      aps: { alert: { body: "Pat Q sent you a friend request" }, "thread-id": "friends", "mutable-content": 1 },
+      retappd: { type: "friend_request", actor: "Pat Q", image_url: avatar },
+    });
+  });
+
   it("respects the friend pref", async () => {
     await register("good-token-1234", APNS_TOKEN, { friend: false });
     await poll(T1);

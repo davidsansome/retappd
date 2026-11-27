@@ -74,7 +74,15 @@ export class FakeApns implements ApnsSender {
   }
 }
 
-export const item = (type: string, checkin: number, at: number | string, first = "Jamie", last = "Smith", beer: string | null = "Late Nights III") => {
+export const item = (
+  type: string,
+  checkin: number,
+  at: number | string,
+  first = "Jamie",
+  last = "Smith",
+  beer: string | null = "Late Nights III",
+  beerLabel?: string,
+) => {
   const created_at = new Date(at).toUTCString().replace("GMT", "+0000");
   return {
     checkin_id: checkin,
@@ -82,13 +90,13 @@ export const item = (type: string, checkin: number, at: number | string, first =
     notification_type: type,
     count: 1,
     users: [{ created_at, user: { first_name: first, last_name: last, user_name: "x" } }],
-    meta: beer ? { beer: { beer_name: beer } } : {},
+    meta: beer ? { beer: { beer_name: beer, ...(beerLabel !== undefined ? { beer_label: beerLabel } : {}) } } : {},
   };
 };
 export const toastItem = (checkin: number, at: number | string) => item("toast", checkin, at);
-export const pendingReq = (at: number, uid = 7, first = "Sam", last = "Jones") => ({
+export const pendingReq = (at: number, uid = 7, first = "Sam", last = "Jones", avatar?: string) => ({
   created_at: new Date(at).toUTCString().replace("GMT", "+0000"),
-  user: { uid, user_name: "sj", first_name: first, last_name: last },
+  user: { uid, user_name: "sj", first_name: first, last_name: last, ...(avatar !== undefined ? { user_avatar: avatar } : {}) },
 });
 
 export function req(method: string, path: string, body?: unknown, headers: Record<string, string> = {}) {

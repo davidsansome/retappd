@@ -46,12 +46,14 @@ online, then forgets them.
 {
   "aps": {
     "alert": { "body": "Jamie S toasted your Late Nights III" },
-    "thread-id": "checkin-1582931702"
+    "thread-id": "checkin-1582931702",
+    "mutable-content": 1            // present when image_url is set
   },
   "retappd": {
     "type": "toast" | "comment" | "tag" | "comment_tag" | "friend_request",
     "checkin_id": 1582931702,       // absent for friend_request
-    "actor": "Jamie S"
+    "actor": "Jamie S",
+    "image_url": "https://..."      // optional: beer_label for check-ins, user_avatar for friend_request
   }
 }
 Tapping: checkin types open that check-in (fetch via GET /v4/checkin/view/{id} if needed);

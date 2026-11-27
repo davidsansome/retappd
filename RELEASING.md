@@ -27,9 +27,10 @@ There are no certificates, keys or secrets in the repository.
 
 2. **Create the app** in [App Store Connect](https://appstoreconnect.apple.com), if it isn't
    there: *Apps → + → New App*: platform iOS, name *Retappd*, bundle ID
-   `com.davidsansome.retappd` (register it under *Identifiers* in the
-   [developer portal](https://developer.apple.com/account/resources/identifiers/list) first, if
-   it's not listed), SKU anything (`retappd`), *Full Access*.
+   `com.davidsansome.retappd` (register both `com.davidsansome.retappd` and the notification
+   extension's `com.davidsansome.retappd.NotificationService` under *Identifiers* in the
+   [developer portal](https://developer.apple.com/account/resources/identifiers/list) if automatic
+   signing doesn't create them), SKU anything (`retappd`), *Full Access*.
 
 3. **Make the workflow.** Run `xcodegen generate` and open `Retappd.xcodeproj` in Xcode. In the
    Report navigator (⌘9), *Cloud* tab, choose *Get Started* (or *Product → Xcode Cloud →

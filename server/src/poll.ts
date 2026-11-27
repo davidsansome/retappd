@@ -133,6 +133,7 @@ interface Event {
   checkinId?: number;
   actor: string;
   body: string;
+  imageUrl?: string;
 }
 
 export const BASELINE_SKEW_MS = 60_000; // Untappd vs server clock allowance for baselines
@@ -254,8 +255,14 @@ async function pushEvents(env: Env, deps: PollDeps, devices: DeviceRow[], events
           aps: {
             alert: { body: e.body },
             "thread-id": e.checkinId ? `checkin-${e.checkinId}` : "friends",
+            ...(e.imageUrl ? { "mutable-content": 1 } : {}),
           },
-          retappd: { type: e.type, ...(e.checkinId ? { checkin_id: e.checkinId } : {}), actor: e.actor },
+          retappd: {
+            type: e.type,
+            ...(e.checkinId ? { checkin_id: e.checkinId } : {}),
+            actor: e.actor,
+            ...(e.imageUrl ? { image_url: e.imageUrl } : {}),
+          },
         };
         const r = await deps.apns.send(d, payload);
         if (r === "unregistered") {
