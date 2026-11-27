@@ -86,11 +86,18 @@ Xcode Cloud build for `MARKETING_VERSION` in `project.yml`.
 - `fastlane upload_screenshots` — stages and uploads the framed PNGs in
   `screenshots/{iphone,ipad}/` to App Store Connect (default locale `en-US`; override with
   `locale:en-AU`).
+- `fastlane draft_release_notes` — previews AI-generated App Store release notes from git commits
+  since the last `v*` tag (using `claude -p --model sonnet`, falling back to
+  `agy -p --model gemini-4-neon-low`; pass `since:<ref>` to override the base).
 - `fastlane release` — attaches the latest Xcode Cloud TestFlight build for `MARKETING_VERSION`,
-  asks for confirmation (skip with `force:true`), and submits it for App Store review (manual
-  release after approval by default). Useful options: `release_notes:"..."`, `screenshots:true`,
-  `automatic_release:true`, `phased_release:true`, `submit:false`, `build_number:42`. For update
-  versions, either pass `release_notes:"..."` or fill in "What's New" in App Store Connect first.
+  auto-generates release notes from `<last v* tag>..origin/main` (on the first release, before any
+  `v*` tag exists, prompts to enter notes manually in `$EDITOR` or skip), lets you
+  **Accept / Edit in `$EDITOR` / Cancel**, submits for App Store review (manual release after
+  approval by default), and creates + pushes an annotated `v<version>` tag on `origin/main`.
+  Useful options: `release_notes:"..."`, `screenshots:true`, `automatic_release:true`,
+  `phased_release:true`, `submit:false`, `tag:false`, `force:true`, `build_number:42`.
+
+Both `asc-api-key.local.json` and `*.p8` are gitignored.
 
 ## When something fails
 

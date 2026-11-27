@@ -6,6 +6,7 @@ DerivedData/
 xcuserdata/
 test-accounts.local
 asc-api-key.local.json
+*.p8
 screenshots/raw/
 fastlane/api_key.json
 fastlane/screenshots/

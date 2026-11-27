@@ -2,12 +2,16 @@ default_platform(:ios)
 
 require "fileutils"
 require "json"
+require "open3"
 require "shellwords"
+require "tempfile"
 
 APP_IDENTIFIER = "com.davidsansome.retappd"
 DEFAULT_LOCALE = "en-US"
 IPHONE_DEVICE_TYPE = "iPhone 18 Pro Max"
 IPAD_DEVICE_TYPE = "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-16GB"
+CLAUDE_MODEL = ENV["RELEASE_NOTES_CLAUDE_MODEL"] || "sonnet"
+AGY_MODEL = ENV["RELEASE_NOTES_AGY_MODEL"] || "gemini-4-neon-low"
 
 def repo_root
   File.expand_path("..", __dir__)
@@ -81,6 +85,125 @@ def stage_screenshots(locale:)
   stage_dir
 end
 
+def latest_release_tag
+  out, status = Open3.capture2("git", "-C", repo_root, "describe", "--tags", "--abbrev=0", "--match", "v*")
+  return nil unless status.success?
+  tag = out.strip
+  tag.empty? ? nil : tag
+end
+
+def commits_between(since_ref, until_ref)
+  args = [
+    "git", "-C", repo_root, "log", "#{since_ref}..#{until_ref}",
+    "--no-merges",
+    "--pretty=format:- %s%n%b",
+    "--", ".", ":!screenshots", ":!fastlane", ":!RetappdTests", ":!*.md", ":!scripts",
+  ]
+  out, err, status = Open3.capture3(*args)
+  UI.user_error!("git log failed for #{since_ref}..#{until_ref}: #{err.strip}") unless status.success?
+  out.strip
+end
+
+def find_executable(name)
+  out, status = Open3.capture2("which", name)
+  return nil unless status.success?
+  path = out.strip
+  path.empty? ? nil : path
+end
+
+def run_llm_cli(cmd, prompt)
+  out, err, status = Open3.capture3(*cmd, stdin_data: prompt)
+  return [out.strip, nil] if status.success? && !out.strip.empty?
+  [nil, err.strip.empty? ? "exit #{status.exitstatus}" : err.strip]
+end
+
+def generate_release_notes(commits:, version:)
+  prompt = <<~PROMPT
+    Write concise App Store "What's New" release notes for version #{version} of Retappd (an iOS craft beer companion app).
+
+    Guidelines:
+    - Output ONLY the release notes text—no heading, no intro, no markdown code fences.
+    - Use 3 to 6 short, friendly, user-facing bullet points starting with "• ".
+    - Group related commits into clear user benefits.
+    - Omit internal refactors, CI/build tweaks, tests, and developer jargon.
+    - Never mention private APIs, scraping, internal endpoints, or test accounts.
+    - Keep total length well under 3,500 characters.
+
+    Commits since the previous release:
+    #{commits}
+  PROMPT
+
+  errors = []
+
+  if (claude = find_executable("claude"))
+    UI.message("Generating release notes with claude (#{CLAUDE_MODEL})...")
+    text, err = run_llm_cli([claude, "-p", "--model", CLAUDE_MODEL], prompt)
+    return text if text
+    errors << "claude: #{err}"
+    UI.important("claude failed (#{err}); falling back to agy (#{AGY_MODEL})...")
+  else
+    errors << "claude: not found on PATH"
+    UI.important("claude not found; falling back to agy (#{AGY_MODEL})...")
+  end
+
+  if (agy = find_executable("agy"))
+    UI.message("Generating release notes with agy (#{AGY_MODEL})...")
+    text, err = run_llm_cli([agy, "-p", "--model", AGY_MODEL], prompt)
+    return text if text
+    errors << "agy: #{err}"
+  else
+    errors << "agy: not found on PATH"
+  end
+
+  UI.user_error!(<<~MSG)
+    Failed to generate release notes with both claude and agy:
+      #{errors.join("\n  ")}
+    Pass release_notes:"..." to set them manually.
+  MSG
+end
+
+def edit_in_editor(initial_text)
+  editor = ENV["VISUAL"] || ENV["EDITOR"] || "vi"
+  Tempfile.create(["retappd-release-notes-", ".txt"]) do |f|
+    f.write(initial_text)
+    f.flush
+    system(*Shellwords.split(editor), f.path)
+    File.read(f.path).strip
+  end
+end
+
+def review_release_notes(notes)
+  current = notes
+  loop do
+    UI.message("\n--- Release Notes Preview ---\n#{current}\n-----------------------------\n")
+    choice = UI.select("Use these release notes?", ["Accept", "Edit in $EDITOR", "Cancel"])
+    case choice
+    when "Accept"
+      UI.user_error!("Release notes cannot be empty.") if current.strip.empty?
+      return current
+    when "Edit in $EDITOR"
+      current = edit_in_editor(current)
+    else
+      UI.user_error!("Cancelled.")
+    end
+  end
+end
+
+def create_and_push_release_tag(version:, ref:, build_number:)
+  tag = "v#{version}"
+  _, status = Open3.capture2("git", "-C", repo_root, "rev-parse", "-q", "--verify", "refs/tags/#{tag}")
+  if status.success?
+    UI.important("Tag #{tag} already exists; skipping tag creation.")
+    return
+  end
+
+  Dir.chdir(repo_root) do
+    sh("git", "tag", "-a", tag, ref, "-m", "Release #{tag} (build #{build_number})")
+    sh("git", "push", "origin", tag)
+  end
+  UI.success("Tagged #{ref} as #{tag} and pushed to origin.")
+end
+
 platform :ios do
   desc "Build Debug, capture all 6 demo screenshots on dedicated iPhone 6.9\" & iPad 13\" simulators, and frame them"
   desc "Options: upload:true (also upload to App Store Connect), locale:en-US, iphone_udid:..., ipad_udid:..."
@@ -151,11 +274,32 @@ platform :ios do
     )
   end
 
-  desc "Promote the latest Xcode Cloud TestFlight build to an App Store release"
-  desc "Options: version:<from project.yml>, build_number:<latest TF>, screenshots:false, submit:true, automatic_release:false, phased_release:false, release_notes:<text>, force:false, locale:en-US"
+  desc "Draft App Store release notes from git commits since the last v* tag (uses claude sonnet, falls back to agy)"
+  desc "Options: since:<ref>, until:origin/main, version:<from project.yml>"
+  lane :draft_release_notes do |options|
+    Dir.chdir(repo_root) { sh("git", "fetch", "origin", "--tags") }
+    version = options[:version] || marketing_version
+    until_ref = options[:until] || "origin/main"
+    since_ref = options[:since] || latest_release_tag
+
+    UI.user_error!("No v* release tag found yet. Pass since:<ref> (e.g. `fastlane draft_release_notes since:HEAD~20`).") unless since_ref
+
+    commits = commits_between(since_ref, until_ref)
+    UI.user_error!("No app commits found between #{since_ref} and #{until_ref}.") if commits.empty?
+
+    notes = generate_release_notes(commits: commits, version: version)
+    UI.message("\n--- Draft Release Notes (#{since_ref}..#{until_ref}) ---\n#{notes}\n------------------------------------------------------\n")
+    notes
+  end
+
+  desc "Promote the latest Xcode Cloud TestFlight build to an App Store release and tag v<version> on origin/main"
+  desc "Options: version:<from project.yml>, build_number:<latest TF>, ref:origin/main, since:<ref>, release_notes:<text>, screenshots:false, submit:true, tag:true, automatic_release:false, phased_release:false, force:false, locale:en-US"
   lane :release do |options|
+    Dir.chdir(repo_root) { sh("git", "fetch", "origin", "--tags") }
+
     api_key = load_asc_api_key
     version = options[:version] || marketing_version
+    release_ref = options[:ref] || "origin/main"
     build_number = (options[:build_number] || latest_testflight_build_number(
       api_key: api_key,
       app_identifier: APP_IDENTIFIER,
@@ -166,11 +310,28 @@ platform :ios do
     UI.user_error!("No TestFlight build found for version #{version}. Push to main and wait for Xcode Cloud first.") if build_number.empty? || build_number == "0"
 
     submit = options.fetch(:submit, true)
+    should_tag = options.fetch(:tag, true)
     automatic_release = options.fetch(:automatic_release, false)
     phased_release = options.fetch(:phased_release, false)
     upload_shots = options.fetch(:screenshots, false)
     locale = options[:locale] || DEFAULT_LOCALE
+
     release_notes = options[:release_notes]
+    if release_notes.nil?
+      since_ref = options[:since] || latest_release_tag
+      if since_ref
+        commits = commits_between(since_ref, release_ref)
+        UI.user_error!("No app commits found between #{since_ref} and #{release_ref}. Pass release_notes:\"...\" to override.") if commits.empty?
+        drafted = generate_release_notes(commits: commits, version: version)
+        release_notes = options[:force] ? drafted : review_release_notes(drafted)
+      else
+        UI.important("No previous v* release tag found (first release) — skipping automatic release notes.")
+        if !options[:force] && UI.confirm("Open $EDITOR to enter release notes manually?")
+          entered = edit_in_editor("")
+          release_notes = entered unless entered.empty?
+        end
+      end
+    end
 
     if submit && !options[:force]
       confirmed = UI.confirm("Submit Retappd #{version} (#{build_number}) for App Store review? (automatic_release: #{automatic_release})")
@@ -204,5 +365,9 @@ platform :ios do
     deliver_opts[:release_notes] = { locale => release_notes } if release_notes
 
     deliver(deliver_opts)
+
+    if submit && should_tag
+      create_and_push_release_tag(version: version, ref: release_ref, build_number: build_number)
+    end
   end
 end
