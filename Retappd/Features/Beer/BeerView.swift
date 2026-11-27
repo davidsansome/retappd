@@ -140,6 +140,7 @@ struct BeerView: View {
     let venue: Venue?
     @State private var model: BeerModel
     @State private var checkInBeer: BeerLite?
+    @State private var shouldDismissAfterCheckIn = false
     @State private var showingListsSheet = false
     @State private var showLabelPhoto = false
     /// The beer's prices at shops, from Metabeer, when shop prices are on and a shop has it.
@@ -148,6 +149,7 @@ struct BeerView: View {
     @State private var listID = UUID()
     @State private var containerWidth: CGFloat = 0
     @Environment(\.beerPageCanCheckIn) private var canCheckIn
+    @Environment(\.dismiss) private var dismiss
     @Environment(DiscoverModel.self) private var discover
     @Environment(AuthStore.self) private var auth
 
@@ -217,7 +219,10 @@ struct BeerView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if canCheckIn {
-                Button { checkInBeer = model.beer } label: { Label("Check in", systemImage: "plus") }
+                Button {
+                    shouldDismissAfterCheckIn = false
+                    checkInBeer = model.beer
+                } label: { Label("Check in", systemImage: "plus") }
                     .buttonStyle(TaproomPrimaryButton())
                     .accessibilityHint("Starts a check-in for this beer")
                     .taproomBottomBar()
@@ -237,7 +242,17 @@ struct BeerView: View {
             _ = await (details, checkins)
             if case .updated(let refreshed) = await prices { shopPrices = refreshed }
         }
-        .checkInPresentation(item: $checkInBeer) { CheckInSheet(beer: $0, venue: venue ?? discover.here.first) }
+        .checkInPresentation(item: $checkInBeer, onDismiss: {
+            if shouldDismissAfterCheckIn {
+                shouldDismissAfterCheckIn = false
+                // Pops this pushed beer page back to the screen that opened it.
+                dismiss()
+            }
+        }) {
+            CheckInSheet(beer: $0, venue: venue ?? discover.here.first) {
+                shouldDismissAfterCheckIn = true
+            }
+        }
     }
 
     @ViewBuilder private var summaryContent: some View {

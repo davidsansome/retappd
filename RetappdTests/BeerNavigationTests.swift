@@ -81,4 +81,18 @@ final class BeerNavigationTests: XCTestCase {
         let venueView = BeerView(beer: sampleBeer, venue: venueA)
         XCTAssertEqual(venueView.venue, venueA)
     }
+
+    @MainActor
+    func testCheckInSheetStoresOptionalOnComplete() {
+        let defaultSheet = CheckInSheet(beer: sampleBeer, venue: venueA)
+        XCTAssertNil(defaultSheet.onComplete)
+
+        var completed = false
+        let sheetWithCallback = CheckInSheet(beer: sampleBeer, venue: venueA) {
+            completed = true
+        }
+        XCTAssertNotNil(sheetWithCallback.onComplete)
+        sheetWithCallback.onComplete?()
+        XCTAssertTrue(completed)
+    }
 }

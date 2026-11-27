@@ -10,6 +10,8 @@ struct CheckInSheet: View {
     let editing: Checkin?
     /// A check-in saved for later that this finishes; removed from the list once it's posted.
     let pending: PendingCheckin?
+    /// Called right before dismissal when a new check-in is queued or saved for later.
+    let onComplete: (() -> Void)?
     @State var venue: Venue?
     @Environment(\.dismiss) private var dismiss
     @Environment(LocationProvider.self) private var location
@@ -48,10 +50,11 @@ struct CheckInSheet: View {
     @State private var error: String?
     @State private var preselectedServing = false
 
-    init(beer: BeerLite, venue: Venue?) {
+    init(beer: BeerLite, venue: Venue?, onComplete: (() -> Void)? = nil) {
         self.beer = beer
         editing = nil
         pending = nil
+        self.onComplete = onComplete
         let v = venue?.foursquareId != nil ? venue : nil
         _venue = State(initialValue: v)
         _extraVenue = State(initialValue: v)
@@ -62,6 +65,7 @@ struct CheckInSheet: View {
         beer = checkin.beerLite
         editing = checkin
         pending = nil
+        onComplete = nil
         _venue = State(initialValue: nil)
         _rating = State(initialValue: checkin.rating ?? 0)
         _shout = State(initialValue: checkin.comment ?? "")
@@ -77,6 +81,7 @@ struct CheckInSheet: View {
         self.beer = beer
         editing = nil
         pending = item
+        onComplete = nil
         _venue = State(initialValue: item.venue)
         _extraVenue = State(initialValue: item.venue)
         _rating = State(initialValue: item.rating)
@@ -90,6 +95,7 @@ struct CheckInSheet: View {
         self.beer = demoBeer
         editing = nil
         pending = nil
+        onComplete = nil
         _venue = State(initialValue: venue)
         _extraVenue = State(initialValue: venue)
         _rating = State(initialValue: rating)
@@ -551,6 +557,7 @@ struct CheckInSheet: View {
                 return
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
+            onComplete?()
             dismiss()
         }
     }
@@ -769,6 +776,7 @@ struct CheckInSheet: View {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         if let pending { PendingCheckins.shared.remove(pending.id) }
         Task { await LocalIndex.shared.add(beers: [beer]) }
+        onComplete?()
         dismiss()
     }
 
@@ -931,25 +939,27 @@ extension View {
     /// and a full-screen cover on iPhone (compact width).
     func checkInPresentation<Item: Identifiable, Content: View>(
         item: Binding<Item?>,
+        onDismiss: (() -> Void)? = nil,
         @ViewBuilder content: @escaping (Item) -> Content
     ) -> some View {
-        modifier(CheckInPresentation(item: item, content: content))
+        modifier(CheckInPresentation(item: item, onDismiss: onDismiss, content: content))
     }
 }
 
 private struct CheckInPresentation<Item: Identifiable, SheetContent: View>: ViewModifier {
     @Binding var item: Item?
+    let onDismiss: (() -> Void)?
     @ViewBuilder let content: (Item) -> SheetContent
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     func body(content base: Content) -> some View {
         if horizontalSizeClass == .regular {
-            base.sheet(item: $item) { value in
+            base.sheet(item: $item, onDismiss: onDismiss) { value in
                 content(value)
                     .presentationSizing(.page)
             }
         } else {
-            base.fullScreenCover(item: $item, content: content)
+            base.fullScreenCover(item: $item, onDismiss: onDismiss, content: content)
         }
     }
 }
