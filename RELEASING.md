@@ -55,6 +55,43 @@ There are no certificates, keys or secrets in the repository.
 5. **Check it:** in App Store Connect, *Xcode Cloud → Start Build* on `main`. When the build
    shows under *TestFlight → iOS Builds*, it's on its way to the testers.
 
+## App Store screenshots & releases (Fastlane)
+
+Fastlane (`fastlane/Fastfile`) automates screenshot capture, screenshot upload, and promoting
+an Xcode Cloud TestFlight build to an App Store release. Because Xcode Cloud owns the build
+counter, `fastlane release` never builds or uploads a binary locally — it selects the latest
+Xcode Cloud build for `MARKETING_VERSION` in `project.yml`.
+
+### One-time setup
+
+1. Install Fastlane (`brew install fastlane`, version 2.233+ for 6.9" iPhone / 13" iPad screenshot sizes).
+2. In App Store Connect (*Users and Access → Integrations → App Store Connect API → Team Keys*),
+   create a key with **App Manager** access and download the `.p8` file.
+3. Save a gitignored JSON file at the root of the main checkout (shared across worktrees, like
+   `test-accounts.local`): `asc-api-key.local.json`:
+   ```json
+   {
+     "key_id": "<KEY_ID>",
+     "issuer_id": "<ISSUER_ID>",
+     "key_filepath": "/absolute/path/to/AuthKey_<KEY_ID>.p8"
+   }
+   ```
+   (Alternatively, set `ASC_API_KEY_PATH` or save it at `fastlane/api_key.json`.)
+
+### Lanes
+
+- `fastlane screenshots` — builds Debug, spins up temporary dedicated iPhone 6.9" and iPad 13"
+  simulators, captures all 6 demo screens, frames them into `screenshots/{iphone,ipad}/`, and
+  deletes the temporary simulators. Pass `upload:true` to upload right after.
+- `fastlane upload_screenshots` — stages and uploads the framed PNGs in
+  `screenshots/{iphone,ipad}/` to App Store Connect (default locale `en-US`; override with
+  `locale:en-AU`).
+- `fastlane release` — attaches the latest Xcode Cloud TestFlight build for `MARKETING_VERSION`,
+  asks for confirmation (skip with `force:true`), and submits it for App Store review (manual
+  release after approval by default). Useful options: `release_notes:"..."`, `screenshots:true`,
+  `automatic_release:true`, `phased_release:true`, `submit:false`, `build_number:42`. For update
+  versions, either pass `release_notes:"..."` or fill in "What's New" in App Store Connect first.
+
 ## When something fails
 
 - *The post-clone script fails:* the log's *Post-Clone* step shows it. Run it as Xcode Cloud

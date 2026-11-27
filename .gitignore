@@ -5,7 +5,13 @@ DerivedData/
 .DS_Store
 xcuserdata/
 test-accounts.local
+asc-api-key.local.json
 screenshots/raw/
+fastlane/api_key.json
+fastlane/screenshots/
+fastlane/README.md
+fastlane/report.xml
+fastlane/Preview.html
 
 server/node_modules/
 server/.dev.vars
