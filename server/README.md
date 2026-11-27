@@ -66,7 +66,6 @@ the schedule never changes under a user (the poller logs `over_capacity` as a re
    (K too big), so items older than 24 h are never pushed. One push per new item, however many, oldest first
    (sequential per device). If K exceeds the new items found on a full first page, further pages (`offset`) are read
    until K is covered or items older than the marker are reached, capped at 100 items per poll (`item_cap_hit` is logged).
-   Badge = the pre-clear `unified_count`.
 4. The first poll after registration only records the watermarks (and does not read the list).
 Items are keyed by (type, checkin); activity on an existing item moves its `created_at` forward and so pushes again.
 A re-toast can raise the counter without a list item: nothing is pushed.

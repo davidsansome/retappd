@@ -98,7 +98,7 @@ final class PendingReminders {
         case .authorized, .provisional, .ephemeral: return true
         case .notDetermined:
             guard ask else { return false }
-            return (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+            return (try? await center.requestAuthorization(options: [.alert])) ?? false
         default: return false
         }
     }
@@ -126,7 +126,6 @@ final class PendingReminders {
         c.body = online
             ? "You have \(beers) to check in. Tap to finish them."
             : "You have \(beers) saved to check in. Tap to finish them."
-        c.sound = .default
         c.userInfo = ["retappd": ["type": "pending_checkins"]]
         return c
     }

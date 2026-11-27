@@ -350,4 +350,15 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertNil(NotificationRoute(userInfo: ["aps": ["alert": ["body": "3 more notifications"], "badge": 5]]))
         XCTAssertNil(NotificationRoute(userInfo: ["retappd": "oops"]))
     }
+
+    func testIsActivityOnlyMatchesUntappdActivityRoutes() {
+        XCTAssertTrue(NotificationRoute.isActivity(userInfo: ["retappd": ["type": "toast", "checkin_id": 1]]))
+        XCTAssertTrue(NotificationRoute.isActivity(userInfo: ["retappd": ["type": "comment", "checkin_id": 2]]))
+        XCTAssertTrue(NotificationRoute.isActivity(userInfo: ["retappd": ["type": "tag", "checkin_id": 3]]))
+        XCTAssertTrue(NotificationRoute.isActivity(userInfo: ["retappd": ["type": "comment_tag", "checkin_id": 4]]))
+        XCTAssertTrue(NotificationRoute.isActivity(userInfo: ["retappd": ["type": "friend_request"]]))
+        XCTAssertFalse(NotificationRoute.isActivity(userInfo: ["retappd": ["type": "pending_checkins"]]))
+        XCTAssertFalse(NotificationRoute.isActivity(userInfo: [:]))
+        XCTAssertFalse(NotificationRoute.isActivity(userInfo: ["retappd": ["type": "mystery", "checkin_id": 1]]))
+    }
 }

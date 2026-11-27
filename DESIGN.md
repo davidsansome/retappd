@@ -161,7 +161,7 @@ row) for lists of many checkins at one place, grouped under recency labels
   never touch, newest bar first). **Press and hold, then drag** to scrub: the totals switch to the
   touched bar and a haptic ticks per bar. VoiceOver gets a "Show/Hide values on bars" action.
 - **Notifications** (pushed from the bell at the right of the Activity title; the bell carries a `TaproomCountBadge`
-  when something is new, or an amber dot when only the app icon's badge is set) is a heavy title, a
+  when something is new, or an amber dot when a push notification has arrived since the screen was last opened) is a heavy title, a
   "Friend requests" row (amber icon, `TaproomCountBadge`, chevron; opens Me > Friends) only while requests are
   waiting, then plain `TaproomRowStyle` rows with dividers in a `LazyVStack`: the actor's avatar, one line of
   text with the names in semibold ("Jamie S and 2 others toasted your Late Nights III"), the short age in muted

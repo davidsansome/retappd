@@ -227,8 +227,7 @@ export async function pollUser(env: Env, deps: PollDeps, u: UserRow): Promise<vo
     }
     if (events.length) {
       events.sort((a, b) => a.at - b.at);
-      // Badge: pre-clear unified_count from the notifications call, else from the pending call.
-      await pushEvents(env, deps, live, events, (fetched ?? polled).counts.unified);
+      await pushEvents(env, deps, live, events);
     }
   }
   if (Object.keys(upd).length) await setState(env, u.uid, upd);
@@ -244,7 +243,7 @@ function allowed(prefs: Prefs, type: string): boolean {
   }
 }
 
-async function pushEvents(env: Env, deps: PollDeps, devices: DeviceRow[], events: Event[], badge: number) {
+async function pushEvents(env: Env, deps: PollDeps, devices: DeviceRow[], events: Event[]) {
   // One push per event, however many. Devices in parallel; sequential within a device to keep order.
   await Promise.all(
     devices.map(async (d) => {
@@ -254,8 +253,6 @@ async function pushEvents(env: Env, deps: PollDeps, devices: DeviceRow[], events
         const payload = {
           aps: {
             alert: { body: e.body },
-            badge,
-            sound: "default",
             "thread-id": e.checkinId ? `checkin-${e.checkinId}` : "friends",
           },
           retappd: { type: e.type, ...(e.checkinId ? { checkin_id: e.checkinId } : {}), actor: e.actor },

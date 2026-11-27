@@ -23,6 +23,15 @@ enum NotificationRoute: Equatable {
             return nil
         }
     }
+
+    /// Whether a notification represents Untappd activity (toasts, comments, tags, or friend
+    /// requests) that should light the in-app Notifications bell.
+    static func isActivity(userInfo: [AnyHashable: Any]) -> Bool {
+        switch NotificationRoute(userInfo: userInfo) {
+        case .checkin, .friendRequest: return true
+        case .pendingCheckins, nil: return false
+        }
+    }
 }
 
 /// Holds a tapped notification's route until the signed-in UI is there to act on it, which covers

@@ -37,7 +37,6 @@ describe("polling", () => {
     await env.DB.prepare("UPDATE users SET marker = NULL, friend_marker = NULL").run();
     u.items = [toastItem(1, T0 - 5000)];
     u.counts = { toasts: 1 };
-    u.unified = 1;
     u.pending = [pendingReq(T0 - 1000)];
     await poll(T1);
     expect(apns.sent).toEqual([]);
@@ -58,16 +57,15 @@ describe("polling", () => {
     spy.mockRestore();
   });
 
-  it("pushes new activity with the contract payload and the pre-clear unified badge", async () => {
+  it("pushes new activity with the contract payload and no badge or sound", async () => {
     await register();
     await poll(T1);
     u.items = [toastItem(2, T1 + 70_000)];
     u.counts = { toasts: 1 };
-    u.unified = 3;
     await poll(T1 + 120_000);
     expect(apns.sent).toHaveLength(1);
     expect(apns.sent[0].payload).toEqual({
-      aps: { alert: { body: "Jamie S toasted your Late Nights III" }, badge: 3, sound: "default", "thread-id": "checkin-2" },
+      aps: { alert: { body: "Jamie S toasted your Late Nights III" }, "thread-id": "checkin-2" },
       retappd: { type: "toast", checkin_id: 2, actor: "Jamie S" },
     });
     expect(Number((await user()).marker)).toBe(T1 + 70_000);
@@ -140,12 +138,11 @@ describe("polling", () => {
     await poll(T1);
     u.pending = [pendingReq(T1 + 30_000, 8, "Pat", "Quinn"), pendingReq(T0 - 1000, 7)];
     u.counts = { friends: 2 };
-    u.unified = 2;
     await poll(T1 + 60_000);
     expect(notifCalls()).toBe(0);
     expect(apns.sent).toHaveLength(1);
     expect(apns.sent[0].payload).toEqual({
-      aps: { alert: { body: "Pat Q sent you a friend request" }, badge: 2, sound: "default", "thread-id": "friends" },
+      aps: { alert: { body: "Pat Q sent you a friend request" }, "thread-id": "friends" },
       retappd: { type: "friend_request", actor: "Pat Q" },
     });
     await poll(T1 + 120_000); // watermark advanced: no repeat
@@ -166,7 +163,6 @@ describe("polling", () => {
     const t = T1 + 70_000;
     u.items = Array.from({ length: 12 }, (_, i) => toastItem(100 + i, t + i * 1000)).reverse(); // newest first
     u.counts = { toasts: 12 };
-    u.unified = 12;
     await poll(T1 + 120_000);
     expect(apns.sent.map((s) => s.payload.retappd.checkin_id)).toEqual(Array.from({ length: 12 }, (_, i) => 100 + i));
   });

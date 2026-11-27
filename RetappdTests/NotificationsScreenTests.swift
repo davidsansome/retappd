@@ -109,8 +109,10 @@ final class NotificationUnreadTests: XCTestCase {
         let d = UserDefaults(suiteName: "NotificationUnreadTests-\(UUID().uuidString)")!
         return d
     }
-    private func unread(_ d: UserDefaults, username: String = "me", badge: Int = 0) -> NotificationUnread {
-        NotificationUnread(username: username, defaults: d, loadRequests: { [] }, sequence: { self.seq }, readIconBadge: { badge }, clearIconBadge: {})
+    private func unread(_ d: UserDefaults, username: String = "me", delivered: [Date] = [],
+                        now: Date = Date(timeIntervalSince1970: 1000)) -> NotificationUnread {
+        NotificationUnread(username: username, defaults: d, loadRequests: { [] }, sequence: { self.seq },
+                           deliveredPushDates: { delivered }, now: { now }, notificationCenter: NotificationCenter())
     }
     private var seq = 0
     private func request(_ id: Int, at: Date?) -> Friend { Friend(user: user(id, "A", "B"), createdAt: at) }
@@ -125,7 +127,7 @@ final class NotificationUnreadTests: XCTestCase {
         XCTAssertFalse(item(.toast, at: nil).isNew(since: seen))
     }
 
-    func testDotFromEnvelopeBadgeOrUnseenRequests() async {
+    func testDotFromEnvelopeDeliveredPushOrUnseenRequests() async {
         let d = defaults()
         var u = unread(d)
         XCTAssertFalse(u.hasUnread)
@@ -133,7 +135,7 @@ final class NotificationUnreadTests: XCTestCase {
         XCTAssertEqual(u.count, 2)  // friends come from the pending list, not the envelope
         XCTAssertTrue(u.hasUnread)
 
-        u = unread(defaults(), badge: 3)
+        u = unread(defaults(), delivered: [Date(timeIntervalSince1970: 500)])
         await u.refresh()
         XCTAssertTrue(u.hasUnread)
         XCTAssertEqual(u.count, 0)  // a dot without a number
@@ -189,7 +191,7 @@ final class NotificationUnreadTests: XCTestCase {
         var fail = false
         let u = NotificationUnread(username: "me", defaults: defaults(),
                                    loadRequests: { if fail { throw APIError.http(500) }; return [Friend(user: user(1, "A", "B"))] },
-                                   sequence: { 0 }, readIconBadge: { 0 }, clearIconBadge: {})
+                                   sequence: { 0 }, deliveredPushDates: { [] }, notificationCenter: NotificationCenter())
         await u.refresh()
         XCTAssertEqual(u.requests.count, 1)
         fail = true
@@ -197,40 +199,76 @@ final class NotificationUnreadTests: XCTestCase {
         XCTAssertEqual(u.requests.count, 1)
     }
 
-    func testMarkSeenClearsIconBadge() async {
-        var cleared = 0
-        let u = NotificationUnread(username: "me", defaults: defaults(), loadRequests: { [] }, sequence: { 0 },
-                                   readIconBadge: { 4 }, clearIconBadge: { cleared += 1 })
-        await u.refresh()
-        XCTAssertTrue(u.hasUnread)
-        u.markSeen(newest: nil)
-        XCTAssertFalse(u.hasUnread)
-        await Task.yield(); await Task.yield()
-        XCTAssertEqual(cleared, 1)
-    }
-
-    func testRefreshAwaitsInFlightBadgeClear() async {
-        var badge = 4
-        var releaseClear: CheckedContinuation<Void, Never>?
-        let u = NotificationUnread(username: "me", defaults: defaults(), loadRequests: { [] }, sequence: { 0 },
-                                   readIconBadge: { badge },
-                                   clearIconBadge: {
-                                       await withCheckedContinuation { releaseClear = $0 }
-                                       badge = 0
-                                   },
+    func testMarkSeenKeepsAlreadyDeliveredPushesQuietAndNewerOnesLightBell() async {
+        var delivered = [Date(timeIntervalSince1970: 800)]
+        var clock = Date(timeIntervalSince1970: 900)
+        let d = defaults()
+        let u = NotificationUnread(username: "me", defaults: d, loadRequests: { [] }, sequence: { 0 },
+                                   deliveredPushDates: { delivered }, now: { clock },
                                    notificationCenter: NotificationCenter())
         await u.refresh()
-        XCTAssertEqual(u.iconBadge, 4)
         XCTAssertTrue(u.hasUnread)
 
-        u.markSeen(newest: nil)
-        let refresh = Task { await u.refresh() }
-        while releaseClear == nil { await Task.yield() }
-        for _ in 0..<20 { await Task.yield() }
+        u.markSeen(newest: Date(timeIntervalSince1970: 750))
+        XCTAssertFalse(u.hasUnread)
 
-        releaseClear?.resume()
+        // Delivered notifications stay in Notification Centre, so refresh sees the same date again.
+        await u.refresh()
+        XCTAssertFalse(u.hasUnread)
+
+        // A newer push delivered later lights the bell again.
+        clock = Date(timeIntervalSince1970: 1100)
+        delivered.append(Date(timeIntervalSince1970: 1050))
+        await u.refresh()
+        XCTAssertTrue(u.hasUnread)
+    }
+
+    func testMarkedSeenAtPersistsAcrossInstances() async {
+        let d = defaults()
+        let delivered = [Date(timeIntervalSince1970: 800)]
+        let first = NotificationUnread(username: "me", defaults: d, loadRequests: { [] }, sequence: { 0 },
+                                       deliveredPushDates: { delivered },
+                                       now: { Date(timeIntervalSince1970: 900) },
+                                       notificationCenter: NotificationCenter())
+        await first.refresh()
+        XCTAssertTrue(first.hasUnread)
+        first.markSeen(newest: Date(timeIntervalSince1970: 750))
+
+        // A fresh instance on the same UserDefaults keeps pushes before the stored cutoff quiet.
+        let second = NotificationUnread(username: "me", defaults: d, loadRequests: { [] }, sequence: { 0 },
+                                        deliveredPushDates: { delivered },
+                                        now: { Date(timeIntervalSince1970: 1200) },
+                                        notificationCenter: NotificationCenter())
+        await second.refresh()
+        XCTAssertFalse(second.hasUnread)
+    }
+
+    func testUpgradeWithLastSeenButNoMarkedSeenAtBaselinesToNow() async {
+        let d = defaults()
+        d.set(700.0, forKey: NotificationUnread.key("me"))
+        // Push delivered at 750 (after item created_at 700, before upgrade at 1000) stays quiet.
+        let u = NotificationUnread(username: "me", defaults: d, loadRequests: { [] }, sequence: { 0 },
+                                   deliveredPushDates: { [Date(timeIntervalSince1970: 750)] },
+                                   now: { Date(timeIntervalSince1970: 1000) },
+                                   notificationCenter: NotificationCenter())
+        await u.refresh()
+        XCTAssertFalse(u.hasUnread)
+    }
+
+    func testInFlightRefreshWithPreMarkSeenPushDoesNotReLightBell() async {
+        var releaseDelivered: CheckedContinuation<[Date], Never>?
+        let u = NotificationUnread(username: "me", defaults: defaults(), loadRequests: { [] }, sequence: { 0 },
+                                   deliveredPushDates: {
+                                       await withCheckedContinuation { releaseDelivered = $0 }
+                                   },
+                                   now: { Date(timeIntervalSince1970: 1000) },
+                                   notificationCenter: NotificationCenter())
+        let refresh = Task { await u.refresh() }
+        while releaseDelivered == nil { await Task.yield() }
+
+        u.markSeen(newest: nil)
+        releaseDelivered?.resume(returning: [Date(timeIntervalSince1970: 950)])
         await refresh.value
-        XCTAssertEqual(u.iconBadge, 0)
         XCTAssertFalse(u.hasUnread)
     }
 
@@ -243,17 +281,16 @@ final class NotificationUnreadTests: XCTestCase {
         XCTAssertFalse(u.hasUnread)
     }
 
-    func testForegroundPushRefreshesUnread() async {
+    func testForegroundPushLightsUnreadWithoutDeliveredNotification() async {
         let center = NotificationCenter()
-        var badge = 0
         let u = NotificationUnread(username: "me", defaults: defaults(), loadRequests: { [] }, sequence: { 0 },
-                                   readIconBadge: { badge }, clearIconBadge: {}, notificationCenter: center)
+                                   deliveredPushDates: { [] }, notificationCenter: center)
         XCTAssertFalse(u.hasUnread)
-        badge = 2
         center.post(name: .foregroundPushReceived, object: nil)
-        for _ in 0..<200 where u.iconBadge != 2 { await Task.yield() }
-        XCTAssertEqual(u.iconBadge, 2)
+        for _ in 0..<200 where !u.hasUnread { await Task.yield() }
         XCTAssertTrue(u.hasUnread)
+        u.markSeen(newest: nil)
+        XCTAssertFalse(u.hasUnread)
     }
 }
 

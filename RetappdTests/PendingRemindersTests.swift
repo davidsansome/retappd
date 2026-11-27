@@ -28,6 +28,8 @@ final class PendingRemindersTests: XCTestCase {
     func testContentRoutesToTheList() {
         let c = PendingReminders.content(count: 3, online: true)
         XCTAssertEqual(c.body, "You have 3 beers to check in. Tap to finish them.")
+        XCTAssertNil(c.sound)
+        XCTAssertNil(c.badge)
         XCTAssertEqual(NotificationRoute(userInfo: c.userInfo), .pendingCheckins)
         XCTAssertTrue(PendingReminders.content(count: 1, online: false).body.contains("1 beer saved"))
     }

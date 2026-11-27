@@ -22,7 +22,6 @@ export interface UntappdMock {
   status: number; // non-auth failure status when != 200
   retryAfter?: string;
   counts: Record<string, number>;
-  unified: number;
   items: any[];
   pending: any[];
   zeroOnFetch?: boolean; // the user read everything in another app between the pending poll and the list fetch
@@ -30,7 +29,7 @@ export interface UntappdMock {
 }
 
 export function untappdMock(over: Partial<UntappdMock> = {}): UntappdMock {
-  return { uid: 42, authOk: true, status: 200, counts: {}, unified: 0, items: [], pending: [], calls: [], ...over };
+  return { uid: 42, authOk: true, status: 200, counts: {}, items: [], pending: [], calls: [], ...over };
 }
 
 export function mockFetch(u: UntappdMock) {
@@ -52,15 +51,14 @@ function untappdResponse(u: UntappdMock, url: URL, auth: string): Response {
     return new Response("{}", { status: u.status, headers: u.retryAfter ? { "retry-after": u.retryAfter } : {} });
   const envelope = {
     meta: { code: 200 },
-    notifications: { unread_count: { toasts: 0, comments: 0, friends: 0, messages: 0, venues: 0, others: 0, news: 0, ...u.counts }, unified_count: u.unified },
+    notifications: { unread_count: { toasts: 0, comments: 0, friends: 0, messages: 0, venues: 0, others: 0, news: 0, ...u.counts } },
   };
   if (url.pathname === "/v4/account/usersettings") return Response.json({ ...envelope, response: { user: { uid: u.uid } } });
   if (url.pathname === "/v4/notifications") {
     // Reading the list clears the counters (but this response still shows the pre-clear values).
-    const env2 = u.zeroOnFetch ? { ...envelope, notifications: { ...envelope.notifications, unread_count: {}, unified_count: 0 } } : envelope;
+    const env2 = u.zeroOnFetch ? { ...envelope, notifications: { ...envelope.notifications, unread_count: {} } } : envelope;
     const res = Response.json({ ...env2, response: { notifications: { items: u.items.slice(Number(url.searchParams.get("offset") ?? 0), Number(url.searchParams.get("offset") ?? 0) + 25) } } });
     for (const k of ["toasts", "comments", "others", "news"]) delete u.counts[k];
-    u.unified = u.counts.friends ?? 0;
     return res;
   }
   if (url.pathname === "/v4/user/pending") return Response.json({ ...envelope, response: { count: u.pending.length, items: u.pending } });

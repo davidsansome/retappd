@@ -30,7 +30,6 @@ export interface Counts {
   venues: number;
   others: number;
   news: number;
-  unified: number;
 }
 
 export interface FriendRequest {
@@ -75,7 +74,6 @@ function parseCounts(json: any): Counts {
     venues: n("venues"),
     others: n("others"),
     news: n("news"),
-    unified: typeof json?.notifications?.unified_count === "number" ? json.notifications.unified_count : 0,
   };
 }
 

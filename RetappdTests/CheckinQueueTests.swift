@@ -713,6 +713,14 @@ final class CheckinQueueTests: XCTestCase {
         XCTAssertEqual(scheduledNotifications.count, 1)
     }
 
+    func testFailureNotificationContentHasNoSoundOrBadge() {
+        let content = CheckinQueue.failureNotificationContent(beerName: "Saison")
+        XCTAssertEqual(content.title, "Check-in failed")
+        XCTAssertNil(content.sound)
+        XCTAssertNil(content.badge)
+        XCTAssertFalse(NotificationRoute.isActivity(userInfo: content.userInfo))
+    }
+
     private func queueFailed(_ queue: CheckinQueue, _ jobID: UUID) -> Bool {
         queue.jobs.first { $0.id == jobID }?.isFailed == true
     }

@@ -73,7 +73,7 @@ final class NotificationService {
          appVersion: String = NotificationService.bundleVersion(),
          apnsEnv: String = NotificationService.defaultEnv,
          requestAuthorization: @escaping () async -> Bool = {
-             (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+             (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert])) ?? false
          },
          authorizationStatus: @escaping () async -> UNAuthorizationStatus = {
              await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
@@ -348,6 +348,8 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        // Clear any leftover app icon badge from older versions.
+        Task { try? await UNUserNotificationCenter.current().setBadgeCount(0) }
         PendingReminders.register()
         CheckinQueue.shared.start()
         return true
@@ -369,8 +371,10 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions {
-        await MainActor.run { NotificationCenter.default.post(name: .foregroundPushReceived, object: nil) }
-        return [.banner, .sound, .badge]
+        if NotificationRoute.isActivity(userInfo: notification.request.content.userInfo) {
+            await MainActor.run { NotificationCenter.default.post(name: .foregroundPushReceived, object: nil) }
+        }
+        return [.banner, .list]
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {

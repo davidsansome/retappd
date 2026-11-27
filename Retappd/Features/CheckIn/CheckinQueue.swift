@@ -351,14 +351,17 @@ final class CheckinQueue: CheckinBackgroundTransportDelegate {
         return appSupport.appendingPathComponent("PendingCheckins", isDirectory: true)
     }
 
-    nonisolated static func defaultScheduleFailureNotification(jobID: UUID, beerName: String) {
+    nonisolated static func failureNotificationContent(beerName: String) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = "Check-in failed"
         content.body = "\(beerName) couldn't be saved. Open Retappd to retry."
-        content.sound = .default
+        return content
+    }
+
+    nonisolated static func defaultScheduleFailureNotification(jobID: UUID, beerName: String) {
         let request = UNNotificationRequest(
             identifier: "checkin-failed-\(jobID.uuidString)",
-            content: content,
+            content: failureNotificationContent(beerName: beerName),
             trigger: nil
         )
         UNUserNotificationCenter.current().add(request)

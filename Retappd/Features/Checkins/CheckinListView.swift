@@ -208,7 +208,7 @@ struct FeedView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         // The feed refreshing (first load, pull to refresh, coming back after a while) is when the
-        // bell checks for friend requests and the icon badge.
+        // bell checks for friend requests and delivered pushes.
         .onChange(of: model.isRefreshing) { was, now in
             if was && !now { Task { await unread.refresh() } }
         }

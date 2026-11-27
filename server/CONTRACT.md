@@ -46,8 +46,6 @@ online, then forgets them.
 {
   "aps": {
     "alert": { "body": "Jamie S toasted your Late Nights III" },
-    "badge": 3,                     // Untappd unified_count
-    "sound": "default",
     "thread-id": "checkin-1582931702"
   },
   "retappd": {
