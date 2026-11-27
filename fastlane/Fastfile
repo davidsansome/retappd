@@ -293,7 +293,7 @@ platform :ios do
   end
 
   desc "Promote the latest Xcode Cloud TestFlight build to an App Store release and tag v<version> on origin/main"
-  desc "Options: version:<from project.yml>, build_number:<latest TF>, ref:origin/main, since:<ref>, release_notes:<text>, screenshots:false, submit:true, tag:true, automatic_release:false, phased_release:false, force:false, locale:en-AU"
+  desc "Options: version:<from project.yml>, build_number:<latest TF>, ref:origin/main, since:<ref>, release_notes:<text>, screenshots:false, submit:true, tag:true, automatic_release:true, phased_release:true, force:false, locale:en-AU"
   lane :release do |options|
     Dir.chdir(repo_root) { sh("git", "fetch", "origin", "--tags") }
 
@@ -311,8 +311,8 @@ platform :ios do
 
     submit = options.fetch(:submit, true)
     should_tag = options.fetch(:tag, true)
-    automatic_release = options.fetch(:automatic_release, false)
-    phased_release = options.fetch(:phased_release, false)
+    automatic_release = options.fetch(:automatic_release, true)
+    phased_release = options.fetch(:phased_release, true)
     upload_shots = options.fetch(:screenshots, false)
     locale = options[:locale] || DEFAULT_LOCALE
 

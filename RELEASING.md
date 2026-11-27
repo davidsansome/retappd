@@ -92,10 +92,10 @@ Xcode Cloud build for `MARKETING_VERSION` in `project.yml`.
 - `fastlane release` — attaches the latest Xcode Cloud TestFlight build for `MARKETING_VERSION`,
   auto-generates release notes from `<last v* tag>..origin/main` (on the first release, before any
   `v*` tag exists, prompts to enter notes manually in `$EDITOR` or skip), lets you
-  **Accept / Edit in `$EDITOR` / Cancel**, submits for App Store review (manual release after
-  approval by default), and creates + pushes an annotated `v<version>` tag on `origin/main`.
-  Useful options: `release_notes:"..."`, `screenshots:true`, `automatic_release:true`,
-  `phased_release:true`, `submit:false`, `tag:false`, `force:true`, `build_number:42`.
+  **Accept / Edit in `$EDITOR` / Cancel**, submits for App Store review (automatic phased
+  release after approval by default), and creates + pushes an annotated `v<version>` tag on `origin/main`.
+  Useful options: `release_notes:"..."`, `screenshots:true`, `automatic_release:false`,
+  `phased_release:false`, `submit:false`, `tag:false`, `force:true`, `build_number:42`.
 
 Both `asc-api-key.local.json` and `*.p8` are gitignored.
 
