@@ -18,8 +18,17 @@ actor ResponseCache {
     private var generation = 0
 
     init() {
+        #if DEBUG
+        if ScreenshotDemo.isEnabled {
+            dir = FileManager.default.temporaryDirectory.appendingPathComponent("retappd-demo-responses", isDirectory: true)
+        } else {
+            dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("responses", isDirectory: true)
+        }
+        #else
         dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("responses", isDirectory: true)
+        #endif
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         memory.totalCostLimit = 32 << 20
     }

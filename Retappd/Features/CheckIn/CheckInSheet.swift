@@ -84,6 +84,24 @@ struct CheckInSheet: View {
         _photo = State(initialValue: PendingCheckins.shared.photo(for: item).flatMap(UIImage.init(data:)))
     }
 
+    #if DEBUG
+    init(demoBeer: BeerLite, venue: Venue?, rating: Double, shout: String,
+         serving: ServingType?, flavors: [FlavorTag], photo: UIImage?) {
+        self.beer = demoBeer
+        editing = nil
+        pending = nil
+        _venue = State(initialValue: venue)
+        _extraVenue = State(initialValue: venue)
+        _rating = State(initialValue: rating)
+        _userTouchedRating = State(initialValue: true)
+        _shout = State(initialValue: shout)
+        _serving = State(initialValue: serving)
+        _preselectedServing = State(initialValue: serving != nil)
+        _flavors = State(initialValue: flavors)
+        _photo = State(initialValue: photo)
+    }
+    #endif
+
     /// Untappd hides check-ins that give their own time from friends' feeds, so a late one is
     /// posted now, and its shout starts "LCI" (late check-in) once it's more than this late.
     static let lateCheckInGrace: TimeInterval = 60 * 60
@@ -156,7 +174,12 @@ struct CheckInSheet: View {
             .onChange(of: libraryItem) { _, item in loadLibraryPhoto(item) }
             .interactiveDismissDisabled(busy)
             .task { await options.loadServingTypes() }
-            .task { if editing == nil { location.start() } }
+            .task {
+                #if DEBUG
+                if ScreenshotDemo.isEnabled { return }
+                #endif
+                if editing == nil { location.start() }
+            }
             .task { if editing == nil { await options.loadFriends() } }
             .task { await loadEditedShop() }
             .task { await prefillRating() }

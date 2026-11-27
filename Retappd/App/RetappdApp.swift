@@ -18,34 +18,46 @@ struct RetappdApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if let username = auth.username, auth.isSignedIn {
-                    if AuthStore.isValidUsername(username) {
-                        RootTabs(username: username)
-                            .id(username)
-                    } else {
-                        UsernameResolutionView()
-                    }
+            #if DEBUG
+            if ScreenshotDemo.isEnabled {
+                ScreenshotDemoRoot(auth: auth, location: location)
+            } else {
+                mainScene
+            }
+            #else
+            mainScene
+            #endif
+        }
+    }
+
+    private var mainScene: some View {
+        Group {
+            if let username = auth.username, auth.isSignedIn {
+                if AuthStore.isValidUsername(username) {
+                    RootTabs(username: username)
+                        .id(username)
                 } else {
-                    LoginView()
-                        #if DEBUG
-                        .task { await auth.signInFromLaunchArguments() }
-                        #endif
+                    UsernameResolutionView()
                 }
+            } else {
+                LoginView()
+                    #if DEBUG
+                    .task { await auth.signInFromLaunchArguments() }
+                    #endif
             }
-            .environment(auth)
-            .environment(location)
-            .tint(Taproom.amber)
-            .preferredColorScheme(appearance.colorScheme)
-            // A notification registration deleted at sign-out that couldn't reach the server is
-            // retried here, signed in or not.
-            .task { await NotificationService.shared.retryPendingDeletion() }
-            .onChange(of: auth.isSignedIn) { _, signedIn in
-                if !signedIn { location.stop() }
-            }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task { await NotificationService.shared.retryPendingDeletion() } }
-            }
+        }
+        .environment(auth)
+        .environment(location)
+        .tint(Taproom.amber)
+        .preferredColorScheme(appearance.colorScheme)
+        // A notification registration deleted at sign-out that couldn't reach the server is
+        // retried here, signed in or not.
+        .task { await NotificationService.shared.retryPendingDeletion() }
+        .onChange(of: auth.isSignedIn) { _, signedIn in
+            if !signedIn { location.stop() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await NotificationService.shared.retryPendingDeletion() } }
         }
     }
 }

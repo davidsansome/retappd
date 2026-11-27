@@ -17,9 +17,19 @@ struct StatsView: View {
     @State private var lastScrubEnd = Date.distantPast
     @State private var containerWidth: CGFloat = 0
 
+    private let initialRange: StatsRange?
+
     init(username: String) {
         _model = State(initialValue: StatsModel(username: username))
+        self.initialRange = nil
     }
+
+    #if DEBUG
+    init(username: String, initialRange: StatsRange) {
+        _model = State(initialValue: StatsModel(username: username))
+        self.initialRange = initialRange
+    }
+    #endif
 
     private var isTwoColumn: Bool { containerWidth >= .twoColumnThreshold }
 
@@ -77,7 +87,11 @@ struct StatsView: View {
             // shouldn't refetch the whole series.
             guard !didLoad else { return }
             didLoad = true
-            model.load(force: true)
+            if let initialRange, initialRange != model.range {
+                model.select(initialRange)
+            } else {
+                model.load(force: true)
+            }
         }
         .refreshable { await model.refresh() }
         .sheet(isPresented: $picking) {

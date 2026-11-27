@@ -105,6 +105,11 @@ final class UntappdAPI: @unchecked Sendable {
         c.urlCache = nil
         c.timeoutIntervalForRequest = 20
         c.httpMaximumConnectionsPerHost = 6
+        #if DEBUG
+        if ScreenshotDemo.isEnabled {
+            c.protocolClasses = [ScreenshotDemoURLProtocol.self] + (c.protocolClasses ?? [])
+        }
+        #endif
         return URLSession(configuration: c)
     }()
 

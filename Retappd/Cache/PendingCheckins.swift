@@ -57,7 +57,17 @@ final class PendingCheckins {
 
     init(directory: URL? = nil,
          currentUser: @escaping () -> String? = { UserDefaults.standard.string(forKey: "username") }) {
-        let dir = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let defaultDir: URL
+        #if DEBUG
+        if ScreenshotDemo.isEnabled {
+            defaultDir = FileManager.default.temporaryDirectory.appendingPathComponent("retappd-demo-pending", isDirectory: true)
+        } else {
+            defaultDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        }
+        #else
+        defaultDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        #endif
+        let dir = directory ?? defaultDir
         url = dir.appendingPathComponent("pending-checkins.json")
         photoDir = dir.appendingPathComponent("pending-photos", isDirectory: true)
         try? FileManager.default.createDirectory(at: photoDir, withIntermediateDirectories: true)

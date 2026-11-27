@@ -351,7 +351,13 @@ final class NotificationAppDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         // Clear any leftover app icon badge from older versions.
         Task { try? await UNUserNotificationCenter.current().setBadgeCount(0) }
         PendingReminders.register()
+        #if DEBUG
+        if !ScreenshotDemo.isEnabled {
+            CheckinQueue.shared.start()
+        }
+        #else
         CheckinQueue.shared.start()
+        #endif
         return true
     }
 

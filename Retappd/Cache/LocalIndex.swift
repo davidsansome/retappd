@@ -29,7 +29,16 @@ actor LocalIndex {
     private let url: URL
 
     init(url: URL? = nil) {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir: URL
+        #if DEBUG
+        if ScreenshotDemo.isEnabled {
+            dir = FileManager.default.temporaryDirectory.appendingPathComponent("retappd-demo-localindex", isDirectory: true)
+        } else {
+            dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        }
+        #else
+        dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        #endif
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         self.url = url ?? dir.appendingPathComponent("local-index.json")
     }

@@ -1,9 +1,11 @@
 *.xcodeproj/
+.build/
 build/
 DerivedData/
 .DS_Store
 xcuserdata/
 test-accounts.local
+screenshots/raw/
 
 server/node_modules/
 server/.dev.vars

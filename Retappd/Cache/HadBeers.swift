@@ -49,7 +49,16 @@ final class HadBeers {
          fetchList: @escaping @Sendable () async throws -> UserBeerList = {
              try await UntappdAPI.shared.fetch(.userBeerList, as: UserBeerList.self)
          }) {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir: URL
+        #if DEBUG
+        if ScreenshotDemo.isEnabled {
+            dir = FileManager.default.temporaryDirectory.appendingPathComponent("retappd-demo-hadbeers", isDirectory: true)
+        } else {
+            dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        }
+        #else
+        dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        #endif
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         self.url = url ?? dir.appendingPathComponent("had-beers.json")
         self.currentUser = currentUser

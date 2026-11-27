@@ -19,6 +19,11 @@ final class ImagePipeline: @unchecked Sendable {
         let c = URLSessionConfiguration.default
         c.urlCache = nil
         c.httpMaximumConnectionsPerHost = 8
+        #if DEBUG
+        if ScreenshotDemo.isEnabled {
+            c.protocolClasses = [ScreenshotDemoURLProtocol.self] + (c.protocolClasses ?? [])
+        }
+        #endif
         session = URLSession(configuration: c)
     }
 
