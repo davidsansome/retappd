@@ -885,9 +885,9 @@ struct TaproomPageTabs<Value: Hashable>: View {
     }
 }
 
-/// A beer's label: its own if it has one, else its brewery's logo, else the app icon. Untappd's
-/// stock "no label" badges count as having none. When an HD URL is given, the lower-res URL of
-/// the same artwork stays visible while the HD image loads.
+/// A beer's label: its own if it has one, else its brewery's logo, else a muted beer-mug
+/// placeholder. Untappd's stock "no label" badges count as having none. When an HD URL is given,
+/// the lower-res URL of the same artwork stays visible while the HD image loads.
 struct BeerLabel: View {
     let beer: URL?
     var beerHD: URL? = nil
@@ -924,7 +924,7 @@ struct BeerLabel: View {
         let resolved = Self.resolve(beer: beer, beerHD: beerHD, brewery: brewery, breweryHD: breweryHD)
         Group {
             if let resolved {
-                // A warm blank while it loads, rather than flashing the app icon.
+                // A warm blank while it loads, rather than flashing the placeholder.
                 CachedImage(url: resolved.url, maxPixel: size * 3) {
                     if let fallback = resolved.fallback {
                         CachedImage(url: fallback, maxPixel: size * 3)
@@ -933,7 +933,7 @@ struct BeerLabel: View {
                     }
                 }
             } else {
-                Image("LabelPlaceholder").resizable()
+                BeerLabelPlaceholder(cornerRadius: cornerRadius)
             }
         }
             .aspectRatio(contentMode: .fill)
@@ -943,6 +943,58 @@ struct BeerLabel: View {
             .accessibilityHidden(true)
     }
 
+}
+
+/// A warm, muted beer-mug silhouette shown when neither a beer nor its brewery has artwork.
+private struct BeerLabelPlaceholder: View {
+    var cornerRadius: CGFloat
+
+    var body: some View {
+        Canvas { context, size in
+            let s = min(size.width, size.height) / 64
+            let dx = (size.width - 64 * s) / 2
+            let dy = (size.height - 64 * s) / 2
+            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+                CGPoint(x: dx + x * s, y: dy + y * s)
+            }
+
+            // Soft foam crown sitting flush on top of the mug rim (y = 21). Combine the three
+            // puffs into one Path so overlapping circles don't compound opacity.
+            var foamContext = context
+            foamContext.clip(to: Path(CGRect(x: dx + 14.5 * s, y: dy, width: 23 * s, height: 21 * s)))
+            var foam = Path()
+            for (cx, cy, r) in [(19.5, 20.8, 5.0), (26.3, 18.8, 5.8), (32.7, 20.8, 4.8)] as [(CGFloat, CGFloat, CGFloat)] {
+                let rect = CGRect(x: dx + (cx - r) * s, y: dy + (cy - r) * s, width: r * 2 * s, height: r * 2 * s)
+                foam.addEllipse(in: rect)
+            }
+            foamContext.fill(foam, with: .color(Taproom.glassRim.opacity(0.55)))
+
+            // Handle on the right side of the mug.
+            var handle = Path()
+            handle.move(to: pt(37.5, 26))
+            handle.addArc(tangent1End: pt(47.5, 26), tangent2End: pt(47.5, 35), radius: 5 * s)
+            handle.addArc(tangent1End: pt(47.5, 44), tangent2End: pt(37.5, 44), radius: 5 * s)
+            handle.addLine(to: pt(37.5, 44))
+            context.stroke(
+                handle,
+                with: .color(Taproom.glassRim),
+                style: StrokeStyle(lineWidth: 4.2 * s, lineCap: .round, lineJoin: .round)
+            )
+
+            // Mug body.
+            let bodyRect = CGRect(x: dx + 14.5 * s, y: dy + 21 * s, width: 23 * s, height: 30 * s)
+            context.fill(
+                Path(roundedRect: bodyRect, cornerRadius: 4 * s),
+                with: .color(Taproom.glassRim)
+            )
+        }
+        .background(Taproom.glassInside)
+        // A subtle border keeps the muted placeholder distinct against `Taproom.card` surfaces.
+        .overlay {
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .strokeBorder(Taproom.border, lineWidth: 1)
+        }
+    }
 }
 
 /// A green corner with a tick, on a card or beer label for a beer the signed-in user has had.
