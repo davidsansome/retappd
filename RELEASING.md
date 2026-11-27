@@ -80,7 +80,7 @@ Xcode Cloud build for `MARKETING_VERSION` in `project.yml`.
 
 ### Lanes
 
-- `fastlane capture_screenshots` — builds Debug, spins up temporary dedicated iPhone 6.9" and iPad 13"
+- `fastlane make_screenshots` — builds Debug, spins up temporary dedicated iPhone 6.9" and iPad 13"
   simulators, captures all 6 demo screens, frames them into `screenshots/{iphone,ipad}/`, and
   deletes the temporary simulators. Pass `upload:true` to upload right after.
 - `fastlane upload_screenshots` — stages and uploads the framed PNGs in

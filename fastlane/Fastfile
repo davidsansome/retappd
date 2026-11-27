@@ -80,7 +80,7 @@ def stage_screenshots(locale:)
     end
   end
 
-  UI.user_error!("No framed PNGs found under screenshots/iphone or screenshots/ipad. Run `fastlane capture_screenshots` first.") if copied == 0
+  UI.user_error!("No framed PNGs found under screenshots/iphone or screenshots/ipad. Run `fastlane make_screenshots` first.") if copied == 0
   UI.message("Staged #{copied} screenshots into #{locale_dir}")
   stage_dir
 end
@@ -207,7 +207,7 @@ end
 platform :ios do
   desc "Build Debug, capture all 6 demo screenshots on dedicated iPhone 6.9\" & iPad 13\" simulators, and frame them"
   desc "Options: upload:true (also upload to App Store Connect), locale:en-US, iphone_udid:..., ipad_udid:..."
-  lane :capture_screenshots do |options|
+  lane :make_screenshots do |options|
     created_sims = []
     iphone_udid = options[:iphone_udid]
     ipad_udid = options[:ipad_udid]
