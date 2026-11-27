@@ -96,7 +96,8 @@ System font throughout (SF Pro), so Dynamic Type works.
 | `TaproomLinkRow` | A row in a card that opens a web page or Maps: amber icon, content, and a muted "Website ↗" hint | Where, Find them: website, social accounts, map |
 | `TaproomSegmented` | Bordered card of equal segments, the selected one amber; 44pt tall | Picking one value from a short row where the options are alike and switch the same content (a statistics range: 1W / 1M / 1Y / All). A value that matches no option shows no selection, which is how Statistics shows a custom date range. Not for splitting a page (`TaproomPageTabs`) or filtering (chips). |
 | `TaproomStatRow` | Muted label left, heavy monospaced value right, 44pt | A table of figures inside a `.taproomCard()`, with a 1pt `border` line between rows (the statistics breakdown) |
-| `TaproomSearchField` | Card-style search field with Cancel; `focusRequests` focuses it from elsewhere; `systemImage` swaps the magnifier (`location` for a "near…" field) and `capitalization` suits names of places | Searching or filtering on a page (Discover, a venue's menu) instead of `.searchable`. The shop picker stacks a second one, "Near… (city or country)", under the shop-name search |
+| `TaproomSearchField` | Card-style search field with optional trailing accessory and Cancel; `focusRequests` focuses it from elsewhere; `systemImage` swaps the magnifier (`location` for a "near…" field) and `capitalization` suits names of places | Searching or filtering on a page (Discover, a venue's menu) instead of `.searchable`. Discover places its icon-only barcode Scan button (`TaproomSearchAccessoryButton`) in the trailing slot. The shop picker stacks a second one, "Near… (city or country)", under the shop-name search |
+| `TaproomSearchAccessoryButton` | 44×44 card-style icon-only button matching `TaproomSearchField`'s height and 16pt corners | An icon action placed beside a search field (Discover's barcode Scan button) |
 | `TaproomOfflineSwitch` | "Offline" beside a switch tinted amber, bound to `Connectivity.offlineMode`; the label turns from muted to ink when on | The top right of screens that search or check in: above the search field on Discover, in the check-in screen's navigation bar. Only the user turns offline mode off, so nothing else flips it |
 | `TaproomNotice` | A card with an amber icon, a bold subheadline title and a muted footnote message, with optional buttons under it (`TaproomOutlineButton` beside `TaproomPrimaryButton(compact: true)`) | Telling you about the app's state at the top of a page: "Offline mode is on" on Discover, and "The connection is slow" with Keep waiting / Go offline |
 | `TaproomRowStyle` + `.taproomRowDivider()` | Full-width tappable row with a pressed highlight, and a 1pt warm line under it | Lists laid out on the page: venues, beers, search results |
@@ -112,9 +113,10 @@ row) for lists of many checkins at one place, grouped under recency labels
 ## Screen patterns
 
 - **Tab bar.** The system tab bar is hidden. `TaproomTabBar` sits on each tab's root screen with
-  Activity, Discover and Me on the left and one context action on the right: **Search** on Activity
-  and Me (jumps to Discover and focuses its search field), **Scan** on Discover (opens the
-  barcode scanner). Choosing the tab you're on scrolls it back to the top.
+  Activity, Discover and Me on the left and a context action on the right where needed: **Search**
+  on Activity and Me (jumps to Discover and focuses its search field), and none on Discover (where
+  the search field and icon-only Scan button sit at the top). Choosing the tab you're on scrolls it
+  back to the top.
 - **Lists of things to read** (the feed, a profile's checkins) are cards: `.taproomCard()` with the
   photo edge to edge inside, the rating as each card's hero on the right.
 - **Lists of things to pick** (venues, beers, search results) are plain rows on the page with

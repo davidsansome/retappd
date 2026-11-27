@@ -3,15 +3,13 @@ import CoreLocation
 
 struct DiscoverView: View {
     let model: DiscoverModel
-    /// Bumped by the tab bar's Search and Scan buttons.
+    /// Bumped by the tab bar's Search button.
     var searchRequests = 0
-    var scanRequests = 0
     @Environment(LocationProvider.self) private var location
     @State private var query = ""
     @State private var scanning = false
     @State private var scannedBeer: BeerLite?
     @State private var scannedBeerToOpen: BeerLite?
-    @State private var handledScans = 0
     @State private var containerWidth: CGFloat = 0
     @State private var selectedVenue: Venue?
     @State private var connectivity = Connectivity.shared
@@ -70,8 +68,6 @@ struct DiscoverView: View {
             BarcodeSearchSheet { scannedBeer = $0 }
         }
         .navigationDestination(item: $scannedBeerToOpen) { BeerView(beer: $0) }
-        .onAppear(perform: handleScanRequest)
-        .onChange(of: scanRequests) { handleScanRequest() }
         .onChange(of: defaultSplitVenue?.id, initial: true) {
             if selectedVenue == nil { selectedVenue = defaultSplitVenue }
         }
@@ -113,7 +109,16 @@ struct DiscoverView: View {
                     Spacer()
                     TaproomOfflineSwitch()
                 }
-                TaproomSearchField(text: $query, prompt: "Beers or venues", focusRequests: searchRequests)
+                TaproomSearchField(text: $query, prompt: "Beers or venues", focusRequests: searchRequests) {
+                    Button { scanning = true } label: {
+                        Image(systemName: "barcode.viewfinder")
+                            .font(.system(size: 20, weight: .medium))
+                    }
+                    .buttonStyle(TaproomSearchAccessoryButton())
+                    .accessibilityLabel("Scan")
+                    .accessibilityHint("Finds a beer by its barcode")
+                    .accessibilityIdentifier("discover.scan")
+                }
             }
                 .frame(maxWidth: isSplit ? .infinity : .readableContentWidth)
                 .padding(.horizontal, Taproom.margin)
@@ -175,12 +180,6 @@ struct DiscoverView: View {
                 }
             }
         }
-    }
-
-    private func handleScanRequest() {
-        guard scanRequests > handledScans else { return }
-        handledScans = scanRequests
-        scanning = true
     }
 
     // MARK: Nearby

@@ -197,7 +197,7 @@ struct ScreenshotDemoRoot: View {
                         DiscoverView(model: discover)
                             .safeAreaInset(edge: .bottom, spacing: 0) {
                                 TaproomTabBar(tabs: Self.tabs, selection: .discover, select: { _ in }) {
-                                    TaproomBarAction(title: "Scan", systemImage: "barcode.viewfinder") {}
+                                    EmptyView()
                                 }
                             }
                             .beerAndBreweryDestinations()

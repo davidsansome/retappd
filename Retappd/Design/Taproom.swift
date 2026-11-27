@@ -538,9 +538,10 @@ struct TaproomLinkRow<Label: View>: View {
     }
 }
 
-/// A search field on the page: a card with a magnifying glass, and a Cancel button while it's
-/// in use. `focusRequests` focuses it each time it goes up (e.g. from the tab bar's Search).
-struct TaproomSearchField: View {
+/// A search field on the page: a card with a magnifying glass, an optional trailing accessory
+/// (e.g. Discover's barcode scan button), and a Cancel button while it's in use. `focusRequests`
+/// focuses it each time it goes up (e.g. from the tab bar's Search).
+struct TaproomSearchField<Trailing: View>: View {
     @Binding var text: String
     let prompt: String
     var focusRequests = 0
@@ -548,8 +549,27 @@ struct TaproomSearchField: View {
     var systemImage = "magnifyingglass"
     var capitalization: TextInputAutocapitalization = .never
     var fieldIdentifier: String? = nil
+    let trailing: Trailing
     @FocusState private var focused: Bool
     @State private var handledRequests = 0
+
+    init(
+        text: Binding<String>,
+        prompt: String,
+        focusRequests: Int = 0,
+        systemImage: String = "magnifyingglass",
+        capitalization: TextInputAutocapitalization = .never,
+        fieldIdentifier: String? = nil,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
+        self._text = text
+        self.prompt = prompt
+        self.focusRequests = focusRequests
+        self.systemImage = systemImage
+        self.capitalization = capitalization
+        self.fieldIdentifier = fieldIdentifier
+        self.trailing = trailing()
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -578,6 +598,9 @@ struct TaproomSearchField: View {
                     .font(.body.weight(.medium))
                     .foregroundStyle(Taproom.ink)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else {
+                trailing
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .animation(.snappy(duration: 0.2), value: focused || !text.isEmpty)
@@ -589,6 +612,44 @@ struct TaproomSearchField: View {
             guard !Task.isCancelled else { return }
             focused = true
         }
+    }
+}
+
+extension TaproomSearchField where Trailing == EmptyView {
+    init(
+        text: Binding<String>,
+        prompt: String,
+        focusRequests: Int = 0,
+        systemImage: String = "magnifyingglass",
+        capitalization: TextInputAutocapitalization = .never,
+        fieldIdentifier: String? = nil
+    ) {
+        self.init(
+            text: text,
+            prompt: prompt,
+            focusRequests: focusRequests,
+            systemImage: systemImage,
+            capitalization: capitalization,
+            fieldIdentifier: fieldIdentifier
+        ) {
+            EmptyView()
+        }
+    }
+}
+
+/// A square icon-only button matching `TaproomSearchField`'s height (44pt) and rounded card
+/// geometry, for an action placed beside a search field (e.g. Discover's barcode scanner).
+struct TaproomSearchAccessoryButton: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(Taproom.ink)
+            .frame(width: 44, height: 44)
+            .background(Taproom.card, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Taproom.border))
+            .contentShape(RoundedRectangle(cornerRadius: 16))
+            .opacity(!isEnabled ? 0.4 : configuration.isPressed ? 0.7 : 1)
     }
 }
 
@@ -790,6 +851,8 @@ struct TaproomTabBar<Value: Hashable, Action: View>: View {
             Spacer(minLength: 8)
             action.environment(\.tabBarFit, fit)
         }
+        // Match TaproomPrimaryButton's default height so the bar doesn't jump when action is empty.
+        .frame(minHeight: 54)
     }
 }
 

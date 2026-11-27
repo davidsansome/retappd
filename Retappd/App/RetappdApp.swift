@@ -87,9 +87,8 @@ struct RootTabs: View {
     @State private var profilePath = NavigationPath()
     @State private var discoverPath = NavigationPath()
     @State private var backgroundedAt: Date?
-    /// Bumped to focus Discover's search field, or open its barcode scanner, from the tab bar.
+    /// Bumped to focus Discover's search field from the tab bar.
     @State private var searchRequests = 0
-    @State private var scanRequests = 0
     @State private var router = NotificationRouter.shared
     @State private var unread: NotificationUnread
 
@@ -117,7 +116,7 @@ struct RootTabs: View {
                 }
                 Tab("Discover", systemImage: "mappin.and.ellipse", value: .discover) {
                     NavigationStack(path: $discoverPath) {
-                        DiscoverView(model: discover, searchRequests: searchRequests, scanRequests: scanRequests)
+                        DiscoverView(model: discover, searchRequests: searchRequests)
                             .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
                             .beerAndBreweryDestinations()
                     }
@@ -262,10 +261,7 @@ extension RootTabs {
 
     private var tabBar: some View {
         TaproomTabBar(tabs: Self.tabs, selection: page, select: select) {
-            if page == .discover {
-                TaproomBarAction(title: "Scan", systemImage: "barcode.viewfinder") { scanRequests += 1 }
-                    .accessibilityHint("Finds a beer by its barcode")
-            } else {
+            if page != .discover {
                 TaproomBarAction(title: "Search", systemImage: "magnifyingglass") {
                     page = .discover
                     searchRequests += 1
