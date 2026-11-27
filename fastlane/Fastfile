@@ -7,7 +7,7 @@ require "shellwords"
 require "tempfile"
 
 APP_IDENTIFIER = "com.davidsansome.retappd"
-DEFAULT_LOCALE = "en-US"
+DEFAULT_LOCALE = "en-AU"
 IPHONE_DEVICE_TYPE = "iPhone 18 Pro Max"
 IPAD_DEVICE_TYPE = "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-16GB"
 CLAUDE_MODEL = ENV["RELEASE_NOTES_CLAUDE_MODEL"] || "sonnet"
@@ -206,7 +206,7 @@ end
 
 platform :ios do
   desc "Build Debug, capture all 6 demo screenshots on dedicated iPhone 6.9\" & iPad 13\" simulators, and frame them"
-  desc "Options: upload:true (also upload to App Store Connect), locale:en-US, iphone_udid:..., ipad_udid:..."
+  desc "Options: upload:true (also upload to App Store Connect), locale:en-AU, iphone_udid:..., ipad_udid:..."
   lane :make_screenshots do |options|
     created_sims = []
     iphone_udid = options[:iphone_udid]
@@ -253,7 +253,7 @@ platform :ios do
   end
 
   desc "Upload framed screenshots from screenshots/{iphone,ipad} to App Store Connect"
-  desc "Options: locale:en-US, version:<marketing_version>"
+  desc "Options: locale:en-AU, version:<marketing_version>"
   lane :upload_screenshots do |options|
     api_key = load_asc_api_key
     locale = options[:locale] || DEFAULT_LOCALE
@@ -293,7 +293,7 @@ platform :ios do
   end
 
   desc "Promote the latest Xcode Cloud TestFlight build to an App Store release and tag v<version> on origin/main"
-  desc "Options: version:<from project.yml>, build_number:<latest TF>, ref:origin/main, since:<ref>, release_notes:<text>, screenshots:false, submit:true, tag:true, automatic_release:false, phased_release:false, force:false, locale:en-US"
+  desc "Options: version:<from project.yml>, build_number:<latest TF>, ref:origin/main, since:<ref>, release_notes:<text>, screenshots:false, submit:true, tag:true, automatic_release:false, phased_release:false, force:false, locale:en-AU"
   lane :release do |options|
     Dir.chdir(repo_root) { sh("git", "fetch", "origin", "--tags") }
 

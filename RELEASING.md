@@ -84,8 +84,8 @@ Xcode Cloud build for `MARKETING_VERSION` in `project.yml`.
   simulators, captures all 6 demo screens, frames them into `screenshots/{iphone,ipad}/`, and
   deletes the temporary simulators. Pass `upload:true` to upload right after.
 - `fastlane upload_screenshots` — stages and uploads the framed PNGs in
-  `screenshots/{iphone,ipad}/` to App Store Connect (default locale `en-US`; override with
-  `locale:en-AU`).
+  `screenshots/{iphone,ipad}/` to App Store Connect (default locale `en-AU`; override with
+  `locale:en-US`).
 - `fastlane draft_release_notes` — previews AI-generated App Store release notes from git commits
   since the last `v*` tag (using `claude -p --model sonnet`, falling back to
   `agy -p --model gemini-4-neon-low`; pass `since:<ref>` to override the base).
